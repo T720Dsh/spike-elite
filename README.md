@@ -1,10 +1,12 @@
 # SPIKE ELITE 🏐
 
-**The first console-quality, 3D, free-to-play indoor volleyball game built for mobile.**
+**The first console-quality, 3D indoor volleyball game built in Unreal Engine 5 — starting on PC, coming to mobile later.**
 
 > 工作代号：SPIKE ELITE（暂定，欢迎在 Issue 中提议正式名）
-> 引擎：Unreal Engine 5 · 平台：iOS / Android（首发），PC / Console（后续）
-> 定位：对标 *EA SPORTS FC Mobile* 与 *NBA 2K Mobile* 的排球品类作品
+> 引擎：Unreal Engine 5
+> 首发平台：**PC / Windows（Steam）**，键鼠 + 手柄
+> 后续平台：iOS / Android（PC 版验证玩法后再移植）
+> 定位：对标 *EA SPORTS FC* / *NBA 2K* 的排球品类作品，主打**第一人称沉浸视角** + 第三人称/俯视多视角切换
 
 [![Status](https://img.shields.io/badge/status-pre--production-orange)]()
 [![Engine](https://img.shields.io/badge/Engine-Unreal%205.5+-blue)]()
@@ -26,10 +28,11 @@
 ## 核心体验
 
 - **真实 6v6 室内排球**：严格遵循 FIVB 2025–2028 规则，rally point、顺时针轮换、5-1 / 6-2 进攻体系、Libero 自由人、拦网/吊球/后排进攻全部还原。
-- **移动端原生操作**：单手可玩的滑动+点按操作体系，同时支持蓝牙手柄；手动/自动 AI 双模式（参考 NBA 2K Mobile）。
-- **控制台级画面**：UE5 Nanite 几何体 + Lumen（高端机）/ 预计算光照（中低端机），动捕动画系统，动态观众与场馆氛围。
+- **第一人称沉浸视角**（核心卖点）：你就是场上那个球员——跳起来扣球的主观冲击力、3D 音频定位、辅助雷达与轨迹预测，解决 FP 看不到全场的问题。第三人称肩后镜、战术俯视镜、直播观战镜并存。
+- **PC 原生操作**：WASD + 鼠标/键鼠，完整支持 Xbox / DualShock / DualSense 手柄；手动/半自动 AI 双模式。
+- **3A 级渲染**：UE5 Lumen + 硬件光追 + Nanite，动捕动画系统，动态观众与场馆氛围。
 - **真实球员与球队**：首发争取国家联赛/俱乐部授权（FIVB Nations League、欧洲冠军联赛、日本 V.League 等方向），未授权期间先做"风格化原创球员 + 可解锁数据"。
-- **持久化成长**：球员卡收集、阵容构建、化学反应、赛季 Pass、限时活动——FC Mobile / 2K Mobile 已验证的长线运营模型。
+- **持久化成长**：球员卡收集、阵容构建、化学反应、赛季 Pass、限时活动——FC / 2K 已验证的长线运营模型。
 
 ## 文档地图（给合作者）
 
@@ -45,12 +48,13 @@
 
 ## 当前状态
 
-📌 **Pre-production / M0（概念验证阶段）**
+📌 **M0 进行中（PC 原型阶段）**
 
 - [x] 市场调研与品类分析
-- [x] 设计理念与 GDD v0.1
-- [x] 技术选型论证
-- [ ] UE5 球场原型（单人 demo 球碰地、发球、扣球）
+- [x] 设计理念与 GDD v0.2（含第一人称视角设计）
+- [x] 技术选型论证（首发 PC，后续手游）
+- [ ] UE5 工程初始化（C++ 第三人称模板 + 第一人称角色）
+- [ ] 白盒球场 + 自定义球弹道
 - [ ] 动捕动画清单与首版动画集
 - [ ] 网络同步方案验证（Lyra / Replication Graph）
 
@@ -59,22 +63,21 @@
 ## 快速开始（给开发者）
 
 ```powershell
-# 仓库目前只有设计文档；UE5 工程将在 M1 阶段加入
-git clone https://github.com/T720Dsh/spike-elite.git
-cd spike-elite
-# 阅读 docs/04-tech-stack.md 了解引擎与分支约定
+# 用本机 UE5 打开工程（M1 加入 .uproject 后）
+# 首次打开会提示编译 C++，点 Yes 即可
 ```
 
-引擎版本：**Unreal Engine 5.5+**（建议 5.5.4 或更新），不要用 5.0–5.3（移动端 Lumen / Nanite 不成熟）。
+引擎版本：**Unreal Engine 5.5+**（具体以 `.uproject` 的 `EngineAssociation` 为准）。
 
 ## 路线图速览
 
 ```
-M0 设计与原型 (0–3月)    → 能在 UE5 里打一场完整的 1v1 对墙/对拦网 demo
-M1 垂直切片 (3–9月)      → 6v6 完整回合、AI 队友、1 个场馆、核心操作
-M2 封测 (9–15月)         → PvP 局域网/WiFi、卡牌系统雏形、iOS 真机 60fps
-M3 软启动 (15–20月)      → 1–2 个地区 TestFlight / 菲律宾+加拿大 Google Play
-M4 全球上线 (20–28月)    → 授权球员、赛季内容、全球 PvP 匹配
+M0 设计与 PC 原型 (0–3月)   → UE5 工程跑起来，球能在场上弹，第一人称能跳能扣
+M1 PC 垂直切片 (3–9月)       → 6v6 完整回合、AI 队友、1 个场馆、第一/三人称切换
+M2 PC 封测 (9–15月)          → PvP 局域网/Steam 匹配、卡牌系统雏形
+M3 Steam EA (15–20月)        → Early Access 上线，真实玩家进来看手感
+M4 PC 1.0 (20–28月)          → 授权球员、赛季内容、全球 PvP
+M5 手游移植 (28月+)           → 分档渲染降级，iOS/Android 上线
 ```
 
 详见 [docs/05-roadmap.md](docs/05-roadmap.md)。

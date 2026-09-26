@@ -8,11 +8,12 @@
 ## 阶段总览
 
 ```
-M0  设计与原型          0–3 个月
-M1  垂直切片 (Vertical Slice)  3–9 个月
-M2  Alpha / 封测          9–15 个月
-M3  Soft Launch           15–20 个月
-M4  Global Launch         20–28 个月
+M0  设计与 PC 原型          0–3 个月
+M1  PC 垂直切片 (Vertical Slice)  3–9 个月
+M2  PC Alpha / 封测          9–15 个月
+M3  PC Steam EA (Early Access)  15–20 个月
+M4  PC 1.0 正式版           20–28 个月
+M5  移动端移植（iOS/Android）   28 个月以后
 ```
 
 ---

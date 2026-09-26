@@ -1,36 +1,50 @@
 # 04 · 技术栈（Tech Stack）
 
-> 版本 v0.1 · 2026-09
+> 版本 v0.2 · 2026-09（首发平台改为 PC）
 > 本文档锁定引擎、渲染分档、网络方案与仓库结构。任何偏离需要在 Issue 里讨论。
 
 ---
 
+## 0. 平台策略（2026-09-27 修订）
+
+**首发：PC（Windows，Steam），键鼠 + 手柄。**
+**后续：移植 iOS / Android（约在 PC 版 EA / 正式上线之后）。**
+
+理由：
+- 先用 PC 把画面、操作手感、网络同步做到位，不用一开始就背移动端优化包袱；
+- PC 上可以放开用 Lumen / 硬件光追 / Nanite 全量，先把"画面对标 3A"的承诺兑现；
+- 移动端移植时再做性能裁剪，那时已经有了成熟玩法和资产管线；
+- 这也是《原》《和平精英》UE5 版等项目走过的路。
+
 ## 1. 引擎
 
-**Unreal Engine 5.5 LTS+**（推荐 5.5.4 或更新的稳定 LTS）。
+**Unreal Engine 5.5 LTS+**（用本机已装的版本，见工程根目录 `.uproject` 的 `EngineAssociation`）。
 
 为什么是 UE5 而不是 Unity：
-- **Nanite**：高模球员直接上桌，不需要手工做 LOD，省美术管线；
-- **Animation Motion Warping / Motion Matching**：UE5 原生支持高质量角色动画混合，体育游戏刚需；
-- **Lyra 示例工程**：提供了完整的移动端输入、网络同步、UI 框架，可直接 fork 改造；
-- 移动端 Vulkan/SM5 支持成熟，2026 年的 UE5 手游（如《原》移动版、《和平精英》UE5 版）已经证明可行。
+- **Nanite**：高模球员直接上桌，不需要手工做 LOD；
+- **Lumen + 硬件光线追踪**：PC 首发可以全开，这是我们"渲染对标 3A"的核心；
+- **Motion Matching / Motion Warping**：UE5 原生高质量角色动画混合，体育游戏刚需；
+- **Lyra 示例工程**：提供了完整的输入、网络同步、UI 框架，可直接 fork 改造；
+- 后续移植手游时，再按 [2026 年 UE5 移动端文档](https://dev.epicgames.com/documentation/en-us/unreal-engine/configuring-graphics-performance-on-mobile) 做分档降级。
 
-**不用 5.0–5.3**：移动端 Lumen/Nanite 不成熟。
-**不考虑 Unity 6**：我们的核心卖点是"控制台级画面"，UE5 的渲染栈在这一代更占优。
+## 2. 渲染分档（PC 首发）
 
-## 2. 渲染分档（关键决策）
+PC 首发不做移动端那种硬分档，而是让玩家在 High/Medium/Low 三档里选，我们保证：
 
-| 档位 | 目标设备 | 光照方案 | 其他 |
+| 档位 | 目标 GPU | 光照 | 帧目标 |
 |---|---|---|---|
-| **High / Epic** | iPhone 15 Pro+ / Galaxy S24+ / 骁龙 8 Gen3 / 天玑 9300 | **Lumen Mobile**（实验性，但在 Adreno 7xx / Mali G7xx 上可用）+ Nanite | 全动态阴影、Niagara 观众粒子、屏幕空间反射、60fps |
-| **Medium** | iPhone 12–14 / 骁龙 8 Gen1–2 / 天玑 8000+ | **预计算光照 + 静态阴影 + 局部 Lumen 反弹** | Nanite 开但压 triangles，反射降为平面反射，30/60fps 可选 |
-| **Low** | 3 年内中端 Android / iPhone 11 | **完全预计算光照**，无实时光追 | 简化观众卡片/公告板、降粒子、锁 30fps |
+| **Epic / Cinematic** | RTX 3070 / RX 6800 及以上 | **Lumen + 硬件光线追踪阴影 + 全局反射**，Nanite 全开 | 1440p 60fps / 4K 30fps |
+| **High** | GTX 1660 / RTX 2060 / RX 5600 | Lumen 软件光追，反射降级为屏幕空间 | 1080p 60fps |
+| **Medium** | GTX 1060 / RX 580 | Lumen 关闭，静态+局部动态光照 | 1080p 60fps |
+| **Low** | 核显 / 老卡 | 完全预计算光照 | 720p 30/60fps |
 
-> ⚠️ **iOS 不支持 Lumen Mobile**（Epic 官方文档明确说明）。所有 iPhone 统一走预计算光照档位，靠**烘焙 AO + 高质量角色 PBR + 动态方向性光**做出"像 Lumen"的观感。
+> 移动端移植阶段（M5）再补：iPhone 全部预计算光照；高端 Android（Adreno 7xx / Mali G7xx）试 Lumen Mobile；中低端走预烘焙。
 
-参考：
-- [Lumen on Mobile - UE5.5](https://dev.epicgames.com/documentation/en-us/unreal-engine/using-lumen-global-illumination-on-mobile-in-unreal-engine)
-- [Configuring Graphics Performance on Mobile](https://dev.epicgames.com/documentation/en-us/unreal-engine/configuring-graphics-performance-on-mobile)
+## 2.1 第一人称渲染特别项
+
+- FP 视角下镜头离球员身体近，**手臂/手模型必须做第一人称专用资产**（高模、跟随相机）；
+- FP 下要保证球离镜头近时不出现穿模/裁剪问题；
+- FP 扣球瞬间加镜头 FOV 拉伸 + 运动模糊，强化冲击感。
 
 ## 3. 核心系统选型
 
@@ -44,13 +58,13 @@
 | 数据驱动 | 球员数值、卡牌、战术全部 DataTable + JSON 配置，策划可改不用重新打包 |
 | 分析 | 接入 Adjust / 自研事件管道，重点追踪：触球成功率、每局时长、PvP 断线率、付费漏斗 |
 
-## 4. 移动端性能预算（硬指标）
+## 4. PC 首发性能预算（硬指标）
 
-- **包体**：首发下载 ≤ 2 GB（之后资源按需下载，首包只带 1 个场馆 + 20 张球员卡）；
-- **内存**：iPhone 12 / 骁龙 8 Gen1 上峰值 ≤ 2.5 GB；
-- **帧率**：High 档目标 60fps（1080p），Low 档锁 30fps；
-- **发热**：连续游玩 30 分钟，机身温度不超过对照组 5°C 以上（2K Mobile 被吐槽的点）；
-- **启动时间**：冷启动到主菜单 ≤ 25 秒（中端机）。
+- **存储**：首发下载 ≤ 25 GB（PC 不限制包体，但要控制）；
+- **内存**：Epic 档峰值 ≤ 16 GB；High 档 ≤ 12 GB；
+- **帧率**：Epic 档 1440p 60fps / 4K 30fps；High 档 1080p 60fps（在 RTX 2060 / GTX 1660 上）；
+- **启动时间**：SSD 上冷启动到主菜单 ≤ 20 秒；HDD ≤ 40 秒。
+- **手柄支持**：首发即支持 Xbox / DualShock / DualSense 手柄（Steam Input）。
 
 ## 5. 仓库结构（规划）
 

@@ -30,6 +30,8 @@ desktop.ini
 # Logs
 *.log
 *.pdb
+build_log.txt
+smoke*.log
 
 # Cooked
 Cooked/
