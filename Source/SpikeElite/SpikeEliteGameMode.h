@@ -7,7 +7,7 @@
 
 /**
  * Default game mode for SPIKE ELITE.
- * M0: just binds a pawn and HUD; rules engine comes in M1.
+ * M0: binds our pawn; rules engine comes in M1.
  */
 UCLASS()
 class SPIKEELITE_API ASpikeEliteGameMode : public AGameModeBase
