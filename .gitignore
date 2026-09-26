@@ -1,0 +1,39 @@
+# Unreal Engine 4/5
+Binaries/
+Build/
+DerivedDataCache/
+Intermediate/
+Saved/
+Script/
+.vs/
+.vscode/
+.idea/
+*.sln
+*.suo
+*.xcodeproj
+*.xcworkspace
+
+# Plugins
+Plugins/*/Binaries/
+Plugins/*/Intermediate/
+Plugins/*/DerivedDataCache/
+
+# Builds
+Builds/
+Dist/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+*.pdb
+
+# Cooked
+Cooked/
+
+# Local temp
+*.user
+*.useropts
