@@ -30,49 +30,60 @@ void ASpikeEliteGameMode::BeginPlay()
 	Court = World->SpawnActor<AVolleyballCourt>(AVolleyballCourt::StaticClass(), FVector::ZeroVector, FRotator::ZeroRotator, Params);
 	Ball = World->SpawnActor<AVolleyballBall>(AVolleyballBall::StaticClass(), FVector(0,0,400), FRotator::ZeroRotator, Params);
 
-	// FIVB 6-player position markers (M1: colored cubes; real avatars in M2).
-	// Team A defends X>0, Team B defends X<0.
-	struct FPos { float X; float Y; int32 Num; };
-	TArray<FPos> TeamAPos = {
-		{ 820,   0, 1},   // server
-		{ 550, 300, 2},
-		{ 550,   0, 3},
-		{ 550,-300, 4},
-		{ 200,-300, 5},
-		{ 200,   0, 6},
+	// FIVB 6 positions per side (cm).
+	struct FPos { float X; float Y; };
+	TArray<FPos> Positions = {
+		{ 820,   0},   // 1: server
+		{ 550, 300},   // 2: front-right
+		{ 550,   0},   // 3: front-middle
+		{ 550,-300},   // 4: front-left
+		{ 200,-300},   // 5: back-left
+		{ 200,   0},   // 6: back-middle
 	};
-	auto SpawnMarker = [&](float X, float Y, FLinearColor Color)
+
+	// Reposition the human-controlled pawn (auto-spawned at origin) to Team A position 1.
+	if (APawn* Human = UGameplayStatics::GetPlayerPawn(this, 0))
 	{
-		FActorSpawnParameters SP;
-		SP.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-		AActor* Marker = World->SpawnActor<AActor>(AActor::StaticClass(), FVector(X, Y, 50), FRotator::ZeroRotator, SP);
-		if (Marker)
+		if (ASpikeEliteCharacter* HC = Cast<ASpikeEliteCharacter>(Human))
 		{
-			UStaticMeshComponent* SMC = NewObject<UStaticMeshComponent>(Marker);
-			SMC->RegisterComponent();
-			SMC->SetWorldScale3D(FVector(0.6f, 0.6f, 1.8f));  // 60cm x 60cm x 180cm
-			static ConstructorHelpers::FObjectFinder<UStaticMesh> Cube(TEXT("/Engine/BasicShapes/Cube.Cube"));
-			if (Cube.Succeeded()) SMC->SetStaticMesh(Cube.Object);
-			if (UMaterialInterface* Base = SMC->GetMaterial(0))
-			{
-				UMaterialInstanceDynamic* MID = UMaterialInstanceDynamic::Create(Base, Marker);
-				MID->SetVectorParameterValue(TEXT("Color"), Color);
-				SMC->SetMaterial(0, MID);
-			}
-			Marker->SetRootComponent(SMC);
+			HC->bIsBot = false;
+			HC->TeamSide = 1;
+			HC->HomePosition = FVector(Positions[0].X, Positions[0].Y, 0);
+			HC->SetActorLocation(FVector(Positions[0].X, Positions[0].Y, 100.0f));
 		}
-	};
-	for (auto& P : TeamAPos)
+	}
+
+	// Spawn the other 5 Team A bots (positions 2-6).
+	for (int32 i = 1; i < 6; i++)
 	{
-		SpawnMarker(P.X, P.Y, FLinearColor(0.2f, 0.4f, 1.0f));   // Team A = blue
-		SpawnMarker(-P.X, P.Y, FLinearColor(1.0f, 0.3f, 0.2f));  // Team B = red
+		ASpikeEliteCharacter* Bot = World->SpawnActor<ASpikeEliteCharacter>(
+			FVector(Positions[i].X, Positions[i].Y, 100.0f), FRotator(0, -90, 0), Params);
+		if (Bot)
+		{
+			Bot->bIsBot = true;
+			Bot->TeamSide = 1;
+			Bot->HomePosition = FVector(Positions[i].X, Positions[i].Y, 0);
+		}
+	}
+
+	// Spawn 6 Team B bots (mirror on X<0 side).
+	for (int32 i = 0; i < 6; i++)
+	{
+		ASpikeEliteCharacter* Bot = World->SpawnActor<ASpikeEliteCharacter>(
+			FVector(-Positions[i].X, Positions[i].Y, 100.0f), FRotator(0, 90, 0), Params);
+		if (Bot)
+		{
+			Bot->bIsBot = true;
+			Bot->TeamSide = -1;
+			Bot->HomePosition = FVector(-Positions[i].X, Positions[i].Y, 0);
+		}
 	}
 
 	MatchState = EMatchState::BetweenRallies;
-	InterRallyTimer = 1.0f;  // short opening delay
+	InterRallyTimer = 1.0f;
 	ServingTeam = EVolleyballTeam::TeamA;
 
-	UE_LOG(LogVolleyballRules, Log, TEXT("=== SPIKE ELITE match start. First to 3 sets wins. Set 1: to %d ==="), PointsToWin);
+	UE_LOG(LogVolleyballRules, Log, TEXT("=== SPIKE ELITE 6v6 match start. First to 3 sets wins. ==="));
 }
 
 void ASpikeEliteGameMode::Tick(float DeltaSeconds)
@@ -82,52 +93,21 @@ void ASpikeEliteGameMode::Tick(float DeltaSeconds)
 	if (MatchState == EMatchState::BetweenRallies)
 	{
 		InterRallyTimer -= DeltaSeconds;
-		if (InterRallyTimer <= 0.0f)
-		{
-			ServeNextBall();
-		}
+		if (InterRallyTimer <= 0.0f) ServeNextBall();
 	}
 
-	// --- Simple AI: when the ball is on a side and dropping, that side "hits" it back. ---
-	if (AIHitCooldown > 0.0f) AIHitCooldown -= DeltaSeconds;
-	if (MatchState == EMatchState::Playing && Ball && AIHitCooldown <= 0.0f)
-	{
-		const FVector BallLoc = Ball->GetActorLocation();
-		const FVector BallVel = Ball->GetVelocity();
-
-		// "Hittable" window: ball between 150 and 450 cm high, moving downward.
-		const bool bHittable = BallLoc.Z > 150.0f && BallLoc.Z < 450.0f && BallVel.Z < -50.0f;
-		if (bHittable)
-		{
-			// Which side is the ball on? That side's AI hits it back.
-			const bool bOnASide = BallLoc.X > 0.0f;
-			// Aim: across the net to the opponent's back court, with an arc.
-			const float TargetX = bOnASide ? -((Court ? Court->HalfCourtLength : 900.0f) - 200.0f) : ((Court ? Court->HalfCourtLength : 900.0f) - 200.0f);
-			const float TargetY = FMath::FRandRange(-200.0f, 200.0f);
-			FVector Dir = FVector(TargetX - BallLoc.X, TargetY - BallLoc.Y, 350.0f).GetSafeNormal();
-			const float Power = FMath::RandRange(900.0f, 1100.0f);
-
-			Ball->Strike(Dir, Power, 0.0f);
-			AIHitCooldown = 1.2f;  // don't touch this ball again for a while
-
-			UE_LOG(LogVolleyballRules, Log, TEXT("AI on %s side hits the ball back."), bOnASide ? TEXT("A") : TEXT("B"));
-		}
-	}
-
-	// --- Net touch: ball crossing X=0 below net height bounces back. ---
+	// Net touch bounce (kept as safety net in case no bot is near the net).
 	if (MatchState == EMatchState::Playing && Ball)
 	{
 		const FVector BL = Ball->GetActorLocation();
 		const float NetH = Court ? Court->NetHeight : 243.0f;
 		if (FMath::Abs(BL.X) < 12.0f && BL.Z < NetH && BL.Z > 20.0f)
 		{
-			// Touching the net: flip horizontal velocity so it bounces back.
 			Ball->Strike(FVector(-Ball->GetVelocity().X, Ball->GetVelocity().Y * 0.5f, 200.0f).GetSafeNormal(), 400.0f, 0.0f);
-			UE_LOG(LogVolleyballRules, Log, TEXT("Ball touched the net, bounced back."));
 		}
 	}
 
-	// On-screen scoreboard (M1: built-in debug text; replace with UMG later).
+	// Scoreboard.
 	if (GEngine)
 	{
 		FString Line1 = FString::Printf(TEXT("SET %d   SCORE  A %d : %d B     (to %d)"),
@@ -137,13 +117,12 @@ void ASpikeEliteGameMode::Tick(float DeltaSeconds)
 			ServingTeam == EVolleyballTeam::TeamA ? TEXT("A") : TEXT("B"));
 		FString Line3 = (MatchState == EMatchState::MatchOver)
 			? FString::Printf(TEXT("*** MATCH WINNER: %s ***"), MatchWinner == EVolleyballTeam::TeamA ? TEXT("TEAM A") : TEXT("TEAM B"))
-			: FString(TEXT("WASD move  Mouse look  Space jump  V toggle FP  LMB hit  E serve"));
+			: FString(TEXT("WASD move  LMB hit  Space jump  V FP  E serve"));
 
 		GEngine->AddOnScreenDebugMessage(101, 0.0f, FColor::Yellow, Line1);
 		GEngine->AddOnScreenDebugMessage(102, 0.0f, FColor::Cyan, Line2);
 		GEngine->AddOnScreenDebugMessage(103, 0.0f, FColor::Green, Line3);
 
-		// Ball direction indicator (first-person helper, GDD §2.1).
 		if (Ball)
 		{
 			APawn* Player = UGameplayStatics::GetPlayerPawn(this, 0);
@@ -171,59 +150,38 @@ void ASpikeEliteGameMode::Tick(float DeltaSeconds)
 void ASpikeEliteGameMode::OnBallLanded(const FVector& BallLocation)
 {
 	if (MatchState != EMatchState::Playing) return;
-
-	// X>0 is Team A's floor -> Team B wins the rally (and vice versa).
 	EVolleyballTeam ScoringTeam = (BallLocation.X >= 0.0f) ? EVolleyballTeam::TeamB : EVolleyballTeam::TeamA;
 	AwardPoint(ScoringTeam);
 }
 
 void ASpikeEliteGameMode::AwardPoint(EVolleyballTeam ScoringTeam)
 {
-	if (ScoringTeam == EVolleyballTeam::TeamA) TeamAScore++;
-	else TeamBScore++;
-
+	if (ScoringTeam == EVolleyballTeam::TeamA) TeamAScore++; else TeamBScore++;
 	ServingTeam = ScoringTeam;
-
-	UE_LOG(LogVolleyballRules, Log,
-		TEXT("Rally -> %s. Set %d score:  A %d : %d B.  Next serve: %s"),
-		ScoringTeam == EVolleyballTeam::TeamA ? TEXT("A") : TEXT("B"),
-		CurrentSet, TeamAScore, TeamBScore,
-		ServingTeam == EVolleyballTeam::TeamA ? TEXT("A") : TEXT("B"));
-
+	UE_LOG(LogVolleyballRules, Log, TEXT("Rally point awarded. Score A:%d B:%d"), TeamAScore, TeamBScore);
 	CheckSetWin();
 }
 
 void ASpikeEliteGameMode::CheckSetWin()
 {
-	// FIVB: need >= PointsToWin AND lead by at least 2.
 	bool bAHas = TeamAScore >= PointsToWin && (TeamAScore - TeamBScore) >= 2;
 	bool bBHas = TeamBScore >= PointsToWin && (TeamBScore - TeamAScore) >= 2;
-
 	if (!bAHas && !bBHas)
 	{
-		// Not over yet -> pause then re-serve.
 		MatchState = EMatchState::BetweenRallies;
-		InterRallyTimer = InterRallyDelay;
+		InterRallyTimer = 1.5f;
 		return;
 	}
-
 	EVolleyballTeam SetWinner = bAHas ? EVolleyballTeam::TeamA : EVolleyballTeam::TeamB;
 	if (SetWinner == EVolleyballTeam::TeamA) TeamASetsWon++; else TeamBSetsWon++;
-
-	UE_LOG(LogVolleyballRules, Log,
-		TEXT("=== Set %d won by %s. Sets: A %d - %d B ==="),
-		CurrentSet, SetWinner == EVolleyballTeam::TeamA ? TEXT("A") : TEXT("B"),
-		TeamASetsWon, TeamBSetsWon);
-
-	// Best of 5: first to 3 sets.
+	UE_LOG(LogVolleyballRules, Log, TEXT("=== Set %d won. Sets A:%d B:%d ==="), CurrentSet, TeamASetsWon, TeamBSetsWon);
 	if (TeamASetsWon >= 3 || TeamBSetsWon >= 3)
 	{
 		MatchWinner = (TeamASetsWon >= 3) ? EVolleyballTeam::TeamA : EVolleyballTeam::TeamB;
 		MatchState = EMatchState::MatchOver;
-		UE_LOG(LogVolleyballRules, Log, TEXT("*** MATCH WON BY %s ***"), MatchWinner == EVolleyballTeam::TeamA ? TEXT("TEAM A") : TEXT("TEAM B"));
+		UE_LOG(LogVolleyballRules, Log, TEXT("*** MATCH OVER ***"));
 		return;
 	}
-
 	StartNextSet();
 }
 
@@ -232,28 +190,20 @@ void ASpikeEliteGameMode::StartNextSet()
 	CurrentSet++;
 	TeamAScore = 0;
 	TeamBScore = 0;
-	// Set 5 (decider) goes to 15, not 25.
 	PointsToWin = (CurrentSet >= 5) ? 15 : 25;
-
 	UE_LOG(LogVolleyballRules, Log, TEXT("--- Set %d starting, to %d ---"), CurrentSet, PointsToWin);
-
 	MatchState = EMatchState::BetweenRallies;
-	InterRallyTimer = InterRallyDelay + 2.0f;  // longer break between sets
+	InterRallyTimer = 3.5f;  // 1.5 + 2.0 between sets
 }
 
 void ASpikeEliteGameMode::ServeNextBall()
 {
 	if (!Ball || !Court) return;
-
 	float ServeX = (ServingTeam == EVolleyballTeam::TeamA)
-		? Court->HalfCourtLength - 50.0f
-		: -(Court->HalfCourtLength - 50.0f);
+		? Court->HalfCourtLength - 50.0f : -(Court->HalfCourtLength - 50.0f);
 	Ball->ResetBall(FVector(ServeX, 0.0f, Court->NetHeight + 80.0f));
-
 	FVector Dir = (ServingTeam == EVolleyballTeam::TeamA)
-		? FVector(-0.878f, 0.0f, 0.479f)
-		: FVector(0.878f, 0.0f, 0.479f);
+		? FVector(-0.878f, 0.0f, 0.479f) : FVector(0.878f, 0.0f, 0.479f);
 	Ball->Strike(Dir, 1300.0f, 0.0f);
-
 	MatchState = EMatchState::Playing;
 }
