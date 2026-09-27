@@ -7,6 +7,7 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "Kismet/GameplayStatics.h"
 #include "UObject/ConstructorHelpers.h"
+#include "Volleyball/VolleyballBall.h"
 
 ASpikeEliteCharacter::ASpikeEliteCharacter()
 {
@@ -78,6 +79,7 @@ void ASpikeEliteCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInpu
 	PlayerInputComponent->BindAction("Jump", IE_Released, this, &ACharacter::StopJumping);
 
 	PlayerInputComponent->BindAction("ToggleFirstPerson", IE_Pressed, this, &ASpikeEliteCharacter::ToggleFirstPerson);
+	PlayerInputComponent->BindAction("HitBall", IE_Pressed, this, &ASpikeEliteCharacter::HitBall);
 }
 
 void ASpikeEliteCharacter::MoveForward(float Value)
@@ -134,4 +136,40 @@ void ASpikeEliteCharacter::UpdateCameraView()
 		FirstPersonCamera->Deactivate();
 		ThirdPersonCamera->Activate();
 	}
+}
+
+void ASpikeEliteCharacter::HitBall()
+{
+	// Find the volleyball in the world.
+	TArray<AActor*> Found;
+	UGameplayStatics::GetAllActorsOfClass(this, AVolleyballBall::StaticClass(), Found);
+	if (Found.Num() == 0) return;
+
+	AVolleyballBall* Ball = Cast<AVolleyballBall>(Found[0]);
+	if (!Ball) return;
+
+	const FVector MyLoc = GetActorLocation();
+	const FVector BallLoc = Ball->GetActorLocation();
+	const float Dist = FVector::Dist(MyLoc, BallLoc);
+
+	// Arm's reach: ~180 cm. If the ball is farther than that, whiff.
+	if (Dist > 220.0f)
+	{
+		if (GEngine) GEngine->AddOnScreenDebugMessage(201, 1.0f, FColor::Red, FString::Printf(TEXT("Too far from ball (%.0f cm)"), Dist));
+		return;
+	}
+
+	// Hit direction: where the player is looking, biased upward so the ball
+	// clears the net. If the player is jumping, hit harder (spike).
+	FVector LookDir = Controller ? Controller->GetControlRotation().Vector() : FVector::ForwardVector;
+	LookDir.Z = FMath::Max(LookDir.Z, 0.15f);
+	LookDir.Normalize();
+
+	const bool bSpiking = !GetCharacterMovement()->IsMovingOnGround();
+	const float Power = bSpiking ? 1200.0f : 850.0f;
+
+	Ball->Strike(LookDir, Power, 0.0f);
+
+	if (GEngine) GEngine->AddOnScreenDebugMessage(201, 1.0f, FColor::Green,
+		bSpiking ? TEXT("SPIKE!") : TEXT("Hit!"));
 }

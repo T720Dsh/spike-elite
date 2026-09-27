@@ -64,6 +64,9 @@ protected:
 	void LookUpRate(float Value);
 	void ToggleFirstPerson();
 
+	/** Left mouse: hit the ball if it is within arm's reach. */
+	void HitBall();
+
 	/** Swaps which camera is considered "view target" by the player controller. */
 	void UpdateCameraView();
 };

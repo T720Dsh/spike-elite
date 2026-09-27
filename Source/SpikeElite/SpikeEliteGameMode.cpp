@@ -6,6 +6,9 @@
 #include "Engine/World.h"
 #include "Kismet/GameplayStatics.h"
 #include "Engine/Engine.h"
+#include "Components/StaticMeshComponent.h"
+#include "UObject/ConstructorHelpers.h"
+#include "Materials/MaterialInstanceDynamic.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogVolleyballRules, Log, All);
 
@@ -26,6 +29,44 @@ void ASpikeEliteGameMode::BeginPlay()
 	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 	Court = World->SpawnActor<AVolleyballCourt>(AVolleyballCourt::StaticClass(), FVector::ZeroVector, FRotator::ZeroRotator, Params);
 	Ball = World->SpawnActor<AVolleyballBall>(AVolleyballBall::StaticClass(), FVector(0,0,400), FRotator::ZeroRotator, Params);
+
+	// FIVB 6-player position markers (M1: colored cubes; real avatars in M2).
+	// Team A defends X>0, Team B defends X<0.
+	struct FPos { float X; float Y; int32 Num; };
+	TArray<FPos> TeamAPos = {
+		{ 820,   0, 1},   // server
+		{ 550, 300, 2},
+		{ 550,   0, 3},
+		{ 550,-300, 4},
+		{ 200,-300, 5},
+		{ 200,   0, 6},
+	};
+	auto SpawnMarker = [&](float X, float Y, FLinearColor Color)
+	{
+		FActorSpawnParameters SP;
+		SP.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		AActor* Marker = World->SpawnActor<AActor>(AActor::StaticClass(), FVector(X, Y, 50), FRotator::ZeroRotator, SP);
+		if (Marker)
+		{
+			UStaticMeshComponent* SMC = NewObject<UStaticMeshComponent>(Marker);
+			SMC->RegisterComponent();
+			SMC->SetWorldScale3D(FVector(0.6f, 0.6f, 1.8f));  // 60cm x 60cm x 180cm
+			static ConstructorHelpers::FObjectFinder<UStaticMesh> Cube(TEXT("/Engine/BasicShapes/Cube.Cube"));
+			if (Cube.Succeeded()) SMC->SetStaticMesh(Cube.Object);
+			if (UMaterialInterface* Base = SMC->GetMaterial(0))
+			{
+				UMaterialInstanceDynamic* MID = UMaterialInstanceDynamic::Create(Base, Marker);
+				MID->SetVectorParameterValue(TEXT("Color"), Color);
+				SMC->SetMaterial(0, MID);
+			}
+			Marker->SetRootComponent(SMC);
+		}
+	};
+	for (auto& P : TeamAPos)
+	{
+		SpawnMarker(P.X, P.Y, FLinearColor(0.2f, 0.4f, 1.0f));   // Team A = blue
+		SpawnMarker(-P.X, P.Y, FLinearColor(1.0f, 0.3f, 0.2f));  // Team B = red
+	}
 
 	MatchState = EMatchState::BetweenRallies;
 	InterRallyTimer = 1.0f;  // short opening delay
