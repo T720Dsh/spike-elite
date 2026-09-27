@@ -6,6 +6,7 @@
 #include "SpikeEliteGameMode.h"
 #include "Kismet/GameplayStatics.h"
 #include "Engine/World.h"
+#include "Materials/MaterialInstanceDynamic.h"
 
 AVolleyballBall::AVolleyballBall()
 {
@@ -16,10 +17,25 @@ AVolleyballBall::AVolleyballBall()
 	Mesh->SetSimulatePhysics(true);
 	Mesh->SetEnableGravity(true);
 	Mesh->SetCollisionProfileName(TEXT("PhysicsActor"));
-	Mesh->SetNotifyRigidBodyCollision(true);   // generate OnComponentHit
+	Mesh->SetNotifyRigidBodyCollision(true);
 	Mesh->SetLinearDamping(0.1f);
 	Mesh->SetAngularDamping(0.5f);
 	Mesh->OnComponentHit.AddDynamic(this, &AVolleyballBall::OnBallHit);
+
+	// Visual: sphere mesh, orange volleyball color.
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> SphereMesh(TEXT("/Engine/BasicShapes/Sphere.Sphere"));
+	if (SphereMesh.Succeeded())
+	{
+		Mesh->SetStaticMesh(SphereMesh.Object);
+		// Sphere is 100cm diameter; FIVB ball is ~20cm radius (40cm diameter).
+		Mesh->SetWorldScale3D(FVector(0.4f, 0.4f, 0.4f));
+		if (UMaterialInterface* Base = Mesh->GetMaterial(0))
+		{
+			UMaterialInstanceDynamic* MID = UMaterialInstanceDynamic::Create(Base, this);
+			MID->SetVectorParameterValue(TEXT("Color"), FLinearColor(1.0f, 0.45f, 0.1f));  // orange
+			Mesh->SetMaterial(0, MID);
+		}
+	}
 	// FIVB ball: circumference 65-67 cm -> radius ~10.5 cm.
 	// The visual mesh and collision shape are assigned in the Blueprint
 	// child class (BP_VolleyballBall) once we have a ball static mesh.
