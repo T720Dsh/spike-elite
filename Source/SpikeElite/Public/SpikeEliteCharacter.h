@@ -68,6 +68,9 @@ protected:
 	/** Left mouse: hit the ball if it is within arm's reach. */
 	void HitBall();
 
+	/** E key: serve the ball (reset to own end line and strike across). */
+	void ServeBall();
+
 	/** Swaps which camera is considered "view target" by the player controller. */
 	void UpdateCameraView();
 };

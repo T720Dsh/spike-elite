@@ -97,6 +97,7 @@ void ASpikeEliteCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInpu
 
 	PlayerInputComponent->BindAction("ToggleFirstPerson", IE_Pressed, this, &ASpikeEliteCharacter::ToggleFirstPerson);
 	PlayerInputComponent->BindAction("HitBall", IE_Pressed, this, &ASpikeEliteCharacter::HitBall);
+	PlayerInputComponent->BindAction("ServeBall", IE_Pressed, this, &ASpikeEliteCharacter::ServeBall);
 }
 
 void ASpikeEliteCharacter::MoveForward(float Value)
@@ -189,4 +190,21 @@ void ASpikeEliteCharacter::HitBall()
 
 	if (GEngine) GEngine->AddOnScreenDebugMessage(201, 1.0f, FColor::Green,
 		bSpiking ? TEXT("SPIKE!") : TEXT("Hit!"));
+}
+
+void ASpikeEliteCharacter::ServeBall()
+{
+	TArray<AActor*> Found;
+	UGameplayStatics::GetAllActorsOfClass(this, AVolleyballBall::StaticClass(), Found);
+	if (Found.Num() == 0) return;
+	AVolleyballBall* Ball = Cast<AVolleyballBall>(Found[0]);
+	if (!Ball) return;
+
+	// Reset ball to above the player's head, then serve toward the opponent.
+	const FVector MyLoc = GetActorLocation();
+	Ball->ResetBall(FVector(MyLoc.X, MyLoc.Y, MyLoc.Z + 180.0f));
+	// Serve toward -X (opponent side, since player defends X>0).
+	Ball->Strike(FVector(-0.85f, FMath::FRandRange(-0.1f, 0.1f), 0.5f), 1200.0f, 0.0f);
+
+	if (GEngine) GEngine->AddOnScreenDebugMessage(201, 1.0f, FColor::Green, TEXT("Serve!"));
 }

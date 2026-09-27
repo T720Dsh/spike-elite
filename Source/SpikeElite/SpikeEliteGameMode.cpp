@@ -114,6 +114,19 @@ void ASpikeEliteGameMode::Tick(float DeltaSeconds)
 		}
 	}
 
+	// --- Net touch: ball crossing X=0 below net height bounces back. ---
+	if (MatchState == EMatchState::Playing && Ball)
+	{
+		const FVector BL = Ball->GetActorLocation();
+		const float NetH = Court ? Court->NetHeight : 243.0f;
+		if (FMath::Abs(BL.X) < 12.0f && BL.Z < NetH && BL.Z > 20.0f)
+		{
+			// Touching the net: flip horizontal velocity so it bounces back.
+			Ball->Strike(FVector(-Ball->GetVelocity().X, Ball->GetVelocity().Y * 0.5f, 200.0f).GetSafeNormal(), 400.0f, 0.0f);
+			UE_LOG(LogVolleyballRules, Log, TEXT("Ball touched the net, bounced back."));
+		}
+	}
+
 	// On-screen scoreboard (M1: built-in debug text; replace with UMG later).
 	if (GEngine)
 	{
@@ -124,11 +137,34 @@ void ASpikeEliteGameMode::Tick(float DeltaSeconds)
 			ServingTeam == EVolleyballTeam::TeamA ? TEXT("A") : TEXT("B"));
 		FString Line3 = (MatchState == EMatchState::MatchOver)
 			? FString::Printf(TEXT("*** MATCH WINNER: %s ***"), MatchWinner == EVolleyballTeam::TeamA ? TEXT("TEAM A") : TEXT("TEAM B"))
-			: FString(TEXT("WASD move  Mouse look  Space jump  V toggle FP"));
+			: FString(TEXT("WASD move  Mouse look  Space jump  V toggle FP  LMB hit  E serve"));
 
 		GEngine->AddOnScreenDebugMessage(101, 0.0f, FColor::Yellow, Line1);
 		GEngine->AddOnScreenDebugMessage(102, 0.0f, FColor::Cyan, Line2);
 		GEngine->AddOnScreenDebugMessage(103, 0.0f, FColor::Green, Line3);
+
+		// Ball direction indicator (first-person helper, GDD §2.1).
+		if (Ball)
+		{
+			APawn* Player = UGameplayStatics::GetPlayerPawn(this, 0);
+			if (Player)
+			{
+				const FVector ToBall = Ball->GetActorLocation() - Player->GetActorLocation();
+				const float Dist = ToBall.Size();
+				FString Dir;
+				if (Dist < 200.0f) Dir = TEXT("HERE!");
+				else
+				{
+					const float Yaw = FRotationMatrix::MakeFromX(ToBall).Rotator().Yaw - Player->GetControlRotation().Yaw;
+					if      (Yaw > 45 && Yaw <= 135)  Dir = TEXT("<< LEFT");
+					else if (Yaw <= -45 && Yaw >= -135) Dir = TEXT("RIGHT >>");
+					else if (Yaw > 135 || Yaw < -135)   Dir = TEXT("BEHIND");
+					else                                   Dir = TEXT("FRONT");
+				}
+				GEngine->AddOnScreenDebugMessage(104, 0.0f, FColor::Orange,
+					FString::Printf(TEXT("Ball: %s  (%.0f m)"), *Dir, Dist / 100.0f));
+			}
+		}
 	}
 }
 
