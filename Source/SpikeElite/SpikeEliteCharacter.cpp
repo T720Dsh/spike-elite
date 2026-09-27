@@ -18,6 +18,8 @@ ASpikeEliteCharacter::ASpikeEliteCharacter()
 	bUseControllerRotationYaw = true;
 	bUseControllerRotationRoll = false;
 
+	PrimaryActorTick.bCanEverTick = true;
+
 	// ---- Skeletal mesh: UE5 Mannequin (copied from engine templates into /Game/Mannequins) ----
 	// User asked for "just a skeleton for now, polish later". We bind the
 	// template Mannequin so the capsule has a visible humanoid rig; the
@@ -60,6 +62,21 @@ void ASpikeEliteCharacter::BeginPlay()
 {
 	Super::BeginPlay();
 	UpdateCameraView();
+}
+
+void ASpikeEliteCharacter::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+
+	// Keep the player on their own half (X>0 = Team A side). Free zone +-950.
+	FVector Loc = GetActorLocation();
+	const float MaxX = 950.0f;   // end line + 50cm free zone
+	const float MaxY = 500.0f;   // sideline + 50cm
+	bool bClamped = false;
+	if (Loc.X < 50.0f)   { Loc.X = 50.0f;   bClamped = true; }  // don't cross the net
+	if (Loc.X > MaxX)    { Loc.X = MaxX;    bClamped = true; }
+	if (FMath::Abs(Loc.Y) > MaxY) { Loc.Y = FMath::Clamp(Loc.Y, -MaxY, MaxY); bClamped = true; }
+	if (bClamped) SetActorLocation(Loc, true);
 }
 
 void ASpikeEliteCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)

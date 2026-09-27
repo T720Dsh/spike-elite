@@ -101,6 +101,9 @@ protected:
 	/** Timer for the inter-rally pause. */
 	float InterRallyTimer = 0.0f;
 
+	/** Cooldown so AI doesn't re-hit the same ball every frame. */
+	float AIHitCooldown = 0.0f;
+
 	/** Award a point to the given team and rotate serve. */
 	void AwardPoint(EVolleyballTeam ScoringTeam);
 

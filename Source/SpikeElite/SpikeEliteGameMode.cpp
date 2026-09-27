@@ -88,6 +88,32 @@ void ASpikeEliteGameMode::Tick(float DeltaSeconds)
 		}
 	}
 
+	// --- Simple AI: when the ball is on a side and dropping, that side "hits" it back. ---
+	if (AIHitCooldown > 0.0f) AIHitCooldown -= DeltaSeconds;
+	if (MatchState == EMatchState::Playing && Ball && AIHitCooldown <= 0.0f)
+	{
+		const FVector BallLoc = Ball->GetActorLocation();
+		const FVector BallVel = Ball->GetVelocity();
+
+		// "Hittable" window: ball between 150 and 450 cm high, moving downward.
+		const bool bHittable = BallLoc.Z > 150.0f && BallLoc.Z < 450.0f && BallVel.Z < -50.0f;
+		if (bHittable)
+		{
+			// Which side is the ball on? That side's AI hits it back.
+			const bool bOnASide = BallLoc.X > 0.0f;
+			// Aim: across the net to the opponent's back court, with an arc.
+			const float TargetX = bOnASide ? -((Court ? Court->HalfCourtLength : 900.0f) - 200.0f) : ((Court ? Court->HalfCourtLength : 900.0f) - 200.0f);
+			const float TargetY = FMath::FRandRange(-200.0f, 200.0f);
+			FVector Dir = FVector(TargetX - BallLoc.X, TargetY - BallLoc.Y, 350.0f).GetSafeNormal();
+			const float Power = FMath::RandRange(900.0f, 1100.0f);
+
+			Ball->Strike(Dir, Power, 0.0f);
+			AIHitCooldown = 1.2f;  // don't touch this ball again for a while
+
+			UE_LOG(LogVolleyballRules, Log, TEXT("AI on %s side hits the ball back."), bOnASide ? TEXT("A") : TEXT("B"));
+		}
+	}
+
 	// On-screen scoreboard (M1: built-in debug text; replace with UMG later).
 	if (GEngine)
 	{
