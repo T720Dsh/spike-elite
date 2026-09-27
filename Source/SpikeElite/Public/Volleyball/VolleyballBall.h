@@ -56,4 +56,8 @@ protected:
 	/** Current spin state (rad/s). TODO: integrate into custom physics in M1. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Ball|Physics")
 	float CurrentSpin = 0.0f;
+
+	/** Physics hit callback: detect floor bounces and notify the rules system. */
+	UFUNCTION()
+	void OnBallHit(class UPrimitiveComponent* HitComp, AActor* OtherActor, class UPrimitiveComponent* OtherComp, FVector NormalImpulse, const FHitResult& Hit);
 };

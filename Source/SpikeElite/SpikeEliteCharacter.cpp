@@ -4,7 +4,9 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "Components/CapsuleComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "Kismet/GameplayStatics.h"
+#include "UObject/ConstructorHelpers.h"
 
 ASpikeEliteCharacter::ASpikeEliteCharacter()
 {
@@ -14,6 +16,20 @@ ASpikeEliteCharacter::ASpikeEliteCharacter()
 	bUseControllerRotationPitch = false;
 	bUseControllerRotationYaw = true;
 	bUseControllerRotationRoll = false;
+
+	// ---- Skeletal mesh: UE5 Mannequin (copied from engine templates into /Game/Mannequins) ----
+	// User asked for "just a skeleton for now, polish later". We bind the
+	// template Mannequin so the capsule has a visible humanoid rig; the
+	// materials / animations will be upgraded in later milestones.
+	static ConstructorHelpers::FObjectFinder<USkeletalMesh> MannequinMesh(TEXT("/Game/Mannequins/Meshes/SK_Mannequin.SK_Mannequin"));
+	if (MannequinMesh.Succeeded())
+	{
+		GetMesh()->SetSkeletalMesh(MannequinMesh.Object);
+		// Mannequin is authored at ~180cm tall. Capsule default is 88 half-height.
+		// Offset the mesh down so feet sit on the capsule bottom.
+		GetMesh()->SetRelativeLocation(FVector(0.0f, 0.0f, -88.0f));
+		GetMesh()->SetRelativeRotation(FRotator(0.0f, -90.0f, 0.0f));
+	}
 
 	// Movement tuning: volleyball players are fast, short bursts.
 	UCharacterMovementComponent* MoveComp = GetCharacterMovement();
