@@ -82,6 +82,33 @@ AVolleyballCourt::AVolleyballCourt()
 	PostLeft = MakePost(TEXT("PostLeft"), HalfCourtWidth + 20.0f);
 	PostRight = MakePost(TEXT("PostRight"), -HalfCourtWidth - 20.0f);
 
+	// --- Gym walls: 4 simple boxes around the court so it feels like an arena. ---
+	auto MakeWall = [&](const TCHAR* Name, float X, float Y, float SX, float SY)
+	{
+		UStaticMeshComponent* Wall = CreateDefaultSubobject<UStaticMeshComponent>(Name);
+		Wall->SetupAttachment(Root);
+		static ConstructorHelpers::FObjectFinder<UStaticMesh> Cube(TEXT("/Engine/BasicShapes/Cube.Cube"));
+		if (Cube.Succeeded())
+		{
+			Wall->SetStaticMesh(Cube.Object);
+			Wall->SetRelativeScale3D(FVector(SX, SY, 5.0f));  // 5m tall walls
+			Wall->SetRelativeLocation(FVector(X, Y, 250.0f));
+			if (UMaterialInterface* Base = Wall->GetMaterial(0))
+			{
+				UMaterialInstanceDynamic* MID = UMaterialInstanceDynamic::Create(Base, this);
+				MID->SetVectorParameterValue(TEXT("Color"), FLinearColor(0.85f, 0.85f, 0.88f));  // off-white
+				Wall->SetMaterial(0, MID);
+			}
+		}
+		return Wall;
+	};
+	// Long walls along the sides (Y = ±550)
+	MakeWall(TEXT("WallSideA"), 0,  550, (HalfCourtLength*2+200)/100.0f, 1.0f);
+	MakeWall(TEXT("WallSideB"), 0, -550, (HalfCourtLength*2+200)/100.0f, 1.0f);
+	// End walls (X = ±1000)
+	MakeWall(TEXT("WallEndA"),  HalfCourtLength+100, 0, 1.0f, (HalfCourtWidth*2+200)/100.0f);
+	MakeWall(TEXT("WallEndB"), -(HalfCourtLength+100), 0, 1.0f, (HalfCourtWidth*2+200)/100.0f);
+
 	// ---- Court lines (white, 5cm wide strips lying flat on the floor) ----
 	// FIVB: lines are 5cm wide, counted as part of the court.
 	const float LineW = 5.0f;
