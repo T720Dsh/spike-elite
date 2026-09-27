@@ -16,6 +16,7 @@ AVolleyballBall::AVolleyballBall()
 	Mesh->SetSimulatePhysics(true);
 	Mesh->SetEnableGravity(true);
 	Mesh->SetCollisionProfileName(TEXT("PhysicsActor"));
+	Mesh->SetNotifyRigidBodyCollision(true);   // generate OnComponentHit
 	Mesh->SetLinearDamping(0.1f);
 	Mesh->SetAngularDamping(0.5f);
 	Mesh->OnComponentHit.AddDynamic(this, &AVolleyballBall::OnBallHit);

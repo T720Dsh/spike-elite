@@ -17,17 +17,26 @@ enum class EVolleyballTeam : uint8
 	None        UMETA(Hidden)
 };
 
+/** Match state machine. */
+UENUM(BlueprintType)
+enum class EMatchState : uint8
+{
+	PreMatch    UMETA(DisplayName = "Pre-match warmup"),
+	Playing     UMETA(DisplayName = "Rally in progress"),
+	BetweenRallies UMETA(DisplayName = "Between rallies (serve delay)"),
+	SetOver     UMETA(DisplayName = "Set finished"),
+	MatchOver   UMETA(DisplayName = "Match finished")
+};
+
 /**
  * Default game mode for SPIKE ELITE.
  *
- * M1: FIVB rally-point rules in their simplest form:
- *  - Every dead ball awards a point (rally point scoring, FIVB §12.2)
- *  - The team that wins the rally also gets to serve next (side-out, §12.4)
- *  - A set goes to 25, win by 2 (§6.1) — M1 only tracks the count, no set win yet
- *  - Court halves are split by X: Team A defends X>0, Team B defends X<0
- *
- * Ball-ground detection lives here for now; later it moves to the ball / a
- * dedicated rules component once AI and a proper UI are in.
+ * FIVB rules modelled here (2025-2028 rulebook):
+ *  - Rally point scoring: every dead ball awards a point (§12.2)
+ *  - Side-out: the rally winner serves next (§12.4)
+ *  - Set to 25, win by 2 (§6.1)
+ *  - Best of 5 sets; 5th set goes to 15 (§6.2)
+ *  - Team positions rotate clockwise on side-out (§7.4) — M2, data only here
  */
 UCLASS()
 class SPIKEELITE_API ASpikeEliteGameMode : public AGameModeBase
@@ -38,12 +47,13 @@ public:
 	ASpikeEliteGameMode();
 
 	virtual void BeginPlay() override;
+	virtual void Tick(float DeltaSeconds) override;
 
 	/** Call when the ball hits the floor. Location.X decides which side's court. */
 	UFUNCTION(BlueprintCallable, Category = "Volleyball|Rules")
 	void OnBallLanded(const FVector& BallLocation);
 
-	/** Current score, Team A vs Team B. */
+	/** Current score, current set. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Volleyball|Score")
 	int32 TeamAScore = 0;
 
@@ -54,9 +64,28 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Volleyball|Score")
 	EVolleyballTeam ServingTeam = EVolleyballTeam::TeamA;
 
-	/** Points needed to win a set (FIVB: 25). */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volleyball|Rules")
+	/** How many sets each team has won. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Volleyball|Score")
+	int32 TeamASetsWon = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Volleyball|Score")
+	int32 TeamBSetsWon = 0;
+
+	/** Which set we are in (1-based). */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Volleyball|Score")
+	int32 CurrentSet = 1;
+
+	/** Points to win a set (25 for sets 1-4, 15 for set 5). */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Volleyball|Score")
 	int32 PointsToWin = 25;
+
+	/** Match winner, once MatchOver. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Volleyball|Score")
+	EVolleyballTeam MatchWinner = EVolleyballTeam::None;
+
+	/** Current state. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Volleyball|Score")
+	EMatchState MatchState = EMatchState::PreMatch;
 
 protected:
 	UPROPERTY()
@@ -65,6 +94,22 @@ protected:
 	UPROPERTY()
 	TObjectPtr<AVolleyballBall> Ball;
 
+	/** Seconds of pause between rallies (let the crowd breathe). */
+	UPROPERTY(EditAnywhere, Category = "Volleyball|Rules")
+	float InterRallyDelay = 1.5f;
+
+	/** Timer for the inter-rally pause. */
+	float InterRallyTimer = 0.0f;
+
 	/** Award a point to the given team and rotate serve. */
 	void AwardPoint(EVolleyballTeam ScoringTeam);
+
+	/** Check whether the current set has been won; advance state. */
+	void CheckSetWin();
+
+	/** Start the next serve after the pause. */
+	void ServeNextBall();
+
+	/** Reset per-set scores and bump CurrentSet. */
+	void StartNextSet();
 };
