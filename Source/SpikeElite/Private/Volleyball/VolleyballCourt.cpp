@@ -3,10 +3,12 @@
 #include "Components/BoxComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/SceneComponent.h"
+#include "Components/LightComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Materials/MaterialInterface.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "UObject/ConstructorHelpers.h"
+#include "Engine/PointLight.h"
 
 AVolleyballCourt::AVolleyballCourt()
 {
@@ -153,6 +155,41 @@ void AVolleyballCourt::BeginPlay()
 {
 	Super::BeginPlay();
 	BuildCourt();
+
+	// Spawn "crowd": rows of small colored boxes behind the end walls.
+	if (UWorld* World = GetWorld())
+	{
+		FActorSpawnParameters SP;
+		SP.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		static ConstructorHelpers::FObjectFinder<UStaticMesh> Cube(TEXT("/Engine/BasicShapes/Cube.Cube"));
+		for (int32 Row = 0; Row < 3; Row++)
+		{
+			for (int32 Col = -8; Col <= 8; Col++)
+			{
+				for (int Side = -1; Side <= 1; Side += 2)
+				{
+					AActor* Fan = World->SpawnActor<AActor>(
+						FVector(Side * (HalfCourtLength + 150.0f + Row * 60.0f), Col * 55.0f, 80.0f + Row * 40.0f),
+						FRotator::ZeroRotator, SP);
+					if (Fan && Cube.Succeeded())
+					{
+						UStaticMeshComponent* SMC = NewObject<UStaticMeshComponent>(Fan);
+						SMC->RegisterComponent();
+						SMC->SetStaticMesh(Cube.Object);
+						SMC->SetWorldScale3D(FVector(0.4f, 0.4f, 0.9f));
+						FLinearColor C(FMath::FRandRange(0.2f, 0.9f), FMath::FRandRange(0.2f, 0.9f), FMath::FRandRange(0.2f, 0.9f));
+						if (UMaterialInterface* Base = SMC->GetMaterial(0))
+						{
+							UMaterialInstanceDynamic* MID = UMaterialInstanceDynamic::Create(Base, Fan);
+							MID->SetVectorParameterValue(TEXT("Color"), C);
+							SMC->SetMaterial(0, MID);
+						}
+						Fan->SetRootComponent(SMC);
+					}
+				}
+			}
+		}
+	}
 }
 
 void AVolleyballCourt::BuildCourt()
