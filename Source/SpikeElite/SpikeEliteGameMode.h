@@ -7,7 +7,7 @@
 
 /**
  * Default game mode for SPIKE ELITE.
- * M0: binds our pawn; rules engine comes in M1.
+ * M0: binds our pawn, spawns a procedural court and a ball.
  */
 UCLASS()
 class SPIKEELITE_API ASpikeEliteGameMode : public AGameModeBase
@@ -16,4 +16,6 @@ class SPIKEELITE_API ASpikeEliteGameMode : public AGameModeBase
 
 public:
 	ASpikeEliteGameMode();
+
+	virtual void BeginPlay() override;
 };
