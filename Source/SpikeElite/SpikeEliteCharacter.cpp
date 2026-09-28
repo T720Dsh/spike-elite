@@ -5,6 +5,7 @@
 #include "GameFramework/SpringArmComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Animation/AnimInstance.h"
 #include "Kismet/GameplayStatics.h"
 #include "UObject/ConstructorHelpers.h"
 #include "Volleyball/VolleyballBall.h"
@@ -25,6 +26,13 @@ ASpikeEliteCharacter::ASpikeEliteCharacter()
 		GetMesh()->SetSkeletalMesh(MannequinMesh.Object);
 		GetMesh()->SetRelativeLocation(FVector(0.0f, 0.0f, -88.0f));
 		GetMesh()->SetRelativeRotation(FRotator(0.0f, -90.0f, 0.0f));
+	}
+
+	// Animation blueprint: idle/walk/jog/jump blending.
+	static ConstructorHelpers::FClassFinder<UAnimInstance> AnimBP(TEXT("/Game/Mannequins/Anims/Unarmed/ABP_Unarmed.ABP_Unarmed_C"));
+	if (AnimBP.Succeeded())
+	{
+		GetMesh()->SetAnimInstanceClass(AnimBP.Class);
 	}
 
 	UCharacterMovementComponent* MoveComp = GetCharacterMovement();
