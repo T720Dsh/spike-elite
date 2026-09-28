@@ -178,6 +178,18 @@ void ASpikeEliteGameMode::Tick(float DeltaSeconds)
 		if (InterRallyTimer <= 0.0f) ServeNextBall();
 	}
 
+	// Serve toss: ball hangs in the air briefly, then gets struck.
+	if (bInToss && Ball)
+	{
+		TossTimer -= DeltaSeconds;
+		if (TossTimer <= 0.0f)
+		{
+			Ball->Strike(TossDir, TossPower, 0.0f);
+			bInToss = false;
+			MatchState = EMatchState::Playing;
+		}
+	}
+
 	// Net touch bounce.
 	if (MatchState == EMatchState::Playing && Ball)
 	{
@@ -278,14 +290,15 @@ void ASpikeEliteGameMode::StartNextSet()
 void ASpikeEliteGameMode::ServeNextBall()
 {
 	if (!Ball || !Court) return;
-	// The current position-1 player serves from the back-right corner.
 	TArray<TObjectPtr<ASpikeEliteCharacter>>& Roster = (ServingTeam == EVolleyballTeam::TeamA) ? TeamAPlayers : TeamBPlayers;
 	FVector ServerPos = (Roster.Num() > 0 && Roster[0]) ? Roster[0]->GetActorLocation()
 		: FVector(ServingTeam == EVolleyballTeam::TeamA ? 770.0f : -770.0f, 0.0f, 0.0f);
 
 	Ball->ResetBall(ServerPos + FVector(0.0f, 0.0f, 180.0f));
-	FVector Dir = (ServingTeam == EVolleyballTeam::TeamA)
+	TossDir = (ServingTeam == EVolleyballTeam::TeamA)
 		? FVector(-0.878f, 0.0f, 0.479f) : FVector(0.878f, 0.0f, 0.479f);
-	Ball->Strike(Dir, 1300.0f, 0.0f);
-	MatchState = EMatchState::Playing;
+	TossPower = 1300.0f;
+	TossTimer = 0.6f;   // 0.6 s toss before the serve
+	bInToss = true;
+	// MatchState stays BetweenRallies until the ball is struck.
 }

@@ -103,6 +103,12 @@ protected:
 	/** Timer for the inter-rally pause. */
 	float InterRallyTimer = 0.0f;
 
+	/** Serving toss: ball is tossed up for a moment before being struck. */
+	bool bInToss = false;
+	float TossTimer = 0.0f;
+	FVector TossDir = FVector::ForwardVector;
+	float TossPower = 1300.0f;
+
 	/** Cooldown so AI doesn't re-hit the same ball every frame. */
 	float AIHitCooldown = 0.0f;
 
