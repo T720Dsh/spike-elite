@@ -8,6 +8,7 @@
 class AVolleyballBall;
 class AVolleyballCourt;
 class ASpikeEliteCharacter;
+class UScoreboardWidget;
 
 /** Which side of the net a team defends. */
 UENUM(BlueprintType)
@@ -120,6 +121,10 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Volleyball|Roster")
 	TArray<TObjectPtr<ASpikeEliteCharacter>> TeamBPlayers;
+
+	/** On-screen scoreboard widget. */
+	UPROPERTY()
+	TObjectPtr<UScoreboardWidget> Scoreboard;
 
 	/** FIVB court positions in cm (Team A half: X>0). */
 	static TArray<FVector> GetPositionsA();

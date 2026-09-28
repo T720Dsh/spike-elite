@@ -14,6 +14,8 @@
 #include "Engine/SkyLight.h"
 #include "Engine/StaticMeshActor.h"
 #include "Components/DirectionalLightComponent.h"
+#include "UI/ScoreboardWidget.h"
+#include "Blueprint/UserWidget.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogVolleyballRules, Log, All);
 
@@ -104,6 +106,13 @@ void ASpikeEliteGameMode::BeginPlay()
 		Sun->GetComponent()->SetIntensity(4.5f);
 	}
 
+	// --- Scoreboard UI. ---
+	if (APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0))
+	{
+		Scoreboard = CreateWidget<UScoreboardWidget>(PC, UScoreboardWidget::StaticClass());
+		if (Scoreboard) Scoreboard->AddToViewport();
+	}
+
 	MatchState = EMatchState::BetweenRallies;
 	InterRallyTimer = 1.0f;
 	ServingTeam = EVolleyballTeam::TeamA;
@@ -180,20 +189,9 @@ void ASpikeEliteGameMode::Tick(float DeltaSeconds)
 		}
 	}
 
-	if (GEngine)
+	if (Scoreboard)
 	{
-		FString Line1 = FString::Printf(TEXT("SET %d   SCORE  A %d : %d B     (to %d)"),
-			CurrentSet, TeamAScore, TeamBScore, PointsToWin);
-		FString Line2 = FString::Printf(TEXT("Sets: A %d - %d B   |   Serving: %d"),
-			TeamASetsWon, TeamBSetsWon, (ServingTeam == EVolleyballTeam::TeamA ? 1 : 2));
-		FString Line3 = (MatchState == EMatchState::MatchOver)
-			? FString(TEXT("*** MATCH OVER ***"))
-			: FString(TEXT("WASD move  LMB hit  Space jump  V FP  E serve"));
-
-		GEngine->AddOnScreenDebugMessage(101, 0.0f, FColor::Yellow, Line1);
-		GEngine->AddOnScreenDebugMessage(102, 0.0f, FColor::Cyan, Line2);
-		GEngine->AddOnScreenDebugMessage(103, 0.0f, FColor::Green, Line3);
-
+		FString BallHint = TEXT("");
 		if (Ball)
 		{
 			APawn* Player = UGameplayStatics::GetPlayerPawn(this, 0);
@@ -201,19 +199,21 @@ void ASpikeEliteGameMode::Tick(float DeltaSeconds)
 			{
 				const FVector ToBall = Ball->GetActorLocation() - Player->GetActorLocation();
 				const float Dist = ToBall.Size();
-				FString Dir = (Dist < 200.0f) ? FString(TEXT("HERE!")) : FString(TEXT(""));
-				if (Dir.IsEmpty())
+				if (Dist < 200.0f) BallHint = TEXT("Ball HERE!");
+				else
 				{
 					const float Yaw = FRotationMatrix::MakeFromX(ToBall).Rotator().Yaw - Player->GetControlRotation().Yaw;
-					if      (Yaw > 45 && Yaw <= 135)  Dir = TEXT("<< LEFT");
-					else if (Yaw <= -45 && Yaw >= -135) Dir = TEXT("RIGHT >>");
-					else if (Yaw > 135 || Yaw < -135)   Dir = TEXT("BEHIND");
-					else                                   Dir = TEXT("FRONT");
+					FString Dir;
+					if      (Yaw > 45 && Yaw <= 135)  Dir = TEXT("Ball << LEFT");
+					else if (Yaw <= -45 && Yaw >= -135) Dir = TEXT("Ball RIGHT >>");
+					else if (Yaw > 135 || Yaw < -135)   Dir = TEXT("Ball BEHIND");
+					else                                   Dir = TEXT("Ball FRONT");
+					BallHint = FString::Printf(TEXT("%s  (%.0fm)"), *Dir, Dist / 100.0f);
 				}
-				GEngine->AddOnScreenDebugMessage(104, 0.0f, FColor::Orange,
-					FString::Printf(TEXT("Ball: %s  (%.0f m)"), *Dir, Dist / 100.0f));
 			}
 		}
+		Scoreboard->UpdateScore(CurrentSet, TeamAScore, TeamBScore, TeamASetsWon, TeamBSetsWon,
+			ServingTeam == EVolleyballTeam::TeamA, BallHint);
 	}
 }
 
