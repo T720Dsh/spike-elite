@@ -7,6 +7,7 @@
 
 class AVolleyballBall;
 class AVolleyballCourt;
+class ASpikeEliteCharacter;
 
 /** Which side of the net a team defends. */
 UENUM(BlueprintType)
@@ -106,6 +107,22 @@ protected:
 
 	/** Award a point to the given team and rotate serve. */
 	void AwardPoint(EVolleyballTeam ScoringTeam);
+
+	/** FIVB §7.4: on side-out, the serving team rotates clockwise (each player moves to the next lower position number). */
+	void RotateTeam(EVolleyballTeam TeamToRotate);
+
+	/** Teleport all players to their current home positions. */
+	void RespawnPlayersToPositions();
+
+	/** The 6 players on each side, in position order [1..6]. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Volleyball|Roster")
+	TArray<TObjectPtr<ASpikeEliteCharacter>> TeamAPlayers;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Volleyball|Roster")
+	TArray<TObjectPtr<ASpikeEliteCharacter>> TeamBPlayers;
+
+	/** FIVB court positions in cm (Team A half: X>0). */
+	static TArray<FVector> GetPositionsA();
 
 	/** Check whether the current set has been won; advance state. */
 	void CheckSetWin();
