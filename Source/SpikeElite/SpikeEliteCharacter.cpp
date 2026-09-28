@@ -29,7 +29,7 @@ ASpikeEliteCharacter::ASpikeEliteCharacter()
 	}
 
 	// Animation blueprint: idle/walk/jog/jump blending.
-	static ConstructorHelpers::FClassFinder<UAnimInstance> AnimBP(TEXT("/Game/Mannequins/Anims/Unarmed/ABP_Unarmed.ABP_Unarmed_C"));
+	static ConstructorHelpers::FClassFinder<UAnimInstance> AnimBP(TEXT("/Game/Mannequins/Anims/Anims/Unarmed/ABP_Unarmed.ABP_Unarmed_C"));
 	if (AnimBP.Succeeded())
 	{
 		GetMesh()->SetAnimInstanceClass(AnimBP.Class);
