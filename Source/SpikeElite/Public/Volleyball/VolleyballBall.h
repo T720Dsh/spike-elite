@@ -59,10 +59,7 @@ protected:
 
 	/** Last team that touched the ball; None before the serve. */
 	EVolleyballTeam LastHitTeam = EVolleyballTeam::None;
-
-	/** Physics hit callback: detect floor contacts and notify the rules system. */
-	UFUNCTION()
-	void OnBallHit(class UPrimitiveComponent* HitComp, AActor* OtherActor, class UPrimitiveComponent* OtherComp, FVector NormalImpulse, const FHitResult& Hit);
+	bool bLandingReported = false;
 
 	/**
 	 * ProjectileMovement bounce callback. Because the mesh is kinematic (no

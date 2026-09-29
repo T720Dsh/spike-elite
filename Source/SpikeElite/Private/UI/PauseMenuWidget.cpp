@@ -8,14 +8,23 @@
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
 #include "Components/Image.h"
+#include "Components/SizeBox.h"
+#include "Components/SizeBoxSlot.h"
 #include "Blueprint/WidgetTree.h"
 
 UPauseMenuWidget::UPauseMenuWidget(const FObjectInitializer& OI) : Super(OI) {}
 
-void UPauseMenuWidget::NativeConstruct()
+TSharedRef<SWidget> UPauseMenuWidget::RebuildWidget()
 {
-	Super::NativeConstruct();
+	if (!WidgetTree->RootWidget)
+	{
+		BuildWidgetTree();
+	}
+	return Super::RebuildWidget();
+}
 
+void UPauseMenuWidget::BuildWidgetTree()
+{
 	UCanvasPanel* Root = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass());
 	WidgetTree->RootWidget = Root;
 
@@ -28,6 +37,7 @@ void UPauseMenuWidget::NativeConstruct()
 	{
 		S->SetAnchors(FAnchors(0.5f,0.5f,0.5f,0.5f));
 		S->SetAlignment(FVector2D(0.5f,0.5f));
+		S->SetAutoSize(true);
 	}
 
 	UTextBlock* Title = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
@@ -48,7 +58,13 @@ void UPauseMenuWidget::NativeConstruct()
 		T->SetColorAndOpacity(FSlateColor(FLinearColor::White));
 		T->SetJustification(ETextJustify::Center);
 		B->AddChild(T);
-		if (UVerticalBoxSlot* V = Col->AddChildToVerticalBox(B))
+		USizeBox* WidthBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+		WidthBox->SetWidthOverride(260.f);
+		if (USizeBoxSlot* ContentSlot = Cast<USizeBoxSlot>(WidthBox->AddChild(B)))
+		{
+			ContentSlot->SetHorizontalAlignment(HAlign_Fill);
+		}
+		if (UVerticalBoxSlot* V = Col->AddChildToVerticalBox(WidthBox))
 		{
 			V->SetPadding(FMargin(0.f, 7.f));
 			V->SetHorizontalAlignment(HAlign_Center);
@@ -61,10 +77,17 @@ void UPauseMenuWidget::NativeConstruct()
 	BtnMainMenu = AddBtn(TEXT("返回主菜单"), FLinearColor(0.22f,0.20f,0.12f,1), FLinearColor(0.40f,0.36f,0.20f,1));
 	BtnQuit     = AddBtn(TEXT("退出到桌面"), FLinearColor(0.30f,0.10f,0.10f,1), FLinearColor(0.55f,0.20f,0.20f,1));
 
-	BtnResume->OnClicked.AddDynamic(this, &UPauseMenuWidget::HResume);
-	BtnSettings->OnClicked.AddDynamic(this, &UPauseMenuWidget::HSettings);
-	BtnMainMenu->OnClicked.AddDynamic(this, &UPauseMenuWidget::HMainMenu);
-	BtnQuit->OnClicked.AddDynamic(this, &UPauseMenuWidget::HQuit);
+}
 
-	if (BtnResume) BtnResume->SetKeyboardFocus();
+void UPauseMenuWidget::NativeConstruct()
+{
+	Super::NativeConstruct();
+	if (BtnResume)
+	{
+		BtnResume->OnClicked.AddUniqueDynamic(this, &UPauseMenuWidget::HResume);
+		BtnResume->SetKeyboardFocus();
+	}
+	if (BtnSettings) BtnSettings->OnClicked.AddUniqueDynamic(this, &UPauseMenuWidget::HSettings);
+	if (BtnMainMenu) BtnMainMenu->OnClicked.AddUniqueDynamic(this, &UPauseMenuWidget::HMainMenu);
+	if (BtnQuit) BtnQuit->OnClicked.AddUniqueDynamic(this, &UPauseMenuWidget::HQuit);
 }

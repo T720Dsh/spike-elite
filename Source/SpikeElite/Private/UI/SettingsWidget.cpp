@@ -7,9 +7,13 @@
 #include "Components/ComboBoxString.h"
 #include "Components/VerticalBox.h"
 #include "Components/HorizontalBox.h"
+#include "Components/HorizontalBoxSlot.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
 #include "Components/Image.h"
+#include "Components/SizeBox.h"
+#include "Components/SizeBoxSlot.h"
+#include "Components/VerticalBoxSlot.h"
 #include "Blueprint/WidgetTree.h"
 #include "GameFramework/GameUserSettings.h"
 #include "Styling/SlateBrush.h"
@@ -19,16 +23,30 @@
 
 USettingsWidget::USettingsWidget(const FObjectInitializer& OI) : Super(OI) {}
 
-static UVerticalBox* AddRow(UWidgetTree* T, UVerticalBox* Parent, const FString& Label)
+static void AddRow(UWidgetTree* T, UVerticalBox* Parent, const FString& Label)
 {
 	UTextBlock* L = T->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
 	L->SetText(FText::FromString(Label));
 	L->SetFont(SEUiStyle::Font(18));
 	L->SetColorAndOpacity(FSlateColor(FLinearColor::White));
-	Parent->AddChildToVerticalBox(L);
-	UVerticalBox* R = T->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass());
-	Parent->AddChildToVerticalBox(R);
-	return R;
+	if (UVerticalBoxSlot* Slot = Parent->AddChildToVerticalBox(L))
+	{
+		Slot->SetPadding(FMargin(0.f, 8.f, 0.f, 2.f));
+	}
+}
+
+static void AddSizedControl(UWidgetTree* T, UVerticalBox* Parent, UWidget* Control, float Width = 320.f)
+{
+	USizeBox* Size = T->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+	Size->SetWidthOverride(Width);
+	if (USizeBoxSlot* ControlSlot = Cast<USizeBoxSlot>(Size->AddChild(Control)))
+	{
+		ControlSlot->SetHorizontalAlignment(HAlign_Fill);
+	}
+	if (UVerticalBoxSlot* Slot = Parent->AddChildToVerticalBox(Size))
+	{
+		Slot->SetHorizontalAlignment(HAlign_Center);
+	}
 }
 
 void USettingsWidget::PopulateResolutions()
@@ -53,6 +71,7 @@ void USettingsWidget::PopulateResolutions()
 	if (List.Num() == 0)
 	{
 		List = { {1280,720},{1366,768},{1600,900},{1920,1080},{2560,1440} };
+		for (const FIntPoint& P : List) Seen.Add(P);
 	}
 	List.Sort([](const FIntPoint& A, const FIntPoint& B) { return A.X < B.X; });
 
@@ -100,18 +119,25 @@ void USettingsWidget::InitFromCurrentSettings()
 		if (Resolution->FindOptionIndex(CurStr) != INDEX_NONE) Resolution->SetSelectedOption(CurStr);
 	}
 
-	// Current overall scalability: 0 Low, 1 Medium, 2 High, 3 Epic.
+	// Current overall scalability: -1 Custom, 0 Low .. 3 Epic.
 	if (Quality)
 	{
-		const int32 Q = FMath::Clamp(S->GetOverallScalabilityLevel(), 0, 3);
-		Quality->SetSelectedIndex(Q);
+		const int32 Q = S->GetOverallScalabilityLevel();
+		Quality->SetSelectedIndex((Q >= 0 && Q <= 3) ? Q : 4);
 	}
 }
 
-void USettingsWidget::NativeConstruct()
+TSharedRef<SWidget> USettingsWidget::RebuildWidget()
 {
-	Super::NativeConstruct();
+	if (!WidgetTree->RootWidget)
+	{
+		BuildWidgetTree();
+	}
+	return Super::RebuildWidget();
+}
 
+void USettingsWidget::BuildWidgetTree()
+{
 	UCanvasPanel* Root = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass());
 	WidgetTree->RootWidget = Root;
 
@@ -131,13 +157,18 @@ void USettingsWidget::NativeConstruct()
 	{
 		S->SetAnchors(FAnchors(0.5f,0.5f,0.5f,0.5f));
 		S->SetAlignment(FVector2D(0.5f,0.5f));
+		S->SetAutoSize(true);
 	}
 
 	auto Title = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
 	Title->SetText(FText::FromString(TEXT("设置")));
 	Title->SetFont(SEUiStyle::Font(40));
 	Title->SetColorAndOpacity(FSlateColor(FLinearColor(0.1f,0.55f,1.f)));
-	Col->AddChildToVerticalBox(Title);
+	if (UVerticalBoxSlot* TitleSlot = Col->AddChildToVerticalBox(Title))
+	{
+		TitleSlot->SetHorizontalAlignment(HAlign_Center);
+		TitleSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 8.f));
+	}
 
 	AddRow(WidgetTree, Col, TEXT("窗口模式"));
 	WindowMode = WidgetTree->ConstructWidget<UComboBoxString>(UComboBoxString::StaticClass());
@@ -145,11 +176,11 @@ void USettingsWidget::NativeConstruct()
 	WindowMode->AddOption(TEXT("无边框窗口"));
 	WindowMode->AddOption(TEXT("全屏"));
 	WindowMode->SetSelectedIndex(0);
-	Col->AddChildToVerticalBox(WindowMode);
+	AddSizedControl(WidgetTree, Col, WindowMode);
 
 	AddRow(WidgetTree, Col, TEXT("分辨率"));
 	Resolution = WidgetTree->ConstructWidget<UComboBoxString>(UComboBoxString::StaticClass());
-	Col->AddChildToVerticalBox(Resolution);
+	AddSizedControl(WidgetTree, Col, Resolution);
 
 	AddRow(WidgetTree, Col, TEXT("图形质量"));
 	Quality = WidgetTree->ConstructWidget<UComboBoxString>(UComboBoxString::StaticClass());
@@ -157,22 +188,29 @@ void USettingsWidget::NativeConstruct()
 	Quality->AddOption(TEXT("中"));
 	Quality->AddOption(TEXT("高"));
 	Quality->AddOption(TEXT("极致"));   // 0 Low .. 3 Epic
+	Quality->AddOption(TEXT("自定义")); // display-only: preserves mixed scalability values
 	Quality->SetSelectedIndex(2);
-	Col->AddChildToVerticalBox(Quality);
+	AddSizedControl(WidgetTree, Col, Quality);
 
 	AddRow(WidgetTree, Col, TEXT("鼠标灵敏度"));
 	SensSlider = WidgetTree->ConstructWidget<USlider>(USlider::StaticClass());
 	SensSlider->SetMinValue(0.1f); SensSlider->SetMaxValue(3.0f);  // matches PlayerController
 	SensSlider->SetValue(PendingSensitivity);
-	SensSlider->OnValueChanged.AddDynamic(this, &USettingsWidget::OnSensChanged);
-	Col->AddChildToVerticalBox(SensSlider);
+	AddSizedControl(WidgetTree, Col, SensSlider);
 	SensValue = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
 	SensValue->SetText(FText::FromString(FString::Printf(TEXT("%.2f"), PendingSensitivity)));
 	SensValue->SetColorAndOpacity(FSlateColor(FLinearColor(0.8f,0.85f,1.f)));
-	Col->AddChildToVerticalBox(SensValue);
+	if (UVerticalBoxSlot* ValueSlot = Col->AddChildToVerticalBox(SensValue))
+	{
+		ValueSlot->SetHorizontalAlignment(HAlign_Center);
+	}
 
 	UHorizontalBox* Btns = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
-	Col->AddChildToVerticalBox(Btns);
+	if (UVerticalBoxSlot* ButtonsSlot = Col->AddChildToVerticalBox(Btns))
+	{
+		ButtonsSlot->SetHorizontalAlignment(HAlign_Center);
+		ButtonsSlot->SetPadding(FMargin(0.f, 10.f, 0.f, 0.f));
+	}
 	BtnApply = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass());
 	BtnApply->SetStyle(SEUiStyle::ButtonStyle(FLinearColor(0.10f,0.50f,0.95f,1), FLinearColor(0.30f,0.68f,1.0f,1), FLinearColor(0.06f,0.30f,0.57f,1)));
 	{
@@ -181,7 +219,7 @@ void USettingsWidget::NativeConstruct()
 		T->SetFont(SEUiStyle::Font(20));
 		T->SetColorAndOpacity(FSlateColor(FLinearColor::White));
 		BtnApply->AddChild(T);
-		Btns->AddChildToHorizontalBox(BtnApply);
+		if (UHorizontalBoxSlot* ButtonSlot = Btns->AddChildToHorizontalBox(BtnApply)) ButtonSlot->SetPadding(FMargin(6.f));
 	}
 	BtnBack = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass());
 	BtnBack->SetStyle(SEUiStyle::ButtonStyle(FLinearColor(0.16f,0.18f,0.24f,1), FLinearColor(0.28f,0.34f,0.46f,1), FLinearColor(0.10f,0.11f,0.15f,1)));
@@ -191,19 +229,38 @@ void USettingsWidget::NativeConstruct()
 		T->SetFont(SEUiStyle::Font(20));
 		T->SetColorAndOpacity(FSlateColor(FLinearColor::White));
 		BtnBack->AddChild(T);
-		Btns->AddChildToHorizontalBox(BtnBack);
+		if (UHorizontalBoxSlot* ButtonSlot = Btns->AddChildToHorizontalBox(BtnBack)) ButtonSlot->SetPadding(FMargin(6.f));
 	}
-	BtnApply->OnClicked.AddDynamic(this, &USettingsWidget::ApplySettings);
-	BtnBack->OnClicked.AddDynamic(this, &USettingsWidget::Back);
-
 	ApplyStatus = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
 	ApplyStatus->SetText(FText::GetEmpty());
 	ApplyStatus->SetColorAndOpacity(FSlateColor(FLinearColor(0.95f,0.95f,0.2f)));
 	Col->AddChildToVerticalBox(ApplyStatus);
 
-	// Reflect the live settings now (in case Init is called before construction).
+}
+
+void USettingsWidget::NativeConstruct()
+{
+	Super::NativeConstruct();
+	if (SensSlider) SensSlider->OnValueChanged.AddUniqueDynamic(this, &USettingsWidget::OnSensChanged);
+	if (BtnApply) BtnApply->OnClicked.AddUniqueDynamic(this, &USettingsWidget::ApplySettings);
+	if (BtnBack) BtnBack->OnClicked.AddUniqueDynamic(this, &USettingsWidget::Back);
+
+	// Reflect the live settings after the controls exist.
 	InitFromCurrentSettings();
 	SetCurrentSensitivity(PendingSensitivity);
+}
+
+void USettingsWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
+{
+	Super::NativeTick(MyGeometry, InDeltaTime);
+	if (ApplyStatusSeconds > 0.0f)
+	{
+		ApplyStatusSeconds -= InDeltaTime;
+		if (ApplyStatusSeconds <= 0.0f && ApplyStatus)
+		{
+			ApplyStatus->SetText(FText::GetEmpty());
+		}
+	}
 }
 
 void USettingsWidget::SetCurrentSensitivity(float V)
@@ -241,8 +298,8 @@ void USettingsWidget::ApplySettings()
 		if (Sel.Split(TEXT(" x "), &L, &R))
 			S->SetScreenResolution(FIntPoint(FCString::Atoi(*L), FCString::Atoi(*R)));
 	}
-	if (Quality)
-		S->SetOverallScalabilityLevel(FMath::Clamp(Quality->GetSelectedIndex(), 0, 3));
+	if (Quality && Quality->GetSelectedIndex() >= 0 && Quality->GetSelectedIndex() <= 3)
+		S->SetOverallScalabilityLevel(Quality->GetSelectedIndex());
 
 	S->ApplySettings(true);
 	S->SaveSettings();
@@ -254,14 +311,7 @@ void USettingsWidget::ApplySettings()
 	if (ApplyStatus)
 	{
 		ApplyStatus->SetText(FText::FromString(TEXT("已应用")));
-		TWeakObjectPtr<USettingsWidget> Weak(this);
-		if (UWorld* W = GetWorld())
-		{
-			W->GetTimerManager().SetTimer(StatusTimer, [Weak]()
-			{
-				if (Weak.IsValid() && Weak->ApplyStatus) Weak->ApplyStatus->SetText(FText::GetEmpty());
-			}, 1.6f, false);
-		}
+		ApplyStatusSeconds = 1.6f;
 	}
 }
 

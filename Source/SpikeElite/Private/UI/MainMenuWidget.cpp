@@ -8,6 +8,8 @@
 #include "Components/VerticalBoxSlot.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
+#include "Components/SizeBox.h"
+#include "Components/SizeBoxSlot.h"
 #include "Blueprint/WidgetTree.h"
 #include "Styling/SlateBrush.h"
 #include "Engine/Texture2D.h"
@@ -39,17 +41,30 @@ static UButton* MakeBtn(UWidgetTree* Tree, UVerticalBox* Parent, const FString& 
 	T->SetJustification(ETextJustify::Center);
 	B->AddChild(T);
 
-	UVerticalBoxSlot* VSlot = Parent->AddChildToVerticalBox(B);
+	USizeBox* WidthBox = Tree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+	WidthBox->SetWidthOverride(300.f);
+	if (USizeBoxSlot* ContentSlot = Cast<USizeBoxSlot>(WidthBox->AddChild(B)))
+	{
+		ContentSlot->SetHorizontalAlignment(HAlign_Fill);
+	}
+	UVerticalBoxSlot* VSlot = Parent->AddChildToVerticalBox(WidthBox);
 	VSlot->SetPadding(FMargin(0.f, 8.f));
 	VSlot->SetHorizontalAlignment(HAlign_Center);
 	VSlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
 	return B;
 }
 
-void UMainMenuWidget::NativeConstruct()
+TSharedRef<SWidget> UMainMenuWidget::RebuildWidget()
 {
-	Super::NativeConstruct();
+	if (!WidgetTree->RootWidget)
+	{
+		BuildWidgetTree();
+	}
+	return Super::RebuildWidget();
+}
 
+void UMainMenuWidget::BuildWidgetTree()
+{
 	UCanvasPanel* Root = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass());
 	WidgetTree->RootWidget = Root;
 
@@ -73,6 +88,7 @@ void UMainMenuWidget::NativeConstruct()
 	{
 		S->SetAnchors(FAnchors(0.5f,0.5f,0.5f,0.5f));
 		S->SetAlignment(FVector2D(0.5f,0.5f));
+		S->SetAutoSize(true);
 	}
 
 	Title = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
@@ -97,10 +113,6 @@ void UMainMenuWidget::NativeConstruct()
 	BtnSettings = MakeBtn(WidgetTree, Col, TEXT("设置"),     FLinearColor(0.16f,0.18f,0.24f,1), FLinearColor(0.28f,0.34f,0.46f,1), 24);
 	BtnQuit     = MakeBtn(WidgetTree, Col, TEXT("退出游戏"), FLinearColor(0.30f,0.10f,0.10f,1), FLinearColor(0.55f,0.20f,0.20f,1), 24);
 
-	if (BtnStart)    BtnStart->OnClicked.AddDynamic(this, &UMainMenuWidget::HandleStartClick);
-	if (BtnSettings) BtnSettings->OnClicked.AddDynamic(this, &UMainMenuWidget::HandleSettingsClick);
-	if (BtnQuit)     BtnQuit->OnClicked.AddDynamic(this, &UMainMenuWidget::HandleQuitClick);
-
 	// Volleyball icon: imported project texture; falls back to a neutral disc.
 	BallIcon = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass());
 	bool bLoaded = false;
@@ -122,17 +134,27 @@ void UMainMenuWidget::NativeConstruct()
 		S->SetAnchors(FAnchors(0.5f, 0.5f, 0.5f, 0.5f));
 		S->SetAlignment(FVector2D(0.5f,0.5f));
 		S->SetSize(FVector2D(84,84));
-		S->SetPosition(FVector2D(240, -160));
+		S->SetPosition(FVector2D(300, -150));
 	}
 
 	// Title starts transparent and fades/slides in once (not a high-freq flicker).
 	Title->SetRenderOpacity(0.f);
 	Title->SetRenderTranslation(FVector2D(0.f, -24.f));
 
-	// Keyboard / gamepad focus starts on the first button.
-	if (BtnStart) BtnStart->SetKeyboardFocus();
-
 	UE_LOG(LogSEWidget, Log, TEXT("MainMenu built, ball icon loaded=%s"), bLoaded ? TEXT("yes") : TEXT("no(fallback)"));
+}
+
+void UMainMenuWidget::NativeConstruct()
+{
+	Super::NativeConstruct();
+	AnimTime = 0.0f;
+	if (BtnStart)
+	{
+		BtnStart->OnClicked.AddUniqueDynamic(this, &UMainMenuWidget::HandleStartClick);
+		BtnStart->SetKeyboardFocus();
+	}
+	if (BtnSettings) BtnSettings->OnClicked.AddUniqueDynamic(this, &UMainMenuWidget::HandleSettingsClick);
+	if (BtnQuit) BtnQuit->OnClicked.AddUniqueDynamic(this, &UMainMenuWidget::HandleQuitClick);
 }
 
 void UMainMenuWidget::NativeTick(const FGeometry& Geo, float DT)
@@ -146,7 +168,7 @@ void UMainMenuWidget::NativeTick(const FGeometry& Geo, float DT)
 		if (UCanvasPanelSlot* S = Cast<UCanvasPanelSlot>(BallIcon->Slot))
 		{
 			const float Hop = FMath::Abs(FMath::Sin(AnimTime * 2.2f)) * 46.f;
-			S->SetPosition(FVector2D(240.f, -160.f - Hop));
+			S->SetPosition(FVector2D(300.f, -150.f - Hop));
 		}
 		BallIcon->SetRenderTransformAngle(FMath::Fmod(AnimTime * 70.f, 360.f));
 	}

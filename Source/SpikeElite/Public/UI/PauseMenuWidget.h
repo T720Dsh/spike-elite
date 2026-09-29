@@ -14,6 +14,7 @@ class SPIKEELITE_API UPauseMenuWidget : public UUserWidget
 
 public:
 	UPauseMenuWidget(const FObjectInitializer& ObjectInitializer);
+	virtual TSharedRef<SWidget> RebuildWidget() override;
 	virtual void NativeConstruct() override;
 
 	DECLARE_DELEGATE(FOnMenuAction);
@@ -27,6 +28,7 @@ protected:
 	UPROPERTY() TObjectPtr<UButton> BtnSettings;
 	UPROPERTY() TObjectPtr<UButton> BtnMainMenu;
 	UPROPERTY() TObjectPtr<UButton> BtnQuit;
+	void BuildWidgetTree();
 
 	UFUNCTION() void HResume()   { OnResume.ExecuteIfBound(); }
 	UFUNCTION() void HSettings() { OnSettings.ExecuteIfBound(); }

@@ -271,13 +271,22 @@ void ASpikeEliteGameMode::Tick(float DeltaSeconds)
 		const float NetBottom = NetTop - Court->NetBandHeight; // 143
 		const float HalfNetW = Court->HalfCourtWidth + Court->NetOverhang; // ~530
 
-		const bool bCrossedPlane = (BallPrevX * BL.X < 0.f) || FMath::Abs(BL.X) < 12.f;
+		constexpr float NetSlabHalfDepth = 14.f;
+		const bool bEnteredFromPositive = BallPrevX > NetSlabHalfDepth && BL.X <= NetSlabHalfDepth;
+		const bool bEnteredFromNegative = BallPrevX < -NetSlabHalfDepth && BL.X >= -NetSlabHalfDepth;
+		const bool bEnteredSlab = bEnteredFromPositive || bEnteredFromNegative;
 		const bool bInBand = (BL.Z < NetTop && BL.Z > NetBottom);
 		const bool bInWidth = FMath::Abs(BL.Y) < HalfNetW;
 		const bool bMovingAcross = FMath::Abs(BV.X) > 20.f;
 
-		if (bCrossedPlane && bInBand && bInWidth && bMovingAcross && NetTouchCooldown <= 0.f)
+		if (FMath::Abs(BL.X) > NetSlabHalfDepth + 8.f)
 		{
+			bNetContactLatched = false;
+		}
+
+		if (bEnteredSlab && !bNetContactLatched && bInBand && bInWidth && bMovingAcross && NetTouchCooldown <= 0.f)
+		{
+			bNetContactLatched = true;
 			// Rebound back toward the side it came from, damped, with a little rise.
 			const float ReboundSpeed = FMath::Clamp(BV.Size() * 0.55f, 260.f, 720.f);
 			FVector Rebound(-BV.X * 0.6f, BV.Y * 0.4f, FMath::Max(BV.Z * 0.3f, 0.f) + 170.f);
@@ -395,6 +404,8 @@ void ASpikeEliteGameMode::ServeNextBall()
 	FVector ServerPos = (Roster.Num() > 0 && Roster[0]) ? Roster[0]->GetActorLocation()
 		: FVector(ServingTeam == EVolleyballTeam::TeamA ? 770.f : -770.f, 0.f, 0.f);
 	Ball->ResetBall(ServerPos + FVector(0,0,180.f));
+	BallPrevX = Ball->GetActorLocation().X;
+	bNetContactLatched = false;
 	Ball->SetLastHitTeam(ServingTeam);   // serve counts as the serving team's touch
 	TossDir = (ServingTeam == EVolleyballTeam::TeamA) ? FVector(-0.878f,0,0.479f) : FVector(0.878f,0,0.479f);
 	TossPower = 1300.f;

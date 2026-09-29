@@ -17,7 +17,9 @@ class SPIKEELITE_API USettingsWidget : public UUserWidget
 
 public:
 	USettingsWidget(const FObjectInitializer& ObjectInitializer);
+	virtual TSharedRef<SWidget> RebuildWidget() override;
 	virtual void NativeConstruct() override;
+	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
 
 	DECLARE_DELEGATE(FOnMenuAction);
 	FOnMenuAction OnBack;
@@ -46,11 +48,12 @@ protected:
 	UPROPERTY() TObjectPtr<UButton> BtnBack;
 
 	float PendingSensitivity = 1.0f;
-	FTimerHandle StatusTimer;
+	float ApplyStatusSeconds = 0.0f;
 
 	UFUNCTION() void OnSensChanged(float V);
 	UFUNCTION() void ApplySettings();
 	UFUNCTION() void Back();
 
 	void PopulateResolutions();
+	void BuildWidgetTree();
 };

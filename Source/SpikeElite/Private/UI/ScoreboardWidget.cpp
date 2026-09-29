@@ -14,19 +14,27 @@ UScoreboardWidget::UScoreboardWidget(const FObjectInitializer& ObjectInitializer
 	// Leave empty: UHT defines the ctor body in gen.cpp.
 }
 
-void UScoreboardWidget::NativeConstruct()
+TSharedRef<SWidget> UScoreboardWidget::RebuildWidget()
 {
-	Super::NativeConstruct();
+	if (!WidgetTree->RootWidget)
+	{
+		BuildWidgetTree();
+	}
+	return Super::RebuildWidget();
+}
 
+void UScoreboardWidget::BuildWidgetTree()
+{
 	// Build the widget tree in C++: Canvas -> VerticalBox (top-center) -> 4 text rows.
 	UCanvasPanel* Root = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass());
 	WidgetTree->RootWidget = Root;
 
 	UVerticalBox* Box = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass());
 	UCanvasPanelSlot* BoxSlot = Root->AddChildToCanvas(Box);
-	BoxSlot->SetPosition(FVector2D(480.0f, 20.0f));
+	BoxSlot->SetPosition(FVector2D(0.0f, 20.0f));
 	BoxSlot->SetAnchors(FAnchors(0.5f, 0.0f, 0.5f, 0.0f));
 	BoxSlot->SetAlignment(FVector2D(0.5f, 0.0f));
+	BoxSlot->SetAutoSize(true);
 
 	auto MakeRow = [&](FLinearColor Color, int32 FontSize) -> UTextBlock*
 	{
@@ -41,6 +49,13 @@ void UScoreboardWidget::NativeConstruct()
 	Text_Score = MakeRow(FLinearColor(1.0f, 1.0f, 1.0f), 36);
 	Text_Sets  = MakeRow(FLinearColor(0.4f, 0.8f, 1.0f), 18);
 	Text_Ball  = MakeRow(FLinearColor(1.0f, 0.6f, 0.2f), 18);
+	Text_Help  = MakeRow(FLinearColor(0.75f, 0.78f, 0.82f), 14);
+	Text_Help->SetText(FText::FromString(TEXT("ESC：暂停 / 释放鼠标")));
+}
+
+void UScoreboardWidget::NativeConstruct()
+{
+	Super::NativeConstruct();
 }
 
 void UScoreboardWidget::UpdateScore(int32 SetNum, int32 AScore, int32 BScore, int32 ASets, int32 BSets,

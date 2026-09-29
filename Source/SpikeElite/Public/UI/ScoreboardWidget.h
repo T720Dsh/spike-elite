@@ -19,6 +19,7 @@ class SPIKEELITE_API UScoreboardWidget : public UUserWidget
 public:
 	UScoreboardWidget(const FObjectInitializer& ObjectInitializer);
 
+	virtual TSharedRef<SWidget> RebuildWidget() override;
 	virtual void NativeConstruct() override;
 
 	void UpdateScore(int32 SetNum, int32 AScore, int32 BScore, int32 ASets, int32 BSets,
@@ -36,4 +37,9 @@ protected:
 
 	UPROPERTY()
 	TObjectPtr<UTextBlock> Text_Ball;
+
+	UPROPERTY()
+	TObjectPtr<UTextBlock> Text_Help;
+
+	void BuildWidgetTree();
 };

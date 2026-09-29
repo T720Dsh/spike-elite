@@ -26,8 +26,7 @@ AVolleyballBall::AVolleyballBall()
 	// Players "hit" the ball via gameplay detection; do not let the capsule
 	// physically kick the ball around.
 	Mesh->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
-	Mesh->SetNotifyRigidBodyCollision(true);
-	Mesh->OnComponentHit.AddDynamic(this, &AVolleyballBall::OnBallHit);
+	Mesh->SetNotifyRigidBodyCollision(false);
 
 	// Visual: engine sphere. Base cube/sphere is 100 cm across; an FIVB ball is
 	// ~21 cm in diameter, so scale 0.21.
@@ -65,25 +64,14 @@ void AVolleyballBall::BeginPlay()
 	Super::BeginPlay();
 }
 
-void AVolleyballBall::OnBallHit(UPrimitiveComponent* HitComp, AActor* OtherActor, UPrimitiveComponent* OtherComp, FVector NormalImpulse, const FHitResult& Hit)
-{
-	// A strongly-upward contact normal means the floor: the rally ends.
-	if (Hit.Normal.Z > 0.7f)
-	{
-		if (ASpikeEliteGameMode* GM = Cast<ASpikeEliteGameMode>(UGameplayStatics::GetGameMode(this)))
-		{
-			GM->OnBallLanded(Hit.ImpactPoint);
-		}
-	}
-}
-
 void AVolleyballBall::HandleProjectileBounce(const FHitResult& ImpactResult, const FVector& ImpactVelocity)
 {
 	// Same floor test as OnBallHit but driven by the projectile component, which
 	// is the authority for this kinematic ball. Up-facing normal = floor or the
 	// top of a stand step (the latter counts as landing out).
-	if (ImpactResult.Normal.Z > 0.7f)
+	if (!bLandingReported && ImpactResult.Normal.Z > 0.7f)
 	{
+		bLandingReported = true;
 		if (ASpikeEliteGameMode* GM = Cast<ASpikeEliteGameMode>(UGameplayStatics::GetGameMode(this)))
 		{
 			GM->OnBallLanded(ImpactResult.ImpactPoint);
@@ -97,6 +85,7 @@ void AVolleyballBall::Strike(const FVector& Direction, float Power, float SpinRa
 	const FVector Dir = Direction.GetSafeNormal();
 	if (Projectile)
 	{
+		Projectile->Activate(true);
 		Projectile->Velocity = Dir * Power;
 		Projectile->UpdateComponentVelocity();
 	}
@@ -109,6 +98,8 @@ void AVolleyballBall::ResetBall(const FVector& Location)
 	{
 		Projectile->StopMovementImmediately();
 		Projectile->Velocity = FVector::ZeroVector;
+		Projectile->Deactivate();
 	}
 	CurrentSpin = 0.0f;
+	bLandingReported = false;
 }

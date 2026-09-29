@@ -133,6 +133,8 @@ protected:
 
 	/** Previous-frame ball X, used to detect crossing the net plane. */
 	float BallPrevX = 0.0f;
+	/** Latched while the ball occupies the net collision slab. */
+	bool bNetContactLatched = false;
 
 	/** Award a point to the given team and rotate serve. */
 	void AwardPoint(EVolleyballTeam ScoringTeam);

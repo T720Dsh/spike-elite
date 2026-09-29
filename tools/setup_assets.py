@@ -251,8 +251,8 @@ def main():
     #    (SEUiStyle::ChineseFont) because Python cannot write FCompositeFont's
     #    protected DefaultTypeface; we only need the UFontFace asset here.
     try:
-        import_task(r"C:\Windows\Fonts\msyh.ttc", "/Game/UI", "msyh_source")
-        log("imported Chinese font face msyh_source")
+        # UI uses Unreal's runtime composite font (including CJK fallback).
+        # Do not import proprietary fonts from a developer's Windows install.
     except Exception as e:
         warn("font face import failed: %r" % e)
 

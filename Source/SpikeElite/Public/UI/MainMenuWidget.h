@@ -16,6 +16,7 @@ class SPIKEELITE_API UMainMenuWidget : public UUserWidget
 
 public:
 	UMainMenuWidget(const FObjectInitializer& ObjectInitializer);
+	virtual TSharedRef<SWidget> RebuildWidget() override;
 	virtual void NativeConstruct() override;
 	virtual void NativeTick(const FGeometry& Geo, float DT) override;
 
@@ -32,6 +33,7 @@ protected:
 	UPROPERTY() TObjectPtr<UButton> BtnQuit;
 
 	float AnimTime = 0.0f;
+	void BuildWidgetTree();
 
 	UFUNCTION() void HandleStartClick() { OnStart.ExecuteIfBound(); }
 	UFUNCTION() void HandleSettingsClick() { OnSettings.ExecuteIfBound(); }
