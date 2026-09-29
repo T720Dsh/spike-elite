@@ -15,4 +15,4 @@ if not exist "%UE%" (
 )
 
 echo Starting SPIKE ELITE ...
-"%UE%" "%PROJ%" /Engine/Maps/Templates/OpenWorld -game -windowed -ResX=1600 -ResY=900
+"%UE%" "%PROJ%" -game -windowed -ResX=1600 -ResY=900

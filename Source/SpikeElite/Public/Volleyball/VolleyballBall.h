@@ -3,6 +3,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "SpikeEliteGameMode.h"
 #include "VolleyballBall.generated.h"
 
 class UStaticMeshComponent;
@@ -11,17 +12,12 @@ class UProjectileMovementComponent;
 /**
  * The volleyball.
  *
- * M0:
- *  - Static mesh sphere driven by ProjectileMovementComponent
- *  - Exposes a simple "Hit(Position, Direction, Power, Spin)" helper so
- *    pawns / AI can serve, set, spike.
+ * Single-authority motion: UProjectileMovementComponent drives translation,
+ * gravity and floor bounces. The static mesh does NOT simulate Chaos physics,
+ * so the two systems can never fight each other.
  *
- * M1 TODO:
- *  - Replace ProjectileMovement with a custom integrator that models:
- *      * Magnus lift from spin (floater vs top-spin serves)
- *      * Air drag (F = -c * v|v|)
- *      * Net-tap / cord interaction
- *      * Bounce restitution tuned to FIVB ball (0.75-0.8)
+ *  - FIVB ball circumference 65-67 cm -> diameter ~21 cm.
+ *  - LastHitTeam tracks the last team that touched the ball for IN/OUT calls.
  */
 UCLASS()
 class SPIKEELITE_API AVolleyballBall : public AActor
@@ -46,6 +42,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Volleyball|Ball")
 	void ResetBall(const FVector& Location);
 
+	/** Record which team last touched the ball (for in/out scoring). */
+	void SetLastHitTeam(EVolleyballTeam Team) { LastHitTeam = Team; }
+	EVolleyballTeam GetLastHitTeam() const { return LastHitTeam; }
+
 protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ball")
 	TObjectPtr<UStaticMeshComponent> Mesh;
@@ -53,11 +53,22 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ball")
 	TObjectPtr<UProjectileMovementComponent> Projectile;
 
-	/** Current spin state (rad/s). TODO: integrate into custom physics in M1. */
+	/** Current spin state (rad/s). Reserved for Magnus integration. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Ball|Physics")
 	float CurrentSpin = 0.0f;
 
-	/** Physics hit callback: detect floor bounces and notify the rules system. */
+	/** Last team that touched the ball; None before the serve. */
+	EVolleyballTeam LastHitTeam = EVolleyballTeam::None;
+
+	/** Physics hit callback: detect floor contacts and notify the rules system. */
 	UFUNCTION()
 	void OnBallHit(class UPrimitiveComponent* HitComp, AActor* OtherActor, class UPrimitiveComponent* OtherComp, FVector NormalImpulse, const FHitResult& Hit);
+
+	/**
+	 * ProjectileMovement bounce callback. Because the mesh is kinematic (no
+	 * Chaos simulation), the mesh's OnComponentHit is not reliably broadcast;
+	 * the projectile component owns collision, so landing is detected here.
+	 */
+	UFUNCTION()
+	void HandleProjectileBounce(const FHitResult& ImpactResult, const FVector& ImpactVelocity);
 };

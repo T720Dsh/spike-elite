@@ -54,6 +54,10 @@ void ASpikeEliteGameMode::StartMatch()
 	UWorld* World = GetWorld();
 	if (!World) return;
 
+	// Count leftovers BEFORE spawning so a failed cleanup (duplicate court/ball/
+	// bots from a previous match) is obvious in the log.
+	LogActorCounts(TEXT("BeforeStart"));
+
 	// Reset scores/state.
 	TeamAScore = TeamBScore = 0;
 	TeamASetsWon = TeamBSetsWon = 0;
@@ -63,6 +67,15 @@ void ASpikeEliteGameMode::StartMatch()
 	ServingTeam = EVolleyballTeam::TeamA;
 	TeamAPlayers.Reset();
 	TeamBPlayers.Reset();
+
+	// Reset rally timers / flags so a stale timer from a previous match cannot
+	// fire the moment the new match starts.
+	bInToss = false;
+	TossTimer = 0.0f;
+	InterRallyTimer = 0.0f;
+	AIHitCooldown = 0.0f;
+	NetTouchCooldown = 0.0f;
+	BallPrevX = 0.0f;
 
 	FActorSpawnParameters Params;
 	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
@@ -85,35 +98,38 @@ void ASpikeEliteGameMode::StartMatch()
 			TeamAPlayers[0] = HC;
 		}
 	}
-	for (int32 i = 1; i < 6; i++)
+	// Bots are spawned deferred so TeamSide/bIsBot/HomePosition are set BEFORE
+	// BeginPlay runs ApplyJerseyColor(); otherwise every bot would keep the
+	// default Team A jersey colour.
+	auto SpawnBot = [&](const FVector& Loc, const FRotator& Rot, int32 Side, const FVector& Home) -> ASpikeEliteCharacter*
 	{
-		ASpikeEliteCharacter* Bot = World->SpawnActor<ASpikeEliteCharacter>(
-			PosA[i] + FVector(0,0,100.0f), FRotator(0,-90,0), Params);
+		ASpikeEliteCharacter* Bot = World->SpawnActorDeferred<ASpikeEliteCharacter>(
+			ASpikeEliteCharacter::StaticClass(),
+			FTransform(Rot.Quaternion(), Loc, FVector(1.f)),
+			nullptr, nullptr,
+			ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
 		if (Bot)
 		{
-			Bot->bIsBot = true; Bot->TeamSide = 1; Bot->HomePosition = PosA[i];
-			TeamAPlayers[i] = Bot;
+			Bot->bIsBot = true;
+			Bot->TeamSide = Side;
+			Bot->HomePosition = Home;
+			UGameplayStatics::FinishSpawningActor(Bot, FTransform(Rot.Quaternion(), Loc, FVector(1.f)));
 		}
+		return Bot;
+	};
+
+	for (int32 i = 1; i < 6; i++)
+	{
+		TeamAPlayers[i] = SpawnBot(PosA[i] + FVector(0,0,100.0f), FRotator(0,-90,0), 1, PosA[i]);
 	}
 	for (int32 i = 0; i < 6; i++)
 	{
-		FVector BPos(-PosA[i].X, PosA[i].Y, 0.0f);
-		ASpikeEliteCharacter* Bot = World->SpawnActor<ASpikeEliteCharacter>(
-			BPos + FVector(0,0,100.0f), FRotator(0,90,0), Params);
-		if (Bot)
-		{
-			Bot->bIsBot = true; Bot->TeamSide = -1; Bot->HomePosition = BPos;
-			TeamBPlayers[i] = Bot;
-		}
+		const FVector BPos(-PosA[i].X, PosA[i].Y, 0.0f);
+		TeamBPlayers[i] = SpawnBot(BPos + FVector(0,0,100.0f), FRotator(0,90,0), -1, BPos);
 	}
 
-	// Stadium light.
-	ADirectionalLight* Sun = World->SpawnActor<ADirectionalLight>(Params);
-	if (Sun)
-	{
-		Sun->SetActorRotation(FRotator(-55.f,0.f,0.f));
-		Sun->GetComponent()->SetIntensity(4.5f);
-	}
+	// Indoor arena lighting is owned by the Court actor (and destroyed with it),
+	// so we never spawn or delete level lights here.
 
 	// Scoreboard.
 	if (APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0))
@@ -131,10 +147,26 @@ void ASpikeEliteGameMode::StartMatch()
 	InterRallyTimer = 1.0f;
 	bMatchActive = true;
 	UE_LOG(LogVolleyballRules, Log, TEXT("=== Match started ==="));
+	LogActorCounts(TEXT("StartMatch"));
+}
+
+void ASpikeEliteGameMode::LogActorCounts(const TCHAR* Tag) const
+{
+	auto Count = [this](UClass* Class) -> int32
+	{
+		TArray<AActor*> Actors;
+		UGameplayStatics::GetAllActorsOfClass(GetWorld(), Class, Actors);
+		return Actors.Num();
+	};
+	UE_LOG(LogVolleyballRules, Log,
+		TEXT("[%s] Court=%d Ball=%d Characters=%d"),
+		Tag, Count(AVolleyballCourt::StaticClass()), Count(AVolleyballBall::StaticClass()),
+		Count(ASpikeEliteCharacter::StaticClass()));
 }
 
 void ASpikeEliteGameMode::CleanupMatch()
 {
+	// Human player (roster slot 0 of Team A) is kept and parked; only bots die.
 	if (Court) { Court->Destroy(); Court = nullptr; }
 	if (Ball)  { Ball->Destroy(); Ball = nullptr; }
 	for (auto& P : TeamAPlayers) if (P && P->bIsBot) P->Destroy();
@@ -142,12 +174,26 @@ void ASpikeEliteGameMode::CleanupMatch()
 	TeamAPlayers.Reset();
 	TeamBPlayers.Reset();
 	if (Scoreboard) { Scoreboard->RemoveFromParent(); Scoreboard = nullptr; }
-	// Remove leftover lights.
-	TArray<AActor*> Lights;
-	UGameplayStatics::GetAllActorsOfClass(this, ADirectionalLight::StaticClass(), Lights);
-	for (AActor* L : Lights) L->Destroy();
+
+	// IMPORTANT: do NOT delete all DirectionalLights / SkyLights — that would
+	// remove lights owned by the loaded level. Match lighting lives on the Court
+	// and was destroyed above.
+
+	// Reset every piece of transient rally/match state.
+	bInToss = false;
+	TossTimer = 0.0f;
+	InterRallyTimer = 0.0f;
+	AIHitCooldown = 0.0f;
+	NetTouchCooldown = 0.0f;
+	BallPrevX = 0.0f;
 	bMatchActive = false;
 	MatchState = EMatchState::PreMatch;
+
+	// Clear any pending timers (serve toss / inter-rally) from this match.
+	GetWorldTimerManager().ClearAllTimersForObject(this);
+
+	UE_LOG(LogVolleyballRules, Log, TEXT("Match cleaned up; level lights untouched"));
+	LogActorCounts(TEXT("Cleanup"));
 }
 
 void ASpikeEliteGameMode::ReturnToMainMenu()
@@ -211,17 +257,36 @@ void ASpikeEliteGameMode::Tick(float DeltaSeconds)
 		}
 	}
 
-	// Net collision: only within the real net band (bottom 143cm to top 243cm) and width.
+	// ---- Single-authority net collision (the visual net has NO physics) ----
+	// Detect the ball crossing the net plane while inside the real band
+	// (bottom 143 to top 243) and within net width; deflect it back once with a
+	// cooldown so it cannot be struck every frame. Ball below 143 or outside the
+	// net width passes freely under/around the net.
+	if (NetTouchCooldown > 0.f) NetTouchCooldown -= DeltaSeconds;
 	if (MatchState == EMatchState::Playing && Ball && Court)
 	{
 		const FVector BL = Ball->GetActorLocation();
-		const float NetTop = Court->NetHeight;          // 243
-		const float NetBottom = NetTop - Court->NetBandHeight; // ~143
-		const float HalfNetW = Court->HalfCourtWidth + Court->NetOverhang;
-		if (FMath::Abs(BL.X) < 10.f && BL.Z < NetTop && BL.Z > NetBottom && FMath::Abs(BL.Y) < HalfNetW)
+		const FVector BV = Ball->GetVelocity();
+		const float NetTop = Court->NetHeight;                 // 243
+		const float NetBottom = NetTop - Court->NetBandHeight; // 143
+		const float HalfNetW = Court->HalfCourtWidth + Court->NetOverhang; // ~530
+
+		const bool bCrossedPlane = (BallPrevX * BL.X < 0.f) || FMath::Abs(BL.X) < 12.f;
+		const bool bInBand = (BL.Z < NetTop && BL.Z > NetBottom);
+		const bool bInWidth = FMath::Abs(BL.Y) < HalfNetW;
+		const bool bMovingAcross = FMath::Abs(BV.X) > 20.f;
+
+		if (bCrossedPlane && bInBand && bInWidth && bMovingAcross && NetTouchCooldown <= 0.f)
 		{
-			Ball->Strike(FVector(-Ball->GetVelocity().X, Ball->GetVelocity().Y*0.5f, 200.f).GetSafeNormal(), 400.f, 0.f);
+			// Rebound back toward the side it came from, damped, with a little rise.
+			const float ReboundSpeed = FMath::Clamp(BV.Size() * 0.55f, 260.f, 720.f);
+			FVector Rebound(-BV.X * 0.6f, BV.Y * 0.4f, FMath::Max(BV.Z * 0.3f, 0.f) + 170.f);
+			Ball->Strike(Rebound.GetSafeNormal(), ReboundSpeed, 0.f);
+			NetTouchCooldown = 0.45f;
+			// A net tap does NOT change the last touching team.
+			UE_LOG(LogVolleyballRules, Log, TEXT("Net touch at Z=%.0f -> rebound (last touch unchanged)"), BL.Z);
 		}
+		BallPrevX = BL.X;
 	}
 
 	if (Scoreboard)
@@ -255,7 +320,35 @@ void ASpikeEliteGameMode::Tick(float DeltaSeconds)
 void ASpikeEliteGameMode::OnBallLanded(const FVector& BallLocation)
 {
 	if (MatchState != EMatchState::Playing) return;
-	EVolleyballTeam ScoringTeam = (BallLocation.X >= 0.f) ? EVolleyballTeam::TeamB : EVolleyballTeam::TeamA;
+
+	// FIVB court: |X| <= 900 (end lines), |Y| <= 450 (side lines). Lines are in.
+	const bool bIn = FMath::Abs(BallLocation.X) <= 900.f
+	              && FMath::Abs(BallLocation.Y) <= 450.f;
+
+	const EVolleyballTeam Last = Ball ? Ball->GetLastHitTeam() : EVolleyballTeam::None;
+	EVolleyballTeam ScoringTeam;
+
+	if (bIn)
+	{
+		// Landed in a court: the side defending that half loses the rally.
+		// X > 0 is Team A's half, so Team B scores (and vice versa).
+		ScoringTeam = (BallLocation.X >= 0.f) ? EVolleyballTeam::TeamB : EVolleyballTeam::TeamA;
+	}
+	else
+	{
+		// Landed out: the opponent of the last touching team scores.
+		if (Last == EVolleyballTeam::TeamA)      ScoringTeam = EVolleyballTeam::TeamB;
+		else if (Last == EVolleyballTeam::TeamB) ScoringTeam = EVolleyballTeam::TeamA;
+		else                                     ScoringTeam = (BallLocation.X >= 0.f) ? EVolleyballTeam::TeamB : EVolleyballTeam::TeamA;
+	}
+
+	UE_LOG(LogVolleyballRules, Log,
+		TEXT("Ball landed %s at (%.0f, %.0f, %.0f) | LastTouch=%s | Scoring=%s"),
+		bIn ? TEXT("IN") : TEXT("OUT"),
+		BallLocation.X, BallLocation.Y, BallLocation.Z,
+		Last == EVolleyballTeam::TeamA ? TEXT("A") : Last == EVolleyballTeam::TeamB ? TEXT("B") : TEXT("None"),
+		ScoringTeam == EVolleyballTeam::TeamA ? TEXT("A") : TEXT("B"));
+
 	AwardPoint(ScoringTeam);
 }
 
@@ -302,8 +395,13 @@ void ASpikeEliteGameMode::ServeNextBall()
 	FVector ServerPos = (Roster.Num() > 0 && Roster[0]) ? Roster[0]->GetActorLocation()
 		: FVector(ServingTeam == EVolleyballTeam::TeamA ? 770.f : -770.f, 0.f, 0.f);
 	Ball->ResetBall(ServerPos + FVector(0,0,180.f));
+	Ball->SetLastHitTeam(ServingTeam);   // serve counts as the serving team's touch
 	TossDir = (ServingTeam == EVolleyballTeam::TeamA) ? FVector(-0.878f,0,0.479f) : FVector(0.878f,0,0.479f);
 	TossPower = 1300.f;
 	TossTimer = 0.6f;
 	bInToss = true;
+	// Leave BetweenRallies immediately: otherwise the Tick's BetweenRallies
+	// branch re-calls ServeNextBall every frame, resetting the toss timer so the
+	// ball is frozen at the serve spot and is never struck.
+	MatchState = EMatchState::Playing;
 }

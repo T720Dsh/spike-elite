@@ -39,6 +39,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Bot")
 	FVector HomePosition = FVector(500, 0, 0);
 
+	/** Per-bot cooldown between ball strikes so the rally can actually end. */
+	float BotHitTimer = 0.0f;
+
 protected:
 	virtual void BeginPlay() override;
 
@@ -51,11 +54,20 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera")
 	TObjectPtr<UCameraComponent> FirstPersonCamera;
 
+	// Hinge-style placeholder humanoid built from engine basic shapes:
+	// torso + head + two arms + two legs, tinted per team. Zero asset deps.
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Character")
-	TObjectPtr<UStaticMeshComponent> PlaceholderBody;
-
+	TObjectPtr<UStaticMeshComponent> Torso;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Character")
-	TObjectPtr<UStaticMeshComponent> PlaceholderHead;
+	TObjectPtr<UStaticMeshComponent> Head;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Character")
+	TObjectPtr<UStaticMeshComponent> ArmL;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Character")
+	TObjectPtr<UStaticMeshComponent> ArmR;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Character")
+	TObjectPtr<UStaticMeshComponent> LegL;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Character")
+	TObjectPtr<UStaticMeshComponent> LegR;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera")
 	bool bFirstPerson = false;

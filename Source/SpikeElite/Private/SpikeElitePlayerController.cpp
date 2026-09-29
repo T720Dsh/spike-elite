@@ -1,4 +1,4 @@
-﻿// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: MIT
 #include "SpikeElitePlayerController.h"
 #include "UI/MainMenuWidget.h"
 #include "UI/PauseMenuWidget.h"
@@ -6,93 +6,250 @@
 #include "UI/ScoreboardWidget.h"
 #include "SpikeEliteGameMode.h"
 #include "Blueprint/UserWidget.h"
+#include "Camera/CameraActor.h"
+#include "Camera/CameraComponent.h"
+#include "Containers/Ticker.h"
 #include "Kismet/GameplayStatics.h"
+#include "Kismet/KismetMathLibrary.h"
 #include "Kismet/KismetSystemLibrary.h"
-#include "GameFramework/GameUserSettings.h"
-#include "Engine/SkeletalMesh.h"
+#include "Engine/GameViewportClient.h"
+#include "Framework/Application/SlateApplication.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogSEMenu, Log, All);
 
 ASpikeElitePlayerController::ASpikeElitePlayerController()
 {
-	// Pure C++ widgets 鈥?no Blueprint assets needed.
+	// All menus are built in pure C++ UMG; no Blueprint assets are required.
 }
 
 void ASpikeElitePlayerController::BeginPlay()
 {
 	Super::BeginPlay();
+
 	// Load persisted sensitivity from GameUserSettings ini.
 	float Saved = 1.0f;
 	if (GConfig)
 	{
 		GConfig->GetFloat(TEXT("/Script/SpikeElite.SpikeEliteSettings"), TEXT("MouseSensitivity"), Saved, GGameUserSettingsIni);
 	}
-	MouseSensitivity = FMath::Clamp(Saved, 0.1f, 5.0f);
+	MouseSensitivity = FMath::Clamp(Saved, MinSensitivity(), MaxSensitivity());
 	UE_LOG(LogSEMenu, Log, TEXT("PC BeginPlay, sensitivity=%.2f, showing main menu"), MouseSensitivity);
 	ShowMainMenu();
 
-	// Headless verification hook: -devauto starts a match after 2s, screenshots at 8s, quits at 10s.
+#if !UE_BUILD_SHIPPING
+	// Headless verification hook: -devauto walks every menu and viewpoint,
+	// screenshots each, then quits. Timers are unpausable so the pause-menu
+	// shot and the final quit still fire while the world is paused.
 	if (FParse::Param(FCommandLine::Get(), TEXT("devauto")))
 	{
-		GetWorldTimerManager().SetTimer(ShotTimer, this, &ASpikeElitePlayerController::DevAutoStart, 2.0f, false);
+		GetWorldTimerManager().SetTimer(DevTimer, this, &ASpikeElitePlayerController::DevAutoStart, 1.2f, false);
+	}
+#endif
+}
+
+#if !UE_BUILD_SHIPPING
+void ASpikeElitePlayerController::DevShot(const FString& Name)
+{
+	// Plain Screenshot defaults to bShowUI=false (3D only). "SHOWUI" makes it
+	// composite Slate/UMG (menus) into the captured backbuffer.
+	ConsoleCommand(FString::Printf(TEXT("Screenshot SHOWUI filename=%s"), *Name), true);
+	UE_LOG(LogSEMenu, Log, TEXT("DEV AUTO: shot requested: %s"), *Name);
+}
+
+void ASpikeElitePlayerController::DevView(const FVector& Loc, const FRotator& Rot)
+{
+	if (!DevCam)
+	{
+		DevCam = GetWorld()->SpawnActor<ACameraActor>(ACameraActor::StaticClass(), FTransform());
+		if (ACameraActor* Cam = Cast<ACameraActor>(DevCam))
+		{
+			Cam->GetCameraComponent()->SetFieldOfView(78.f);
+		}
+	}
+	if (DevCam)
+	{
+		DevCam->SetActorLocationAndRotation(Loc, Rot);
+		SetViewTarget(DevCam);
+	}
+}
+
+void ASpikeElitePlayerController::DevViewPlayer()
+{
+	if (APawn* P = GetPawn())
+	{
+		// Returning from a dev camera can leave the view pitched straight down;
+		// restore a natural slightly-elevated third-person aim.
+		SetControlRotation(FRotator(-12.f, GetControlRotation().Yaw, 0.f));
+		SetViewTarget(P);
 	}
 }
 
 void ASpikeElitePlayerController::DevAutoStart()
 {
-	UE_LOG(LogSEMenu, Log, TEXT("DEV AUTO: starting match"));
-	StartMatch();
-	// Screenshot the arena after it has spawned.
-	FTimerHandle ShotH, QuitH;
-	GetWorldTimerManager().SetTimer(ShotH, [this]()
+	// UE 5.8 removed per-timer bPauseable, and a paused game world no longer
+	// ticks its timer manager. Drive the whole sequence from the core ticker,
+	// which keeps running while the game is paused, so the pause-menu shot and
+	// the final quit still fire.
+	struct FDevEvent { float Delay; TFunction<void()> Fn; };
+	TArray<FDevEvent> Events;
+	auto At = [&Events](float Delay, TFunction<void()> Fn) { Events.Add(FDevEvent{ Delay, MoveTemp(Fn) }); };
+
+	// --- Front end (world is on the main menu) ---
+	At(1.5f,  [this]() { DevShot(TEXT("shot_01_menu")); });
+	At(2.4f,  [this]() { OpenSettingsFromMenu(); });
+	At(3.4f,  [this]() { DevShot(TEXT("shot_02_settings")); });
+	At(4.2f,  [this]() { CloseSettings(); });
+	At(4.8f,  [this]() { UE_LOG(LogSEMenu, Log, TEXT("DEV AUTO: starting match")); StartMatch(); });
+
+	// --- Third-person style broadcast view of the full court ---
+	At(9.6f,  [this]()
 	{
-		ConsoleCommand(TEXT("shot"), true);
-		UE_LOG(LogSEMenu, Log, TEXT("DEV AUTO: arena shot requested"));
-	}, 6.0f, false);
-	GetWorldTimerManager().SetTimer(QuitH, [this]()
+		const FVector Loc(1250.f, 0.f, 430.f);
+		const FRotator Rot = UKismetMathLibrary::FindLookAtRotation(Loc, FVector(-120.f, 0.f, 170.f));
+		DevView(Loc, Rot);
+	});
+	At(10.5f, [this]() { DevShot(TEXT("shot_03_court")); });
+
+	// --- Side/oblique close-up of the net (shows top/bottom tapes & gap) ---
+	At(11.4f, [this]()
+	{
+		const FVector Loc(360.f, -470.f, 200.f);
+		const FRotator Rot = UKismetMathLibrary::FindLookAtRotation(Loc, FVector(0.f, 0.f, 195.f));
+		DevView(Loc, Rot);
+	});
+	At(12.3f, [this]() { DevShot(TEXT("shot_04_net")); });
+
+	// --- High corner: stands, seating aisles and the roof ---
+	At(13.2f, [this]()
+	{
+		const FVector Loc(1650.f, 1150.f, 880.f);
+		const FRotator Rot = UKismetMathLibrary::FindLookAtRotation(Loc, FVector(0.f, 0.f, 220.f));
+		DevView(Loc, Rot);
+	});
+	At(14.1f, [this]() { DevShot(TEXT("shot_05_stands_roof")); });
+
+	// --- Back to player, open the pause menu and shoot it ---
+	At(15.0f, [this]() { DevViewPlayer(); });
+	At(15.4f, [this]() { PauseGame(); });
+	At(16.3f, [this]() { DevShot(TEXT("shot_06_pause")); });
+	At(17.6f, [this]() { ResumeGame(); });
+
+	// --- Lifecycle cycle test: menu -> match -> menu -> match (twice) to prove
+	// cleanup leaves no duplicate court/ball/players and level lights survive.
+	At(20.5f, [this]() { UE_LOG(LogSEMenu, Log, TEXT("DEV AUTO: return to menu #1")); ReturnToMainMenu(); });
+	At(22.5f, [this]() { UE_LOG(LogSEMenu, Log, TEXT("DEV AUTO: start match #2")); StartMatch(); });
+	At(26.5f, [this]() { UE_LOG(LogSEMenu, Log, TEXT("DEV AUTO: return to menu #2")); ReturnToMainMenu(); });
+	At(28.5f, [this]() { UE_LOG(LogSEMenu, Log, TEXT("DEV AUTO: start match #3")); StartMatch(); });
+
+	At(32.0f, [this]()
 	{
 		UE_LOG(LogSEMenu, Log, TEXT("DEV AUTO: quitting"));
 		UKismetSystemLibrary::QuitGame(this, this, EQuitPreference::Quit, false);
-	}, 9.0f, false);
+	});
+
+	TWeakObjectPtr<ASpikeElitePlayerController> Weak(this);
+	const double StartSeconds = FPlatformTime::Seconds();
+	int32 Index = 0;
+	FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda(
+		[Weak, StartSeconds, Index, Events = MoveTemp(Events)](float) mutable -> bool
+	{
+		ASpikeElitePlayerController* PC = Weak.Get();
+		if (!PC) { return false; }
+		const double Elapsed = FPlatformTime::Seconds() - StartSeconds;
+		while (Index < Events.Num() && Elapsed >= static_cast<double>(Events[Index].Delay))
+		{
+			if (Events[Index].Fn) { Events[Index].Fn(); }
+			++Index;
+		}
+		return Index < Events.Num();
+	}));
 }
+#endif
 
 void ASpikeElitePlayerController::SetupInputComponent()
 {
 	Super::SetupInputComponent();
-	InputComponent->BindAction(TEXT("Pause"), IE_Pressed, this, &ASpikeElitePlayerController::OnPausePressed);
+
+	// Esc must keep working while the game is paused, so enable it there too.
+	FInputActionBinding& PauseBind =
+		InputComponent->BindAction(TEXT("Pause"), IE_Pressed, this, &ASpikeElitePlayerController::OnPausePressed);
+	PauseBind.bExecuteWhenPaused = true;
 }
 
 void ASpikeElitePlayerController::OnPausePressed()
 {
-	if (MenuState == EMenuState::Playing) PauseGame();
-	else if (MenuState == EMenuState::Paused) ResumeGame();
+	switch (MenuState)
+	{
+	case EMenuState::Playing:
+		PauseGame();
+		break;
+	case EMenuState::Paused:
+		ResumeGame();
+		break;
+	case EMenuState::SettingsFromPause:
+		CloseSettings();   // returns to the pause menu
+		break;
+	case EMenuState::SettingsFromMenu:
+		CloseSettings();   // returns to the main menu
+		break;
+	case EMenuState::MainMenu:
+	default:
+		break;
+	}
 }
 
 void ASpikeElitePlayerController::SetGameInputMode()
 {
+	// GameOnly defaults to capturing the mouse permanently for look control.
 	FInputModeGameOnly Mode;
 	SetInputMode(Mode);
+
 	bShowMouseCursor = false;
 	bEnableMouseOverEvents = false;
 	bEnableClickEvents = false;
+
+	if (UGameViewportClient* VC = GetWorld() ? GetWorld()->GetGameViewport() : nullptr)
+	{
+		VC->SetMouseLockMode(EMouseLockMode::LockOnCapture);
+	}
 	SetPause(false);
 }
 
-void ASpikeElitePlayerController::SetUIInputMode()
+void ASpikeElitePlayerController::SetUIInputMode(UUserWidget* FocusWidget)
 {
-	FInputModeUIOnly Mode;
-	Mode.SetWidgetToFocus(nullptr);
+	// GameAndUI keeps the Esc action routed to this controller (UIOnly does not
+	// reliably deliver keyboard input) while the game world is paused so that
+	// movement / hit actions cannot leak through.
+	FInputModeGameAndUI Mode;
 	Mode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+	Mode.SetHideCursorDuringCapture(false);
+	if (FocusWidget)
+	{
+		Mode.SetWidgetToFocus(FocusWidget->TakeWidget());
+	}
 	SetInputMode(Mode);
+
 	bShowMouseCursor = true;
 	bEnableMouseOverEvents = true;
 	bEnableClickEvents = true;
+
+	if (UGameViewportClient* VC = GetWorld() ? GetWorld()->GetGameViewport() : nullptr)
+	{
+		VC->SetMouseLockMode(EMouseLockMode::DoNotLock);
+	}
+
+	// Release any held capture so the cursor can leave the window immediately.
+	if (FSlateApplication::IsInitialized())
+	{
+		FSlateApplication& Slate = FSlateApplication::Get();
+		Slate.ReleaseAllPointerCapture();
+	}
 }
 
 void ASpikeElitePlayerController::HideAllMenus()
 {
-	if (MainMenu) { MainMenu->RemoveFromParent(); MainMenu = nullptr; }
-	if (PauseMenu) { PauseMenu->RemoveFromParent(); PauseMenu = nullptr; }
+	if (MainMenu)     { MainMenu->RemoveFromParent();     MainMenu = nullptr; }
+	if (PauseMenu)    { PauseMenu->RemoveFromParent();    PauseMenu = nullptr; }
 	if (SettingsMenu) { SettingsMenu->RemoveFromParent(); SettingsMenu = nullptr; }
 }
 
@@ -101,8 +258,8 @@ void ASpikeElitePlayerController::ShowMainMenu()
 	UE_LOG(LogSEMenu, Log, TEXT("ShowMainMenu"));
 	HideAllMenus();
 	MenuState = EMenuState::MainMenu;
-	SetUIInputMode();
 	SetPause(false);
+
 	MainMenu = CreateWidget<UMainMenuWidget>(this);
 	if (MainMenu)
 	{
@@ -110,10 +267,9 @@ void ASpikeElitePlayerController::ShowMainMenu()
 		MainMenu->OnSettings.BindUObject(this, &ASpikeElitePlayerController::OpenSettingsFromMenu);
 		MainMenu->OnQuit.BindUObject(this, &ASpikeElitePlayerController::QuitToDesktop);
 		MainMenu->AddToViewport(10);
-		UE_LOG(LogSEMenu, Log, TEXT("MainMenu added. InViewport=%s CachedWidget=%s Vis=%d"),
-			MainMenu->IsInViewport() ? TEXT("yes") : TEXT("no"),
-			MainMenu->GetCachedWidget().IsValid() ? TEXT("yes") : TEXT("no"),
-			(int32)MainMenu->GetVisibility());
+		SetUIInputMode(MainMenu);
+		UE_LOG(LogSEMenu, Log, TEXT("MainMenu added. InViewport=%s"),
+			MainMenu->IsInViewport() ? TEXT("yes") : TEXT("no"));
 	}
 	else
 	{
@@ -137,12 +293,9 @@ void ASpikeElitePlayerController::OnMatchStarted(UScoreboardWidget* InScoreboard
 	Scoreboard = InScoreboard;
 }
 
-void ASpikeElitePlayerController::PauseGame()
+void ASpikeElitePlayerController::BuildPauseMenu()
 {
-	if (MenuState != EMenuState::Playing) return;
-	MenuState = EMenuState::Paused;
-	SetPause(true);
-	SetUIInputMode();	PauseMenu = CreateWidget<UPauseMenuWidget>(this);
+	PauseMenu = CreateWidget<UPauseMenuWidget>(this);
 	if (PauseMenu)
 	{
 		PauseMenu->OnResume.BindUObject(this, &ASpikeElitePlayerController::ResumeGame);
@@ -151,6 +304,15 @@ void ASpikeElitePlayerController::PauseGame()
 		PauseMenu->OnQuit.BindUObject(this, &ASpikeElitePlayerController::QuitToDesktop);
 		PauseMenu->AddToViewport(20);
 	}
+}
+
+void ASpikeElitePlayerController::PauseGame()
+{
+	if (MenuState != EMenuState::Playing) return;
+	MenuState = EMenuState::Paused;
+	SetPause(true);
+	BuildPauseMenu();
+	SetUIInputMode(PauseMenu);
 }
 
 void ASpikeElitePlayerController::ResumeGame()
@@ -164,34 +326,45 @@ void ASpikeElitePlayerController::ResumeGame()
 void ASpikeElitePlayerController::OpenSettingsFromMenu()
 {
 	if (MainMenu) MainMenu->RemoveFromParent();
+	MainMenu = nullptr;
 	MenuState = EMenuState::SettingsFromMenu;
-	SetUIInputMode();	SettingsMenu = CreateWidget<USettingsWidget>(this);
+
+	SettingsMenu = CreateWidget<USettingsWidget>(this);
 	if (SettingsMenu)
 	{
+		SettingsMenu->InitFromCurrentSettings();
 		SettingsMenu->SetCurrentSensitivity(MouseSensitivity);
 		SettingsMenu->OnBack.BindUObject(this, &ASpikeElitePlayerController::CloseSettings);
+		SettingsMenu->OnApply.BindUObject(this, &ASpikeElitePlayerController::SaveSettings);
 		SettingsMenu->OnSensitivityChanged.BindUObject(this, &ASpikeElitePlayerController::SetMouseSensitivity);
 		SettingsMenu->AddToViewport(30);
+		SetUIInputMode(SettingsMenu);
 	}
 }
 
 void ASpikeElitePlayerController::OpenSettingsFromPause()
 {
 	if (PauseMenu) PauseMenu->RemoveFromParent();
+	PauseMenu = nullptr;
 	MenuState = EMenuState::SettingsFromPause;
-	SetUIInputMode();	SettingsMenu = CreateWidget<USettingsWidget>(this);
+
+	SettingsMenu = CreateWidget<USettingsWidget>(this);
 	if (SettingsMenu)
 	{
+		SettingsMenu->InitFromCurrentSettings();
 		SettingsMenu->SetCurrentSensitivity(MouseSensitivity);
 		SettingsMenu->OnBack.BindUObject(this, &ASpikeElitePlayerController::CloseSettings);
+		SettingsMenu->OnApply.BindUObject(this, &ASpikeElitePlayerController::SaveSettings);
 		SettingsMenu->OnSensitivityChanged.BindUObject(this, &ASpikeElitePlayerController::SetMouseSensitivity);
 		SettingsMenu->AddToViewport(30);
+		SetUIInputMode(SettingsMenu);
 	}
 }
 
 void ASpikeElitePlayerController::CloseSettings()
 {
 	if (SettingsMenu) { SettingsMenu->RemoveFromParent(); SettingsMenu = nullptr; }
+
 	if (MenuState == EMenuState::SettingsFromMenu)
 	{
 		ShowMainMenu();
@@ -199,15 +372,9 @@ void ASpikeElitePlayerController::CloseSettings()
 	else if (MenuState == EMenuState::SettingsFromPause)
 	{
 		MenuState = EMenuState::Paused;
-		PauseMenu = CreateWidget<UPauseMenuWidget>(this);
-		if (PauseMenu)
-		{
-			PauseMenu->OnResume.BindUObject(this, &ASpikeElitePlayerController::ResumeGame);
-			PauseMenu->OnSettings.BindUObject(this, &ASpikeElitePlayerController::OpenSettingsFromPause);
-			PauseMenu->OnMainMenu.BindUObject(this, &ASpikeElitePlayerController::ReturnToMainMenu);
-			PauseMenu->OnQuit.BindUObject(this, &ASpikeElitePlayerController::QuitToDesktop);
-			PauseMenu->AddToViewport(20);
-		}
+		SetPause(true);
+		BuildPauseMenu();
+		SetUIInputMode(PauseMenu);
 	}
 }
 
@@ -218,11 +385,13 @@ void ASpikeElitePlayerController::ReturnToMainMenu()
 	{
 		GM->ReturnToMainMenu();
 	}
+	Scoreboard = nullptr;   // GameMode destroyed its scoreboard widget.
 	ShowMainMenu();
 }
 
 void ASpikeElitePlayerController::QuitToDesktop()
 {
+	UE_LOG(LogSEMenu, Log, TEXT("Quit to desktop requested"));
 	UKismetSystemLibrary::QuitGame(this, this, EQuitPreference::Quit, false);
 }
 
@@ -234,11 +403,3 @@ void ASpikeElitePlayerController::SaveSettings()
 		GConfig->Flush(false, GGameUserSettingsIni);
 	}
 }
-
-void ASpikeElitePlayerController::TakeDevShot()
-{
-	ConsoleCommand(TEXT("shot D:/projects/spike-elite/Saved/dev_menu.png"), true);
-	UE_LOG(LogSEMenu, Log, TEXT("Dev screenshot requested"));
-}
-
-

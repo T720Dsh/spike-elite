@@ -9,7 +9,6 @@ class UButton;
 class UComboBoxString;
 class USlider;
 class UTextBlock;
-class UCheckBox;
 
 UCLASS()
 class SPIKEELITE_API USettingsWidget : public UUserWidget
@@ -23,11 +22,18 @@ public:
 	DECLARE_DELEGATE(FOnMenuAction);
 	FOnMenuAction OnBack;
 
-	/** Called after Apply so the owner can persist values. */
+	/** Fired after the user clicks Apply (owner persists sensitivity etc.). */
+	FOnMenuAction OnApply;
+
+	/** Fired on Apply with the chosen sensitivity. */
 	DECLARE_DELEGATE_OneParam(FOnSensitivityChanged, float);
 	FOnSensitivityChanged OnSensitivityChanged;
 
+	/** Set the pending sensitivity from the owner's persisted value. */
 	void SetCurrentSensitivity(float V);
+
+	/** Populate window mode / resolution / quality from the live user settings. */
+	void InitFromCurrentSettings();
 
 protected:
 	UPROPERTY() TObjectPtr<UComboBoxString> WindowMode;
@@ -35,10 +41,12 @@ protected:
 	UPROPERTY() TObjectPtr<UComboBoxString> Quality;
 	UPROPERTY() TObjectPtr<USlider> SensSlider;
 	UPROPERTY() TObjectPtr<UTextBlock> SensValue;
+	UPROPERTY() TObjectPtr<UTextBlock> ApplyStatus;
 	UPROPERTY() TObjectPtr<UButton> BtnApply;
 	UPROPERTY() TObjectPtr<UButton> BtnBack;
 
 	float PendingSensitivity = 1.0f;
+	FTimerHandle StatusTimer;
 
 	UFUNCTION() void OnSensChanged(float V);
 	UFUNCTION() void ApplySettings();

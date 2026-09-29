@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "UI/ScoreboardWidget.h"
+#include "UI/SEUiStyle.h"
 #include "Components/VerticalBox.h"
 #include "Components/TextBlock.h"
 #include "Components/CanvasPanel.h"
@@ -30,9 +31,7 @@ void UScoreboardWidget::NativeConstruct()
 	auto MakeRow = [&](FLinearColor Color, int32 FontSize) -> UTextBlock*
 	{
 		UTextBlock* T = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
-		FSlateFontInfo Font = T->Font;
-		Font.Size = FontSize;
-		T->SetFont(Font);
+		T->SetFont(SEUiStyle::Font(FontSize));
 		T->SetColorAndOpacity(FSlateColor(Color));
 		Box->AddChildToVerticalBox(T);
 		return T;

@@ -1,28 +1,14 @@
 // SPDX-License-Identifier: MIT
 #include "UI/PauseMenuWidget.h"
+#include "UI/SEUiStyle.h"
 #include "Components/TextBlock.h"
 #include "Components/Button.h"
 #include "Components/VerticalBox.h"
+#include "Components/VerticalBoxSlot.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
 #include "Components/Image.h"
 #include "Blueprint/WidgetTree.h"
-#include "Styling/SlateBrush.h"
-#include "Engine/Texture2D.h"
-
-static UImage* MakeDimImage(UWidgetTree* Tree, const FLinearColor& Color)
-{
-	UImage* Img = Tree->ConstructWidget<UImage>(UImage::StaticClass());
-	if (UTexture2D* White = LoadObject<UTexture2D>(nullptr, TEXT("/Engine/EngineResources/WhiteSquareTexture.WhiteSquareTexture")))
-	{
-		FSlateBrush Brush;
-		Brush.SetResourceObject(White);
-		Brush.TintColor = FSlateColor(Color);
-		Img->SetBrush(Brush);
-	}
-	else Img->SetColorAndOpacity(Color);
-	return Img;
-}
 
 UPauseMenuWidget::UPauseMenuWidget(const FObjectInitializer& OI) : Super(OI) {}
 
@@ -33,7 +19,8 @@ void UPauseMenuWidget::NativeConstruct()
 	UCanvasPanel* Root = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass());
 	WidgetTree->RootWidget = Root;
 
-	UImage* Dim = MakeDimImage(WidgetTree, FLinearColor(0,0,0,0.7f));
+	UImage* Dim = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass());
+	Dim->SetBrush(SEUiStyle::SolidBrush(FLinearColor(0.02f,0.02f,0.03f,0.72f)));
 	if (auto* S = Root->AddChildToCanvas(Dim)) { S->SetAnchors(FAnchors(0,0,1,1)); S->SetOffsets(FMargin(0)); }
 
 	UVerticalBox* Col = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass());
@@ -43,34 +30,41 @@ void UPauseMenuWidget::NativeConstruct()
 		S->SetAlignment(FVector2D(0.5f,0.5f));
 	}
 
-	auto AddTitle = [&](const FString& T, int32 Sz, FLinearColor C)
-	{
-		UTextBlock* TB = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
-		TB->SetText(FText::FromString(T));
-		FSlateFontInfo F = TB->Font; F.Size = Sz; TB->SetFont(F);
-		TB->SetColorAndOpacity(FSlateColor(C));
-		Col->AddChildToVerticalBox(TB);
-	};
-	AddTitle(TEXT("已暂停"), 48, FLinearColor(0.95f,0.95f,0.1f));
+	UTextBlock* Title = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
+	Title->SetText(FText::FromString(TEXT("已暂停")));
+	Title->SetFont(SEUiStyle::Font(48));
+	Title->SetColorAndOpacity(FSlateColor(FLinearColor(0.95f,0.95f,0.1f)));
+	Title->SetJustification(ETextJustify::Center);
+	Col->AddChildToVerticalBox(Title);
 
-	auto AddBtn = [&](const FString& Label) -> UButton*
+	auto AddBtn = [&](const FString& Label, const FLinearColor& Base, const FLinearColor& Hover) -> UButton*
 	{
 		UButton* B = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass());
+		B->SetStyle(SEUiStyle::ButtonStyle(Base, Hover,
+			FLinearColor(Base.R*0.6f, Base.G*0.6f, Base.B*0.6f, 1.f)));
 		UTextBlock* T = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
 		T->SetText(FText::FromString(Label));
-		FSlateFontInfo F = T->Font; F.Size = 22; T->SetFont(F);
+		T->SetFont(SEUiStyle::Font(22));
 		T->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+		T->SetJustification(ETextJustify::Center);
 		B->AddChild(T);
-		Col->AddChildToVerticalBox(B);
+		if (UVerticalBoxSlot* V = Col->AddChildToVerticalBox(B))
+		{
+			V->SetPadding(FMargin(0.f, 7.f));
+			V->SetHorizontalAlignment(HAlign_Center);
+		}
 		return B;
 	};
-	BtnResume   = AddBtn(TEXT("继续游戏"));
-	BtnSettings = AddBtn(TEXT("设置"));
-	BtnMainMenu = AddBtn(TEXT("返回主菜单"));
-	BtnQuit     = AddBtn(TEXT("退出到桌面"));
+
+	BtnResume   = AddBtn(TEXT("继续游戏"),   FLinearColor(0.10f,0.50f,0.95f,1), FLinearColor(0.30f,0.68f,1.0f,1));
+	BtnSettings = AddBtn(TEXT("设置"),       FLinearColor(0.16f,0.18f,0.24f,1), FLinearColor(0.28f,0.34f,0.46f,1));
+	BtnMainMenu = AddBtn(TEXT("返回主菜单"), FLinearColor(0.22f,0.20f,0.12f,1), FLinearColor(0.40f,0.36f,0.20f,1));
+	BtnQuit     = AddBtn(TEXT("退出到桌面"), FLinearColor(0.30f,0.10f,0.10f,1), FLinearColor(0.55f,0.20f,0.20f,1));
 
 	BtnResume->OnClicked.AddDynamic(this, &UPauseMenuWidget::HResume);
 	BtnSettings->OnClicked.AddDynamic(this, &UPauseMenuWidget::HSettings);
 	BtnMainMenu->OnClicked.AddDynamic(this, &UPauseMenuWidget::HMainMenu);
 	BtnQuit->OnClicked.AddDynamic(this, &UPauseMenuWidget::HQuit);
+
+	if (BtnResume) BtnResume->SetKeyboardFocus();
 }

@@ -20,7 +20,9 @@ public class SpikeElite : ModuleRules
 		PrivateDependencyModuleNames.AddRange(new string[]
 		{
 			"Slate",
-			"SlateCore"
+			"SlateCore",
+			"ApplicationCore",
+			"RHI"
 		});
 	}
 }

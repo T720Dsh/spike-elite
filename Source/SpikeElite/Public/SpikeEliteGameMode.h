@@ -103,6 +103,9 @@ public:
 protected:
 	/** Tear down court/ball/players/scoreboard. */
 	void CleanupMatch();
+
+	/** Log runtime actor counts (used to verify no duplicates across match cycles). */
+	void LogActorCounts(const TCHAR* Tag) const;
 	UPROPERTY()
 	TObjectPtr<AVolleyballCourt> Court;
 
@@ -124,6 +127,12 @@ protected:
 
 	/** Cooldown so AI doesn't re-hit the same ball every frame. */
 	float AIHitCooldown = 0.0f;
+
+	/** Cooldown after a manual net tap so the ball isn't deflected every frame. */
+	float NetTouchCooldown = 0.0f;
+
+	/** Previous-frame ball X, used to detect crossing the net plane. */
+	float BallPrevX = 0.0f;
 
 	/** Award a point to the given team and rotate serve. */
 	void AwardPoint(EVolleyballTeam ScoringTeam);
