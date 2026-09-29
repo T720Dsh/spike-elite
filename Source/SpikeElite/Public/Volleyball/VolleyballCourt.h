@@ -7,23 +7,16 @@
 
 class UStaticMeshComponent;
 class UBoxComponent;
-class UMaterialInterface;
-class UTexture2D;
+class UInstancedStaticMeshComponent;
+class USceneComponent;
 
 /**
- * Procedurally-built FIVB indoor volleyball court.
+ * Procedural FIVB indoor volleyball arena.
  *
- * Dimensions (UE units = cm):
- *  - Playing court: 18 m x 9 m  (1800 x 900)
- *  - Free zone:     3 m on every side (visual only)
- *  - Net height:    2.43 m men's / 2.24 m women's (default 2.43)
- *  - Attack line:   3 m from center line on each side
- *
- * M1 upgrade:
- *  - Wood-tinted floor material (real Poly Haven wood_floor jpg dropped in
- *    Content/Textures/ — auto-imports on next editor open)
- *  - White boundary / center / attack lines as thin box strips
- *  - Net is a thin semi-transparent cloth plane (not a solid box)
+ * Playing court: 18m x 9m.
+ * Free zone: 3m around.
+ * Net: top 243cm, band 100cm (bottom 143cm).
+ * Stepped stands + instanced crowd beyond the free zone.
  */
 UCLASS()
 class SPIKEELITE_API AVolleyballCourt : public AActor
@@ -32,49 +25,63 @@ class SPIKEELITE_API AVolleyballCourt : public AActor
 
 public:
 	AVolleyballCourt();
-
 	virtual void BeginPlay() override;
 
-	/** Net height in cm (men's 243, women's 224). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Court|Dimensions")
 	float NetHeight = 243.0f;
 
-	/** Half of the 9m court width. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Court|Dimensions")
+	float NetBandHeight = 100.0f;       // net cloth height
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Court|Dimensions")
+	float NetOverhang = 80.0f;          // net extends past each sideline
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Court|Dimensions")
 	float HalfCourtWidth = 450.0f;
 
-	/** Half of the 18m court length. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Court|Dimensions")
 	float HalfCourtLength = 900.0f;
 
-	/** FIVB attack line is 3m from the net on each side. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Court|Dimensions")
 	float AttackLineOffset = 300.0f;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Court|Dimensions")
+	float FreeZone = 300.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Court|Stands")
+	int32 StandRows = 6;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Court|Stands")
+	float StandStepHeight = 45.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Court|Stands")
+	float StandStepDepth = 90.0f;
+
 protected:
-	UPROPERTY(VisibleAnywhere)
-	TObjectPtr<UBoxComponent> Root;
+	UPROPERTY(VisibleAnywhere) TObjectPtr<UBoxComponent> Root;
 
-	UPROPERTY(VisibleAnywhere)
-	TObjectPtr<UStaticMeshComponent> FloorMesh;
+	// Floor layers
+	UPROPERTY(VisibleAnywhere) TObjectPtr<UStaticMeshComponent> CourtFloor;   // wood play area
+	UPROPERTY(VisibleAnywhere) TObjectPtr<UStaticMeshComponent> FreeZoneFloor; // darker surround
+	UPROPERTY(VisibleAnywhere) TObjectPtr<UStaticMeshComponent> ArenaFloor;    // outer concrete
 
-	/** Semi-transparent cloth net (a plane, not a solid box). */
-	UPROPERTY(VisibleAnywhere)
-	TObjectPtr<UStaticMeshComponent> NetMesh;
+	// Net
+	UPROPERTY(VisibleAnywhere) TObjectPtr<UStaticMeshComponent> NetMesh;
+	UPROPERTY(VisibleAnywhere) TObjectPtr<UStaticMeshComponent> NetTopBand;
+	UPROPERTY(VisibleAnywhere) TObjectPtr<UStaticMeshComponent> NetBottomBand;
+	UPROPERTY(VisibleAnywhere) TObjectPtr<UStaticMeshComponent> PostLeft;
+	UPROPERTY(VisibleAnywhere) TObjectPtr<UStaticMeshComponent> PostRight;
 
-	UPROPERTY(VisibleAnywhere)
-	TObjectPtr<UStaticMeshComponent> PostLeft;
+	// Lines
+	UPROPERTY(VisibleAnywhere) TObjectPtr<USceneComponent> LinesRoot;
 
-	UPROPERTY(VisibleAnywhere)
-	TObjectPtr<UStaticMeshComponent> PostRight;
+	// Stands & crowd (instanced)
+	UPROPERTY(VisibleAnywhere) TObjectPtr<UInstancedStaticMeshComponent> StandSteps;
+	UPROPERTY(VisibleAnywhere) TObjectPtr<UInstancedStaticMeshComponent> Crowd;
 
-	/** All white court line strips. */
-	UPROPERTY(VisibleAnywhere)
-	TObjectPtr<USceneComponent> LinesRoot;
-
-	/** Build all geometry. Called in constructor / BeginPlay. */
-	void BuildCourt();
-
-	/** Helper: spawn a thin white box line strip. */
-	class UStaticMeshComponent* MakeLine(const TCHAR* Name, float X, float Y, float ScaleX, float ScaleY);
+	UStaticMeshComponent* MakeLine(const TCHAR* Name, float X, float Y, float LenX, float LenY);
+	void BuildFloor(UStaticMesh* Cube);
+	void BuildNet(UStaticMesh* Cube, UStaticMesh* Plane, UStaticMesh* Cyl);
+	void BuildStands(UStaticMesh* Cube);
+	void PopulateStands();
 };

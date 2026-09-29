@@ -51,6 +51,14 @@ public:
 	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaSeconds) override;
 
+	/** Spawn court/ball/players and start the first rally. Called from the main menu. */
+	UFUNCTION(BlueprintCallable, Category = "Volleyball|Flow")
+	void StartMatch();
+
+	/** Destroy all match actors and return to the main menu. */
+	UFUNCTION(BlueprintCallable, Category = "Volleyball|Flow")
+	void ReturnToMainMenu();
+
 	/** Call when the ball hits the floor. Location.X decides which side's court. */
 	UFUNCTION(BlueprintCallable, Category = "Volleyball|Rules")
 	void OnBallLanded(const FVector& BallLocation);
@@ -89,7 +97,12 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Volleyball|Score")
 	EMatchState MatchState = EMatchState::PreMatch;
 
+	/** True after StartMatch spawns the world; gates Tick logic. */
+	bool bMatchActive = false;
+
 protected:
+	/** Tear down court/ball/players/scoreboard. */
+	void CleanupMatch();
 	UPROPERTY()
 	TObjectPtr<AVolleyballCourt> Court;
 

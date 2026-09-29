@@ -8,6 +8,75 @@ for milestone tags once a first playable is tagged.
 
 ## [Unreleased]
 
+### Milestone M7 — Front-end flow, FIVB court/arena, real net, game settings
+
+#### Added — main menu / pause / settings front-end
+- **Custom `ASpikeElitePlayerController`** owns a `EMenuState` state machine
+  (MainMenu / Playing / Paused / SettingsFromMenu / SettingsFromPause) and all
+  input-mode + mouse-capture transitions.
+- **Main menu (`UMainMenuWidget`)**: title `SPIKE ELITE`, neon-yellow bold heading,
+  electric-blue accent stripe, dark charcoal background, buttons 开始比赛 / 设置 /
+  退出游戏, plus a looping animated volleyball icon (bounce + scale) and a pulsing
+  title. Built entirely in C++ UMG (engine white-square brush, no Blueprint assets).
+- **Pause menu (`UPauseMenuWidget`)**: 继续游戏 / 设置 / 返回主菜单 / 退出到桌面,
+  dimmed overlay. Bound to `Esc`, which toggles open/closed.
+- **Settings (`USettingsWidget`)**, all functional and persisted:
+  - Window mode (windowed / borderless / fullscreen) and resolution via
+    `UGameUserSettings`, applied and saved.
+  - Graphics quality preset (Low/Medium/High/Cinematic) via
+    `SetOverallScalabilityLevel`.
+  - Mouse sensitivity slider (0.1–3.0), persisted to `GameUserSettings.ini` and
+    multiplied into the character turn/look rates.
+  - Settings is reachable from both the main menu and pause menu; back returns to
+    the correct origin.
+- **Mouse capture fixed.** Launch now goes to the menu with a visible, unlocked
+  cursor that can leave the window (title-bar close and Alt+F4 work). Starting a
+  match switches to `GameOnly` (hidden, captured mouse for look); pausing switches
+  to `UIOnly` with `DoNotLock` and releases capture. Focus loss never re-grabs the
+  mouse. Quit uses `UKismetSystemLibrary::QuitGame`.
+- `DefaultInput.ini`: `bCaptureMouseOnLaunch=False`, `NoCapture` / `DoNotLock`,
+  added `Pause=Escape`, and repaired the previously empty (None) WASD/mouse axis
+  mappings.
+
+#### Changed — match lifecycle
+- GameMode no longer spawns the world on launch. `StartMatch()` spawns the court,
+  ball, 1 human + 11 AI players, light and scoreboard and resets the score;
+  `ReturnToMainMenu()` / `CleanupMatch()` tear them down. Repeated menu→match
+  transitions do not duplicate actors. The human pawn is parked off-world and
+  collision-disabled while in the menu.
+
+#### Changed — FIVB court and arena
+- Three-layer floor: outer arena slab (30×20 m), 3 m free-zone surround, and the
+  18×9 m maple play court.
+- Standard lines, 5 cm wide, raised 1 cm with collision disabled (no z-fighting,
+  no physics ridge): two end lines (X=±900), two side lines (Y=±450), centre line
+  (X=0) and two attack lines (X=±300).
+- Removed the four close walls. Added six-row stepped stands on all four sides
+  (step depth 90 cm, rise 45 cm) beyond the 3 m free zone, using
+  `UInstancedStaticMeshComponent` for both the step slabs and the crowd (no
+  per-spectator Actors / draw-call explosion).
+
+#### Changed — net geometry and collision
+- Net top 243 cm, cloth band 100 cm tall (bottom at 143 cm), width extends 80 cm
+  past each sideline to the cylindrical posts. Semi-transparent cloth with opaque
+  white 7 cm top band and 5 cm bottom band that do not go transparent.
+- GameMode net touch now only reflects the ball inside the real band
+  (143 < Z < 243) and within net width, so a ball passing under the net is no
+  longer blocked by an invisible wall.
+
+#### Changed — characters
+- Replaced the broken, unloadable Mannequin/ABP dependency (template cooked assets
+  could not be found at runtime and spammed load errors) with a zero-asset
+  hinge-style placeholder: a box torso + sphere head per player, tinted electric
+  blue (Team A) / red (Team B). Matches the "articulated stand-in first" art plan;
+  a rigged skeletal mesh can be swapped in later.
+
+#### Dev
+- Optional `-devauto` command line: starts a match 2 s after launch, requests an
+  in-engine shot at 8 s and quits at 10 s for headless smoke testing.
+
+---
+
 ### Milestone M3 — FIVB rotation, serving player, stadium lighting
 _commit 8ec4531 → next_
 
@@ -92,4 +161,4 @@ D:\Epic\UE_5.8\Engine\Binaries\Win64\UnrealEditor.exe `
 ```
 
 Controls: `WASD` move, mouse look, `Space` jump, `V` toggle first/third person,
-`LMB` hit, `E` serve.
+`LMB` hit, `E` serve, `Esc` pause/resume.

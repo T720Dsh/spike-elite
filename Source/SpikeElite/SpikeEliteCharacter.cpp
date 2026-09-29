@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "SpikeEliteCharacter.h"
+#include "SpikeElitePlayerController.h"
 #include "Camera/CameraComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/SpringArmComponent.h"
@@ -10,6 +11,8 @@
 #include "UObject/ConstructorHelpers.h"
 #include "Volleyball/VolleyballBall.h"
 #include "Materials/MaterialInstanceDynamic.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMesh.h"
 
 ASpikeEliteCharacter::ASpikeEliteCharacter()
 {
@@ -19,20 +22,26 @@ ASpikeEliteCharacter::ASpikeEliteCharacter()
 	bUseControllerRotationYaw = true;
 	bUseControllerRotationRoll = false;
 
-	// Skeletal mesh: Mannequin.
-	static ConstructorHelpers::FObjectFinder<USkeletalMesh> MannequinMesh(TEXT("/Game/Mannequins/Meshes/SK_Mannequin.SK_Mannequin"));
-	if (MannequinMesh.Succeeded())
+	// Hinge-style placeholder body (per design doc: simple articulated stand-in until
+	// proper player models are imported). Built from engine basic shapes, zero asset deps.
+	// TODO(M-models): swap this for a rigged skeletal mesh + animation blueprint.
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeMesh(TEXT("/Engine/BasicShapes/Cube.Cube"));
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> SphereMesh(TEXT("/Engine/BasicShapes/Sphere.Sphere"));
+	PlaceholderBody = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("PlaceholderBody"));
+	PlaceholderBody->SetupAttachment(RootComponent);
+	if (CubeMesh.Succeeded())
 	{
-		GetMesh()->SetSkeletalMesh(MannequinMesh.Object);
-		GetMesh()->SetRelativeLocation(FVector(0.0f, 0.0f, -88.0f));
-		GetMesh()->SetRelativeRotation(FRotator(0.0f, -90.0f, 0.0f));
+		PlaceholderBody->SetStaticMesh(CubeMesh.Object);
+		PlaceholderBody->SetRelativeScale3D(FVector(0.45f, 0.28f, 0.75f));
+		PlaceholderBody->SetRelativeLocation(FVector(0, 0, -25.f));
 	}
-
-	// Animation blueprint: idle/walk/jog/jump blending.
-	static ConstructorHelpers::FClassFinder<UAnimInstance> AnimBP(TEXT("/Game/Mannequins/Anims/Anims/Unarmed/ABP_Unarmed.ABP_Unarmed_C"));
-	if (AnimBP.Succeeded())
+	PlaceholderHead = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("PlaceholderHead"));
+	PlaceholderHead->SetupAttachment(RootComponent);
+	if (SphereMesh.Succeeded())
 	{
-		GetMesh()->SetAnimInstanceClass(AnimBP.Class);
+		PlaceholderHead->SetStaticMesh(SphereMesh.Object);
+		PlaceholderHead->SetRelativeScale3D(FVector(0.22f,0.22f,0.22f));
+		PlaceholderHead->SetRelativeLocation(FVector(0, 0, 32.f));
 	}
 
 	UCharacterMovementComponent* MoveComp = GetCharacterMovement();
@@ -75,9 +84,21 @@ void ASpikeEliteCharacter::BeginPlay()
 
 void ASpikeEliteCharacter::ApplyJerseyColor()
 {
-	// Team A = blue, Team B = red.
-	FLinearColor Col = (TeamSide > 0) ? FLinearColor(0.15f, 0.35f, 0.9f) : FLinearColor(0.9f, 0.2f, 0.15f);
-	if (GetMesh())
+	// Team A = electric blue, Team B = red.
+	FLinearColor Col = (TeamSide > 0) ? FLinearColor(0.15f, 0.45f, 1.0f) : FLinearColor(0.95f, 0.25f, 0.15f);
+	auto Tint = [&](UStaticMeshComponent* Comp)
+	{
+		if (!Comp) return;
+		if (UMaterialInterface* Base = Comp->GetMaterial(0))
+		{
+			UMaterialInstanceDynamic* MID = UMaterialInstanceDynamic::Create(Base, this);
+			MID->SetVectorParameterValue(TEXT("Color"), Col);
+			Comp->SetMaterial(0, MID);
+		}
+	};
+	Tint(PlaceholderBody);
+	// Head stays neutral skin/grey.
+	if (GetMesh() && GetMesh()->GetSkeletalMeshAsset())
 	{
 		if (UMaterialInterface* Base = GetMesh()->GetMaterial(0))
 		{
@@ -199,8 +220,24 @@ void ASpikeEliteCharacter::MoveRight(float Value)
 	}
 }
 
-void ASpikeEliteCharacter::TurnRate(float Value) { AddControllerYawInput(Value * LookSensitivity); }
-void ASpikeEliteCharacter::LookUpRate(float Value) { AddControllerPitchInput(Value * LookSensitivity); }
+void ASpikeEliteCharacter::TurnRate(float Value)
+{
+	float Mult = LookSensitivity;
+	if (auto* PC = Cast<APlayerController>(GetController()))
+	{
+		if (auto* SEPC = Cast<ASpikeElitePlayerController>(PC)) Mult *= SEPC->GetMouseSensitivity();
+	}
+	AddControllerYawInput(Value * Mult);
+}
+void ASpikeEliteCharacter::LookUpRate(float Value)
+{
+	float Mult = LookSensitivity;
+	if (auto* PC = Cast<APlayerController>(GetController()))
+	{
+		if (auto* SEPC = Cast<ASpikeElitePlayerController>(PC)) Mult *= SEPC->GetMouseSensitivity();
+	}
+	AddControllerPitchInput(Value * Mult);
+}
 void ASpikeEliteCharacter::ToggleFirstPerson() { bFirstPerson = !bFirstPerson; UpdateCameraView(); }
 
 void ASpikeEliteCharacter::UpdateCameraView()

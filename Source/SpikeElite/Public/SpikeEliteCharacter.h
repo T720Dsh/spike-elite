@@ -7,6 +7,7 @@
 
 class UCameraComponent;
 class USpringArmComponent;
+class UStaticMeshComponent;
 
 /**
  * Player pawn for SPIKE ELITE.
@@ -49,6 +50,12 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera")
 	TObjectPtr<UCameraComponent> FirstPersonCamera;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Character")
+	TObjectPtr<UStaticMeshComponent> PlaceholderBody;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Character")
+	TObjectPtr<UStaticMeshComponent> PlaceholderHead;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera")
 	bool bFirstPerson = false;
