@@ -6,6 +6,7 @@
 #include "UI/ScoreboardWidget.h"
 #include "UI/MatchEndWidget.h"
 #include "UI/ConfirmWidget.h"
+#include "UI/RotationWidget.h"
 #include "SpikeEliteGameMode.h"
 #include "Blueprint/UserWidget.h"
 #include "Camera/CameraActor.h"
@@ -253,8 +254,9 @@ void ASpikeElitePlayerController::DevQuickMatch()
 	float ConfirmShotAt = -1.0f;
 	float RematchAt = -1.0f;
 	float ShotRematch = -1.0f;
+	float RallyShotAt = -1.0f;
 	FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda(
-		[Weak, StartSeconds, Index, Events = MoveTemp(Events), ShotAt, ConfirmAt, ConfirmShotAt, RematchAt, ShotRematch](float) mutable -> bool
+		[Weak, StartSeconds, Index, Events = MoveTemp(Events), ShotAt, ConfirmAt, ConfirmShotAt, RematchAt, ShotRematch, RallyShotAt](float) mutable -> bool
 	{
 		ASpikeElitePlayerController* PC = Weak.Get();
 		if (!PC) { return false; }
@@ -267,6 +269,14 @@ void ASpikeElitePlayerController::DevQuickMatch()
 
 		if (ASpikeEliteGameMode* GM = Cast<ASpikeEliteGameMode>(UGameplayStatics::GetGameMode(PC)))
 		{
+			// M11b-2: one live-rally screenshot to verify the rotation HUD and
+			// officials are actually rendered during play (not just logged).
+			if (GM->MatchState == EMatchState::Rally && RallyShotAt < 0.0f)
+			{
+				RallyShotAt = static_cast<float>(Elapsed);
+				UE_LOG(LogSEMenu, Log, TEXT("DEV QUICK MATCH: rally in progress, shooting rotation HUD"));
+				PC->DevShot(TEXT("shot_qm_05_rally"));
+			}
 			if (GM->MatchState == EMatchState::MatchOver)
 			{
 				if (ShotAt < 0.0f)
@@ -339,6 +349,17 @@ void ASpikeElitePlayerController::SetupInputComponent()
 	FInputActionBinding& PauseBind =
 		InputComponent->BindAction(TEXT("Pause"), IE_Pressed, this, &ASpikeElitePlayerController::OnPausePressed);
 	PauseBind.bExecuteWhenPaused = true;
+
+	// H toggles the right-top rotation HUD (gameplay only).
+	InputComponent->BindAction(TEXT("ToggleRotation"), IE_Pressed, this, &ASpikeElitePlayerController::OnToggleRotation);
+}
+
+void ASpikeElitePlayerController::OnToggleRotation()
+{
+	if (ASpikeEliteGameMode* GM = GetWorld()->GetAuthGameMode<ASpikeEliteGameMode>())
+	{
+		if (GM->GetRotationWidget()) { GM->GetRotationWidget()->ToggleVisible(); }
+	}
 }
 
 void ASpikeElitePlayerController::OnPausePressed()

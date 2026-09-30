@@ -1,4 +1,4 @@
-﻿// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: MIT
 #include "SpikeEliteGameMode.h"
 #include "SpikeEliteCharacter.h"
 #include "SpikeElitePlayerController.h"
@@ -16,6 +16,8 @@
 #include "Engine/StaticMeshActor.h"
 #include "Components/DirectionalLightComponent.h"
 #include "UI/ScoreboardWidget.h"
+#include "UI/RotationWidget.h"
+#include "Volleyball/MatchOfficialManager.h"
 #include "Blueprint/UserWidget.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogVolleyballRules, Log, All);
@@ -69,6 +71,20 @@ ASpikeEliteGameMode::ASpikeEliteGameMode()
 	bDevAuto = FParse::Param(FCommandLine::Get(), TEXT("devauto"));
 #endif
 	UE_LOG(LogVolleyballRules, Log, TEXT("devauto=%d QuickMatch=%d"), bDevAuto ? 1 : 0, bQuickMatch ? 1 : 0);
+
+	// M11b-2: -FastFlow shortens the post-rally ceremony (result display,
+	// readiness check and serve deadline). Automated QuickMatch runs use it;
+	// normal play keeps the official pacing.
+	bFastFlow = FParse::Param(FCommandLine::Get(), TEXT("FastFlow"));
+	if (bFastFlow)
+	{
+		InterRallyDelay = 0.35f;
+		SetOverDelay = 0.8f;
+		ResetDelay = 0.06f;
+		ReadyDelay = 0.12f;
+		ServeDeadline = 2.0f;
+		UE_LOG(LogVolleyballRules, Log, TEXT("FastFlow=1 ceremony timings shortened"));
+	}
 
 	// Seeded AI randomness: -Seed=N makes automated runs reproducible.
 	int32 Seed = FDateTime::Now().GetTicks() % 1000000;
@@ -161,6 +177,8 @@ void ASpikeEliteGameMode::StartMatch()
 			HC->bIsBot = false;
 			HC->TeamSide = 1;
 			HC->HomePosition = PosA[0];
+			HC->PlayerId = 0;
+			HC->JerseyNumber = 1;
 			HC->SetActorEnableCollision(true);
 			HC->SetActorLocation(PosA[0] + FVector(0,0,100.0f));
 			HC->bTouchArmed = true;
@@ -197,11 +215,13 @@ void ASpikeEliteGameMode::StartMatch()
 	for (int32 i = 1; i < 6; i++)
 	{
 		TeamAPlayers[i] = SpawnBot(PosA[i] + FVector(0,0,100.0f), FRotator(0,-90,0), 1, PosA[i]);
+		if (TeamAPlayers[i]) { TeamAPlayers[i]->PlayerId = i; TeamAPlayers[i]->JerseyNumber = i + 1; }
 	}
 	for (int32 i = 0; i < 6; i++)
 	{
 		const FVector BPos(-PosA[i].X, PosA[i].Y, 0.0f);
 		TeamBPlayers[i] = SpawnBot(BPos + FVector(0,0,100.0f), FRotator(0,90,0), -1, BPos);
+		if (TeamBPlayers[i]) { TeamBPlayers[i]->PlayerId = 6 + i; TeamBPlayers[i]->JerseyNumber = 7 + i; }
 	}
 
 	// Scoreboard.
@@ -214,8 +234,23 @@ void ASpikeEliteGameMode::StartMatch()
 			if (ASpikeElitePlayerController* SEPC = Cast<ASpikeElitePlayerController>(PC))
 				SEPC->OnMatchStarted(Scoreboard);
 		}
+
+		// M11b-2: persistent match officials + rotation HUD (created once; a
+		// Rematch reuses them instead of respawning referee stands or benches).
+		if (!Officials)
+		{
+			Officials = World->SpawnActor<AMatchOfficialManager>(
+				AMatchOfficialManager::StaticClass(), FVector::ZeroVector, FRotator::ZeroRotator, Params);
+		}
+		if (!RotationWidget)
+		{
+			RotationWidget = CreateWidget<URotationWidget>(PC, URotationWidget::StaticClass());
+			if (RotationWidget) { RotationWidget->AddToViewport(20); }
+		}
 	}
 
+	RotationCount = 1;
+	RefreshRotationView();
 	MatchState = EMatchState::BetweenRallies;
 	InterRallyTimer = 1.0f;
 	bMatchActive = true;
@@ -355,13 +390,36 @@ void ASpikeEliteGameMode::Tick(float DeltaSeconds)
 	case EMatchState::BetweenRallies:
 	{
 		InterRallyTimer -= DeltaSeconds;
-		if (InterRallyTimer <= 0.f) { BeginAwaitingServe(); }
+		if (InterRallyTimer <= 0.f) { AdvanceRallyPhase(); }
 		break;
 	}
-	case EMatchState::AwaitingServe:
+	case EMatchState::ResettingPositions:
 	{
+		PhaseTimer -= DeltaSeconds;
+		if (PhaseTimer <= 0.f)
+		{
+			MatchState = EMatchState::AwaitingReady;
+			PhaseTimer = ReadyDelay;
+			UE_LOG(LogVolleyballRules, Log, TEXT("Readiness check: 2nd referee verifying formation"));
+			UpdateScoreboard();
+		}
+		break;
+	}
+	case EMatchState::AwaitingReady:
+	{
+		PhaseTimer -= DeltaSeconds;
+		if (PhaseTimer <= 0.f) { BeginServiceAuthorized(); }
+		break;
+	}
+	case EMatchState::ServiceAuthorized:
+	{
+		// 8 s serve window (FIVB); running out is a serve fault.
+		ServeDeadlineTimer -= DeltaSeconds;
+		if (ServeDeadlineTimer <= 0.f) { HandleServeDeadline(); break; }
+
 		// A bot server (or Team A's bot when the human rotated away) serves
-		// automatically after a short pause; the human waits for the E key.
+		// automatically after a short pause; the human waits for the E key
+		// (or -devauto serves for them after its own short delay).
 		if (bAIServePending)
 		{
 			AIServeTimer -= DeltaSeconds;
@@ -526,25 +584,27 @@ void ASpikeEliteGameMode::UpdateScoreboard()
 	FString Phase;
 	switch (MatchState)
 	{
-	case EMatchState::PreMatch:       Phase = TEXT("赛前"); break;
-	case EMatchState::BetweenRallies: Phase = TEXT("回合间"); break;
-	case EMatchState::AwaitingServe:  Phase = TEXT("等待发球"); break;
-	case EMatchState::ServingToss:    Phase = TEXT("发球抛球"); break;
-	case EMatchState::Rally:          Phase = TEXT("回合进行"); break;
-	case EMatchState::SetOver:        Phase = TEXT("局间休息"); break;
-	case EMatchState::MatchOver:      Phase = TEXT("比赛结束"); break;
-	default:                          Phase = TEXT("-"); break;
+	case EMatchState::PreMatch:           Phase = TEXT("赛前"); break;
+	case EMatchState::BetweenRallies:     Phase = TEXT("回合间"); break;
+	case EMatchState::ResettingPositions: Phase = TEXT("球员就位"); break;
+	case EMatchState::AwaitingReady:      Phase = TEXT("裁判确认准备"); break;
+	case EMatchState::ServiceAuthorized:  Phase = TEXT("允许发球"); break;
+	case EMatchState::ServingToss:        Phase = TEXT("发球抛球"); break;
+	case EMatchState::Rally:              Phase = TEXT("回合进行"); break;
+	case EMatchState::SetOver:            Phase = TEXT("局间休息"); break;
+	case EMatchState::MatchOver:          Phase = TEXT("比赛结束"); break;
+	default:                              Phase = TEXT("-"); break;
 	}
 
 	// Serve hint ONLY in the legal state, for the legal server.
 	FString ServeHint;
-	if (MatchState == EMatchState::AwaitingServe && ServingTeam == EVolleyballTeam::TeamA)
+	if (MatchState == EMatchState::ServiceAuthorized && ServingTeam == EVolleyballTeam::TeamA)
 	{
 		if (ASpikeEliteCharacter* Player = Cast<ASpikeEliteCharacter>(UGameplayStatics::GetPlayerPawn(this, 0)))
 		{
 			if (TeamAPlayers.Num() > 0 && TeamAPlayers[0] == Player)
 			{
-				ServeHint = TEXT("按 E 发球");
+				ServeHint = FString::Printf(TEXT("按 E 发球（%.0f 秒）"), FMath::CeilToFloat(ServeDeadlineTimer));
 			}
 		}
 	}
@@ -565,6 +625,16 @@ void ASpikeEliteGameMode::UpdateScoreboard()
 
 	Scoreboard->UpdateScore(CurrentSet, TeamAScore, TeamBScore, TeamASetsWon, TeamBSetsWon,
 		ServingTeam == EVolleyballTeam::TeamA, BallHint, Phase, Possession, ServeHint, RallyResultText);
+
+	// M11b-2: push the authoritative score to the scorer-table scoreboard
+	// (event-driven; the officials own no score of their own).
+	if (Officials)
+	{
+		Officials->SetScorerText(
+			FString::Printf(TEXT("SET %d"), CurrentSet),
+			FString::Printf(TEXT("A %d : %d B"), TeamAScore, TeamBScore),
+			FString::Printf(TEXT("Serve %s  Sets A%d:%d B"), TeamStr(ServingTeam), TeamASetsWon, TeamBSetsWon));
+	}
 }
 
 void ASpikeEliteGameMode::OnBallLanded(const FVector& BallLocation)
@@ -601,6 +671,9 @@ void ASpikeEliteGameMode::EndRally(ERallyEndReason Reason, EVolleyballTeam Scori
 {
 	if (!SEVolleyballRules::SettleRally(RallyState)) return;  // single settlement
 
+	// M11b-2: the 1st referee blows the end-of-rally whistle.
+	if (Officials) { Officials->Whistle(); }
+
 	SetRallyResult(Reason, ScoringTeam);
 
 	// M11: award FIRST, then log with explicit before -> after so [RallyEnd] never
@@ -624,7 +697,8 @@ void ASpikeEliteGameMode::AwardPoint(EVolleyballTeam ScoringTeam)
 
 	const bool bWasServeWin = (ServingTeam == ScoringTeam);
 	ServingTeam = ScoringTeam;
-	if (!bWasServeWin) { RotateTeam(ScoringTeam); }
+	if (!bWasServeWin) { RotateTeam(ScoringTeam); RotationCount++; }
+	RefreshRotationView();
 
 	// Record the current set's running score.
 	if (SetScoresA.Num() >= CurrentSet) { SetScoresA[CurrentSet-1] = TeamAScore; }
@@ -685,7 +759,7 @@ void ASpikeEliteGameMode::StartNextSet()
 	UE_LOG(LogVolleyballRules, Log, TEXT("Set %d begins (to %d)"), CurrentSet, PointsToWin);
 }
 
-void ASpikeEliteGameMode::BeginAwaitingServe()
+void ASpikeEliteGameMode::BeginServiceAuthorized()
 {
 	if (!Ball) return;
 
@@ -701,8 +775,14 @@ void ASpikeEliteGameMode::BeginAwaitingServe()
 	SEVolleyballRules::BeginRally(RallyState, ServingTeam);
 	ServerPlayerIndex = (Server && !Server->bIsBot) ? 0 : -1;
 
-	MatchState = EMatchState::AwaitingServe;
+	MatchState = EMatchState::ServiceAuthorized;
 	bInToss = false;
+
+	// M11b-2: the 1st referee blows the service whistle and the 8 s window opens.
+	// Before this whistle the E key is refused (RequestServe state gate).
+	ServeDeadlineTimer = ServeDeadline;
+	if (Officials) { Officials->Whistle(); }
+	UE_LOG(LogVolleyballRules, Log, TEXT("Whistle: service authorized for team=%s (%.0fs window)"), TeamStr(ServingTeam), ServeDeadline);
 
 	// M11 auto-serve policy: bots always auto-serve after a short pause; a human
 	// server serves ONLY when the automation flag (-devauto) is present. Normal
@@ -713,17 +793,50 @@ void ASpikeEliteGameMode::BeginAwaitingServe()
 	{
 		const bool bAuto = SEVolleyballRules::ShouldAutoServe(Server->bIsBot, bDevAuto);
 		bAIServePending = bAuto;
-		AIServeTimer = Server->bIsBot ? 1.0f : 3.0f;
+		AIServeTimer = (Server->bIsBot ? 1.0f : 0.5f) * (bFastFlow ? 0.3f : 1.0f);
 	}
 
-	UE_LOG(LogVolleyballRules, Log, TEXT("Awaiting serve: team=%s server=%s auto=%d"), TeamStr(ServingTeam),
+	UE_LOG(LogVolleyballRules, Log, TEXT("Service authorized: team=%s server=%s auto=%d"), TeamStr(ServingTeam),
 		(Server && !Server->bIsBot) ? TEXT("human") : TEXT("bot"), bAIServePending ? 1 : 0);
+	RefreshRotationView();
 	UpdateScoreboard();
+}
+
+void ASpikeEliteGameMode::AdvanceRallyPhase()
+{
+	// Post-rally ceremony: players return to their formation, then the 2nd
+	// referee confirms readiness, then the 1st referee authorizes service.
+	if (!Ball) return;
+	RespawnPlayersToPositions();
+	MatchState = EMatchState::ResettingPositions;
+	PhaseTimer = ResetDelay;
+	UE_LOG(LogVolleyballRules, Log, TEXT("Rally ceremony: players resetting positions (side-out rotation already applied)"));
+	UpdateScoreboard();
+}
+
+void ASpikeEliteGameMode::HandleServeDeadline()
+{
+	// 8 s elapsed with no legal serve: serve delay fault, opponent scores.
+	if (Officials) { Officials->Whistle(); }
+	UE_LOG(LogVolleyballRules, Log, TEXT("Serve delay: %s failed to serve within %.0fs -> fault"),
+		TeamStr(ServingTeam), ServeDeadline);
+	EndRally(ERallyEndReason::ServeFault, (ServingTeam == EVolleyballTeam::TeamA) ? EVolleyballTeam::TeamB : EVolleyballTeam::TeamA);
 }
 
 bool ASpikeEliteGameMode::RequestServe(ASpikeEliteCharacter* Server)
 {
-	if (MatchState != EMatchState::AwaitingServe) { return false; }
+	// M11b-2: the service whistle (ServiceAuthorized) is the ONLY legal entry.
+	// Pressing E while players are resetting or the 2nd referee is checking is
+	// refused with a hint; every other state refuses silently.
+	if (MatchState != EMatchState::ServiceAuthorized)
+	{
+		if (MatchState == EMatchState::ResettingPositions || MatchState == EMatchState::AwaitingReady)
+		{
+			ShowBanner(TEXT("裁判尚未鸣哨"), 1.0f);
+			UpdateScoreboard();
+		}
+		return false;
+	}
 	if (!Server) { return false; }
 
 	const EVolleyballTeam Team = TeamOf(Server);
@@ -867,6 +980,11 @@ bool ASpikeEliteGameMode::TryTouchBall(ASpikeEliteCharacter* Toucher, EBallTouch
 
 		Ball->Strike(Dir, Power, 0.f);
 		Toucher->bTouchArmed = false;   // single-touch protection until rearmed
+		// M11b-2: a successful touch must immediately retire the player from the
+		// primary-handler role. Without this the setter (who is still flagged
+		// Primary on the frame after the set) could touch the ball again before
+		// UpdateAIDirectives picks the attacker, producing a DoubleTouch fault.
+		Toucher->bIsPrimaryHandler = false;
 
 		UE_LOG(LogVolleyballRules, Log, TEXT("[Touch] team=%s player=%d touch=%d/%d type=%s"),
 			TeamStr(Team), Index, RallyState.TouchCount, 3, TypeStr(EffectiveType));
@@ -971,6 +1089,11 @@ int32 ASpikeEliteGameMode::SelectSetterPlayer(EVolleyballTeam Team) const
 	for (int32 i = 0; i < Roster.Num(); i++)
 	{
 		if (!Roster[i]) continue;
+		// M11b-2: the player who just made the first touch can never be picked as
+		// the setter (consecutive-touch fault). Without this the receiver, who is
+		// often the closest player to the setter zone right after the pass, was
+		// selected again and every rally ended in a DoubleTouch fault.
+		if (i == RallyState.LastTouchPlayerIndex && RallyState.LastTouchTeam == Team) continue;
 		const float D = FVector::Dist2D(Roster[i]->GetActorLocation(), SetZone);
 		if (D < BestDist) { BestDist = D; Best = i; }
 	}
@@ -1199,4 +1322,41 @@ void ASpikeEliteGameMode::NotifyMatchOver()
 	{
 		SEPC->OnMatchOver(SetScoresA, SetScoresB, MatchWinner);
 	}
+}
+
+void ASpikeEliteGameMode::BuildRotationView(FRotationViewState& Out) const
+{
+	Out.RotationIndex = RotationCount;
+	Out.ServingTeam = ServingTeam;
+
+	// Roster order IS the authoritative rotation: index 0 = P1 (back-right,
+	// the server), then P2/P3/P4 (front row), P5/P6.
+	auto Fill = [this](const TArray<TObjectPtr<ASpikeEliteCharacter>>& Roster, TArray<FRotationSlotView>& OutArr)
+	{
+		OutArr.Reset();
+		for (int32 i = 0; i < Roster.Num(); ++i)
+		{
+			FRotationSlotView V;
+			V.SlotIndex = i;
+			if (Roster[i])
+			{
+				V.PlayerId = Roster[i]->PlayerId;
+				V.Jersey = FString::Printf(TEXT("#%d"), Roster[i]->JerseyNumber);
+				V.bControlled = !Roster[i]->bIsBot;
+				V.bServer = (i == 0);
+			}
+			V.bFrontRow = (i == 1 || i == 2 || i == 3);
+			OutArr.Add(V);
+		}
+	};
+	Fill(TeamAPlayers, Out.TeamA);
+	Fill(TeamBPlayers, Out.TeamB);
+}
+
+void ASpikeEliteGameMode::RefreshRotationView()
+{
+	if (!RotationWidget) return;
+	FRotationViewState State;
+	BuildRotationView(State);
+	RotationWidget->Refresh(State);
 }

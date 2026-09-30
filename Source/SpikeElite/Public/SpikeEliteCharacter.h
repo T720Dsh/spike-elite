@@ -43,6 +43,14 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Bot")
 	int32 TeamSide = 1;
 
+	/** Stable per-match player id (Team A: 0..5, Team B: 6..11). */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Bot")
+	int32 PlayerId = -1;
+
+	/** Jersey number shown on the rotation HUD (Team A 1..6, Team B 7..12). */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Bot")
+	int32 JerseyNumber = 0;
+
 	/** Position this bot returns to when not chasing the ball. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Bot")
 	FVector HomePosition = FVector(500, 0, 0);

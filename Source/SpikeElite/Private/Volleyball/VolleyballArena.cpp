@@ -13,7 +13,7 @@
 #include "Engine/World.h"
 #include "SEMaterials.h"
 
-static UMaterialInstanceDynamic* MakeMID(UObject* Owner, const FLinearColor& Color)
+static UMaterialInstanceDynamic* ArenaMakeMID(UObject* Owner, const FLinearColor& Color)
 {
 	return SEMaterials::MakeTint(Owner, Color);
 }
@@ -48,7 +48,7 @@ void AVolleyballArena::BuildHall(UStaticMesh* Cube)
 		W->SetRelativeScale3D(Scale);
 		W->SetRelativeLocation(Loc);
 		W->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-		if (auto* M = MakeMID(W, WallCol)) W->SetMaterial(0, M);
+		if (auto* M = ArenaMakeMID(W, WallCol)) W->SetMaterial(0, M);
 		return W;
 	};
 
@@ -67,14 +67,14 @@ void AVolleyballArena::BuildHall(UStaticMesh* Cube)
 	BackdropA->SetRelativeScale3D(FVector(20.f/100.f, HallHalfWidth*2/100.f, HallHeight*0.75f/100.f));
 	BackdropA->SetRelativeLocation(FVector(HallHalfLength - 220.f, 0, HallHeight*0.35f));
 	BackdropA->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	if (auto* M = MakeMID(BackdropA, FLinearColor(0.045f, 0.05f, 0.065f))) BackdropA->SetMaterial(0, M);
+	if (auto* M = ArenaMakeMID(BackdropA, FLinearColor(0.045f, 0.05f, 0.065f))) BackdropA->SetMaterial(0, M);
 	UStaticMeshComponent* BackdropB = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("BackdropB"));
 	BackdropB->SetupAttachment(Root);
 	BackdropB->SetStaticMesh(Cube);
 	BackdropB->SetRelativeScale3D(FVector(20.f/100.f, HallHalfWidth*2/100.f, HallHeight*0.75f/100.f));
 	BackdropB->SetRelativeLocation(FVector(-(HallHalfLength - 220.f), 0, HallHeight*0.35f));
 	BackdropB->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	if (auto* M = MakeMID(BackdropB, FLinearColor(0.045f, 0.05f, 0.065f))) BackdropB->SetMaterial(0, M);
+	if (auto* M = ArenaMakeMID(BackdropB, FLinearColor(0.045f, 0.05f, 0.065f))) BackdropB->SetMaterial(0, M);
 
 	// Roof (no sky ever visible).
 	Roof = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Roof"));
@@ -83,7 +83,7 @@ void AVolleyballArena::BuildHall(UStaticMesh* Cube)
 	Roof->SetRelativeScale3D(FVector(HallHalfLength*2/100.f, HallHalfWidth*2/100.f, 0.25f));
 	Roof->SetRelativeLocation(FVector(0, 0, HallHeight));
 	Roof->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	if (auto* M = MakeMID(Roof, FLinearColor(0.09f, 0.09f, 0.11f))) Roof->SetMaterial(0, M);
+	if (auto* M = ArenaMakeMID(Roof, FLinearColor(0.09f, 0.09f, 0.11f))) Roof->SetMaterial(0, M);
 
 	// LED boards: bright thin slabs along both end walls just below the first
 	// stand row (they read as advertising boards and give the hall depth).
@@ -91,7 +91,7 @@ void AVolleyballArena::BuildHall(UStaticMesh* Cube)
 	LedBoards->SetupAttachment(Root);
 	LedBoards->SetStaticMesh(Cube);
 	LedBoards->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	if (auto* M = MakeMID(LedBoards, FLinearColor(0.02f, 0.04f, 0.08f))) LedBoards->SetMaterial(0, M);
+	if (auto* M = ArenaMakeMID(LedBoards, FLinearColor(0.02f, 0.04f, 0.08f))) LedBoards->SetMaterial(0, M);
 	// A few luminous strips with a cooler tint near the floor line.
 	LedBoards->AddInstance(FTransform(FRotator::ZeroRotator, FVector( HallHalfLength - 60.f, 0, 140.f), FVector(1.4f, 28.f, 1.1f)));
 	LedBoards->AddInstance(FTransform(FRotator::ZeroRotator, FVector(-HallHalfLength + 60.f, 0, 140.f), FVector(1.4f, 28.f, 1.1f)));
@@ -145,7 +145,7 @@ void AVolleyballArena::BuildStands(UStaticMesh* Cube)
 	StandSteps->SetupAttachment(Root);
 	StandSteps->SetStaticMesh(Cube);
 	StandSteps->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
-	if (auto* M = MakeMID(StandSteps, FLinearColor(0.30f, 0.31f, 0.36f)))
+	if (auto* M = ArenaMakeMID(StandSteps, FLinearColor(0.30f, 0.31f, 0.36f)))
 		StandSteps->SetMaterial(0, M);
 
 	// Railings in front of the first row (keep the crowd off the concourse).
@@ -153,7 +153,7 @@ void AVolleyballArena::BuildStands(UStaticMesh* Cube)
 	Railings->SetupAttachment(Root);
 	Railings->SetStaticMesh(Cube);
 	Railings->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	if (auto* M = MakeMID(Railings, FLinearColor(0.42f, 0.44f, 0.50f)))
+	if (auto* M = ArenaMakeMID(Railings, FLinearColor(0.42f, 0.44f, 0.50f)))
 		Railings->SetMaterial(0, M);
 
 	static const FLinearColor Clothing[] = {
@@ -176,7 +176,7 @@ void AVolleyballArena::BuildStands(UStaticMesh* Cube)
 	if (UStaticMesh* S = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Sphere.Sphere")))
 		CrowdHeads->SetStaticMesh(S);
 	CrowdHeads->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	if (auto* M = MakeMID(CrowdHeads, FLinearColor(0.72f, 0.55f, 0.42f)))
+	if (auto* M = ArenaMakeMID(CrowdHeads, FLinearColor(0.72f, 0.55f, 0.42f)))
 		CrowdHeads->SetMaterial(0, M);
 }
 

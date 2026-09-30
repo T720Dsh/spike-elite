@@ -127,6 +127,9 @@ protected:
 	/** Esc / Start button handler, valid in every menu state. */
 	void OnPausePressed();
 
+	/** H key: toggle the right-top rotation HUD. */
+	void OnToggleRotation();
+
 	/** GameOnly: hidden, captured and locked mouse for look. */
 	void SetGameInputMode();
 	/** UI: visible, unlocked mouse that can leave the window. */

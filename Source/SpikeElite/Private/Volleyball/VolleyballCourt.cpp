@@ -11,7 +11,7 @@
 #include "Engine/World.h"
 #include "SEMaterials.h"
 
-static UMaterialInstanceDynamic* MakeMID(UObject* Owner, const FLinearColor& Color)
+static UMaterialInstanceDynamic* CourtMakeMID(UObject* Owner, const FLinearColor& Color)
 {
 	return SEMaterials::MakeTint(Owner, Color);
 }
@@ -66,7 +66,7 @@ void AVolleyballCourt::ApplyFloorMaterial(UStaticMeshComponent* Comp, const FLin
 	{
 		Comp->SetMaterial(0, Chosen);
 	}
-	else if (UMaterialInstanceDynamic* M = MakeMID(Comp, Fallback))
+	else if (UMaterialInstanceDynamic* M = CourtMakeMID(Comp, Fallback))
 	{
 		Comp->SetMaterial(0, M);
 	}
@@ -106,7 +106,7 @@ void AVolleyballCourt::BuildNet(UStaticMesh* Cube, UStaticMesh* Cyl)
 	NetGrid->SetupAttachment(Root);
 	if (Cube) NetGrid->SetStaticMesh(Cube);
 	NetGrid->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	if (auto* M = MakeMID(NetGrid, FLinearColor(0.68f, 0.69f, 0.72f)))
+	if (auto* M = CourtMakeMID(NetGrid, FLinearColor(0.68f, 0.69f, 0.72f)))
 		NetGrid->SetMaterial(0, M);
 
 	NetTopBand = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("NetTopBand"));
@@ -116,7 +116,7 @@ void AVolleyballCourt::BuildNet(UStaticMesh* Cube, UStaticMesh* Cyl)
 		NetTopBand->SetStaticMesh(Cube);
 		NetTopBand->SetRelativeScale3D(FVector(0.07f, NetW/100.f, 0.07f));
 		NetTopBand->SetRelativeLocation(FVector(0, 0, NetHeight - 3.5f));
-		if (auto* M = MakeMID(NetTopBand, FLinearColor(0.95f, 0.95f, 0.95f)))
+		if (auto* M = CourtMakeMID(NetTopBand, FLinearColor(0.95f, 0.95f, 0.95f)))
 			NetTopBand->SetMaterial(0, M);
 	}
 	NetTopBand->SetCollisionEnabled(ECollisionEnabled::NoCollision);
@@ -128,7 +128,7 @@ void AVolleyballCourt::BuildNet(UStaticMesh* Cube, UStaticMesh* Cyl)
 		NetBottomBand->SetStaticMesh(Cube);
 		NetBottomBand->SetRelativeScale3D(FVector(0.05f, NetW/100.f, 0.05f));
 		NetBottomBand->SetRelativeLocation(FVector(0, 0, NetBottom + 2.5f));
-		if (auto* M = MakeMID(NetBottomBand, FLinearColor(0.95f, 0.95f, 0.95f)))
+		if (auto* M = CourtMakeMID(NetBottomBand, FLinearColor(0.95f, 0.95f, 0.95f)))
 			NetBottomBand->SetMaterial(0, M);
 	}
 	NetBottomBand->SetCollisionEnabled(ECollisionEnabled::NoCollision);
@@ -142,7 +142,7 @@ void AVolleyballCourt::BuildNet(UStaticMesh* Cube, UStaticMesh* Cyl)
 			P->SetStaticMesh(Cyl);
 			P->SetRelativeScale3D(FVector(0.12f, 0.12f, 2.6f));
 			P->SetRelativeLocation(FVector(0, Y, 130.f));
-			if (auto* M = MakeMID(P, FLinearColor(0.75f, 0.75f, 0.8f)))
+			if (auto* M = CourtMakeMID(P, FLinearColor(0.75f, 0.75f, 0.8f)))
 				P->SetMaterial(0, M);
 		}
 		P->SetCollisionEnabled(ECollisionEnabled::NoCollision);
@@ -208,7 +208,7 @@ UStaticMeshComponent* AVolleyballCourt::MakeLine(const TCHAR* Name, float X, flo
 		Line->SetRelativeScale3D(FVector(ScaleX, ScaleY, 0.01f));
 		Line->SetRelativeLocation(FVector(X, Y, 0.45f));
 		Line->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-		if (auto* M = MakeMID(Line, FLinearColor(0.95f, 0.95f, 0.95f)))
+		if (auto* M = CourtMakeMID(Line, FLinearColor(0.95f, 0.95f, 0.95f)))
 			Line->SetMaterial(0, M);
 	}
 	return Line;

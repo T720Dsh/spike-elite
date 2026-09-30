@@ -1,4 +1,4 @@
-﻿// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: MIT
 #pragma once
 
 #include "CoreMinimal.h"
@@ -10,6 +10,8 @@
 class AVolleyballBall;
 class AVolleyballCourt;
 class AVolleyballArena;
+class AMatchOfficialManager;
+class URotationWidget;
 class ASpikeEliteCharacter;
 class UScoreboardWidget;
 
@@ -40,6 +42,20 @@ public:
 	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaSeconds) override;
 
+	/** How many side-out rotations happened since StartMatch (1-based display). */
+	int32 RotationCount = 1;
+
+	/** Public access for widgets / dev verification. */
+	AMatchOfficialManager* GetOfficials() const { return Officials; }
+	URotationWidget* GetRotationWidget() const { return RotationWidget; }
+	float GetServeDeadlineRemaining() const { return ServeDeadlineTimer; }
+
+	/** Build the authoritative rotation snapshot from the current rosters. */
+	void BuildRotationView(FRotationViewState& Out) const;
+
+	/** Push the rotation snapshot to the HUD (no-op if unchanged). */
+	void RefreshRotationView();
+
 	/** Spawn court/ball/players and start the first rally. Called from the main menu. */
 	UFUNCTION(BlueprintCallable, Category = "Volleyball|Flow")
 	void StartMatch();
@@ -56,7 +72,7 @@ public:
 
 	/**
 	 * A server (human or AI) asks the GameMode to start the serve.
-	 * Valid only in AwaitingServe, for the correct serving team, and for the
+	 * Valid only in ServiceAuthorized, for the correct serving team, and for the
 	 * roster's current server. On success the ball is tossed and the state moves
 	 * to ServingToss.
 	 */
@@ -168,6 +184,36 @@ protected:
 	/** Timer for the inter-rally pause. */
 	float InterRallyTimer = 0.0f;
 
+	// ---- M11b-2: official pre-serve ceremony (ResettingPositions/AwaitingReady/ServiceAuthorized) ----
+	/** -FastFlow shortens result display, readiness check and serve deadline. */
+	bool bFastFlow = false;
+
+	/** Shared phase timer for ResettingPositions/AwaitingReady. */
+	float PhaseTimer = 0.0f;
+	/** How long players stay in ResettingPositions before the 2nd-referee check. */
+	float ResetDelay = 0.25f;
+	/** How long the 2nd referee "confirms readiness" (AwaitingReady). */
+	float ReadyDelay = 0.5f;
+	/** Seconds the server has after the whistle (FIVB 8 s). */
+	float ServeDeadline = 8.0f;
+	/** Remaining time to serve after the whistle. */
+	float ServeDeadlineTimer = 0.0f;
+
+	/** Advance BetweenRallies -> ResettingPositions -> AwaitingReady -> ServiceAuthorized. */
+	void AdvanceRallyPhase();
+	/** Blow the service whistle, arm the 8 s serve window and start bot auto-serve timers. */
+	void BeginServiceAuthorized();
+	/** 8 s elapsed with no serve: serve-fault, opponent scores. */
+	void HandleServeDeadline();
+
+	/** Persistent officials (referee stands, scorer table, benches, whistle). */
+	UPROPERTY()
+	TObjectPtr<AMatchOfficialManager> Officials;
+
+	/** Persistent right-top rotation HUD (created once, hidden/reshown). */
+	UPROPERTY()
+	TObjectPtr<URotationWidget> RotationWidget;
+
 	// ---- Serve machine ----
 	/** Serving toss: ball is tossed up for a moment before being struck. */
 	bool bInToss = false;
@@ -254,9 +300,6 @@ protected:
 
 	/** Reset per-set scores and bump CurrentSet. */
 	void StartNextSet();
-
-	/** Place the ball at the server's hand and enter AwaitingServe. */
-	void BeginAwaitingServe();
 
 	/** Finish the toss: strike the ball, record the serve touch, enter Rally. */
 	void ExecuteServe();

@@ -13,15 +13,30 @@ enum class EVolleyballTeam : uint8
 	None        UMETA(Hidden)
 };
 
-/** Match / rally state machine (M10: explicit serve and toss phases). */
+/** FIVB rotation slot (P1 = back-right / serve slot). */
+UENUM(BlueprintType)
+enum class ERotationSlot : uint8
+{
+	P1  UMETA(DisplayName = "P1 back-right (serve)"),
+	P2  UMETA(DisplayName = "P2 front-right"),
+	P3  UMETA(DisplayName = "P3 front-middle"),
+	P4  UMETA(DisplayName = "P4 front-left"),
+	P5  UMETA(DisplayName = "P5 back-left"),
+	P6  UMETA(DisplayName = "P6 back-middle"),
+	None UMETA(Hidden)
+};
+
+/** Match / rally state machine (M11b: full official pre-serve ceremony). */
 UENUM(BlueprintType)
 enum class EMatchState : uint8
 {
-	PreMatch        UMETA(DisplayName = "Pre-match"),
-	BetweenRallies  UMETA(DisplayName = "Between rallies"),
-	AwaitingServe   UMETA(DisplayName = "Awaiting serve"),
-	ServingToss     UMETA(DisplayName = "Serving toss"),
-	Rally           UMETA(DisplayName = "Rally in progress"),
-	SetOver         UMETA(DisplayName = "Set finished"),
-	MatchOver       UMETA(DisplayName = "Match finished")
+	PreMatch           UMETA(DisplayName = "Pre-match"),
+	BetweenRallies     UMETA(DisplayName = "Post-rally result display"),
+	ResettingPositions UMETA(DisplayName = "Players returning to formation"),
+	AwaitingReady      UMETA(DisplayName = "2nd referee checking readiness"),
+	ServiceAuthorized  UMETA(DisplayName = "Whistle blown, service authorized"),
+	ServingToss        UMETA(DisplayName = "Serving toss"),
+	Rally              UMETA(DisplayName = "Rally in progress"),
+	SetOver            UMETA(DisplayName = "Set finished"),
+	MatchOver          UMETA(DisplayName = "Match finished")
 };

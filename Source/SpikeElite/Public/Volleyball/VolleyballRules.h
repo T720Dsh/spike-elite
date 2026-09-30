@@ -1,4 +1,4 @@
-﻿// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: MIT
 #pragma once
 
 #include "CoreMinimal.h"
@@ -70,6 +70,58 @@ enum class EBallTouchType : uint8
 	Set     UMETA(DisplayName = "Set (second touch)"),
 	Attack  UMETA(DisplayName = "Attack (third touch)"),
 	Unknown UMETA(DisplayName = "Unknown")
+};
+
+/**
+ * One player's authoritative rotation view (built by the GameMode from the
+ * roster order; consumed by the rotation HUD and tests).
+ */
+USTRUCT(BlueprintType)
+struct FRotationSlotView
+{
+	GENERATED_BODY()
+
+	/** 0..5 = P1..P6. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+	int32 SlotIndex = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+	int32 PlayerId = -1;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+	FString Jersey;
+
+	/** True when this player is the current server (P1 of the serving team). */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+	bool bServer = false;
+
+	/** True when this is the local human-controlled player. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+	bool bControlled = false;
+
+	/** P2/P3/P4 are front-row. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+	bool bFrontRow = false;
+};
+
+/** Snapshot of the authoritative rotation state pushed to the rotation HUD. */
+USTRUCT(BlueprintType)
+struct FRotationViewState
+{
+	GENERATED_BODY()
+
+	/** Current rotation count 1..6 (how many side-out rotations occurred). */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+	int32 RotationIndex = 1;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+	EVolleyballTeam ServingTeam = EVolleyballTeam::TeamA;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+	TArray<FRotationSlotView> TeamA;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+	TArray<FRotationSlotView> TeamB;
 };
 
 /**
@@ -156,7 +208,7 @@ namespace SEVolleyballRules
 	SPIKEELITE_API bool SettleRally(FVolleyballRallyState& State);
 
 	/** Phase gate shared by GameMode::CanTouchBall and the tests: only a live,
-	 *  unsettled Rally allows touches (never BetweenRallies / AwaitingServe /
+	 *  unsettled Rally allows touches (never BetweenRallies / ServiceAuthorized /
 	 *  ServingToss / SetOver / MatchOver / PreMatch). */
 	inline bool IsTouchLegalInPhase(EMatchState State, bool bRallySettled)
 	{

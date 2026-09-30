@@ -232,11 +232,11 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSEMatchOverBlocksActions, "SpikeElite.Tests.Ma
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FSEMatchOverBlocksActions::RunTest(const FString& Parameters)
 {
-	// No touch in PreMatch / BetweenRallies / AwaitingServe / ServingToss /
+	// No touch in PreMatch / BetweenRallies / ServiceAuthorized / ServingToss /
 	// SetOver / MatchOver; only a live, unsettled Rally.
 	TestFalse(TEXT("no touch in PreMatch"), IsTouchLegalInPhase(EMatchState::PreMatch, false));
 	TestFalse(TEXT("no touch in BetweenRallies"), IsTouchLegalInPhase(EMatchState::BetweenRallies, false));
-	TestFalse(TEXT("no touch while awaiting serve"), IsTouchLegalInPhase(EMatchState::AwaitingServe, false));
+	TestFalse(TEXT("no touch while awaiting serve"), IsTouchLegalInPhase(EMatchState::ServiceAuthorized, false));
 	TestFalse(TEXT("no touch during serving toss"), IsTouchLegalInPhase(EMatchState::ServingToss, false));
 	TestFalse(TEXT("no touch after set over"), IsTouchLegalInPhase(EMatchState::SetOver, false));
 	TestFalse(TEXT("no touch after match over"), IsTouchLegalInPhase(EMatchState::MatchOver, false));
@@ -326,10 +326,12 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSEPhaseGateMatrix, "SpikeElite.Tests.PhaseGate
 bool FSEPhaseGateMatrix::RunTest(const FString& Parameters)
 {
 	// Full phase matrix over every EMatchState; this is exactly the gate the
-	// GameMode's CanTouchBall/TryTouchBall call (M11: no second copy).
+	// GameMode's CanTouchBall/TryTouchBall call (M11: no second copy). M11b-2
+	// adds the official ceremony states: none of them allow touching.
 	const EMatchState All[] = {
-		EMatchState::PreMatch, EMatchState::BetweenRallies, EMatchState::AwaitingServe,
-		EMatchState::ServingToss, EMatchState::Rally, EMatchState::SetOver, EMatchState::MatchOver
+		EMatchState::PreMatch, EMatchState::BetweenRallies, EMatchState::ResettingPositions,
+		EMatchState::AwaitingReady, EMatchState::ServiceAuthorized, EMatchState::ServingToss,
+		EMatchState::Rally, EMatchState::SetOver, EMatchState::MatchOver
 	};
 	for (EMatchState State : All)
 	{
@@ -345,7 +347,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSEAutoServePolicy, "SpikeElite.Tests.AutoServe
 bool FSEAutoServePolicy::RunTest(const FString& Parameters)
 {
 	// M11: normal human NEVER auto-serves; bots always do; -devauto re-enables
-	// the human timeout. This is the exact predicate BeginAwaitingServe uses.
+	// the human timeout. This is the exact predicate BeginServiceAuthorized uses.
 	TestFalse(TEXT("human without -devauto waits for E"), ShouldAutoServe(false, false));
 	TestTrue(TEXT("human under -devauto may auto-serve"), ShouldAutoServe(false, true));
 	TestTrue(TEXT("bot always auto-serves"), ShouldAutoServe(true, false));
