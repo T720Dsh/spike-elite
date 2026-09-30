@@ -9,17 +9,18 @@ class UStaticMeshComponent;
 class UBoxComponent;
 class UInstancedStaticMeshComponent;
 class USceneComponent;
-class USpotLightComponent;
-class UPointLightComponent;
 
 /**
- * Procedural FIVB indoor volleyball arena.
+ * The playing court — floor, free zone, all lines, net, net posts and the
+ * short service lines. This object is persistent across Rematch; only its
+ * match state (handled by the GameMode) is reset.
  *
- * Playing court: 18m x 9m.
- * Free zone: 3m around.
- * Net: top 243cm, band 100cm (bottom 143cm).
- * Enclosed indoor hall (walls + roof, no sky), stepped stands on four sides
- * with instanced head+torso crowd, and bright court lighting.
+ * Arena shell (hall/stands/lighting/LED boards) lives in AVolleyballArena.
+ *
+ * Playing court: 18 m x 9 m (X = -900..+900, Y = -450..+450), line width 5 cm,
+ * centre line X=0, attack lines X=±300. Lines are IN.
+ * Free zone: 5 m past each sideline, 6.5 m past each end line
+ * (full play+free area 31 x 19 m). Net top 243 cm, band 100 cm (bottom 143 cm).
  */
 UCLASS()
 class SPIKEELITE_API AVolleyballCourt : public AActor
@@ -48,42 +49,26 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Court|Dimensions")
 	float AttackLineOffset = 300.0f;
 
+	/** Free zone: distance past the sidelines. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Court|Dimensions")
-	float FreeZone = 300.0f;
+	float SideFreeZone = 500.0f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Court|Stands")
-	int32 StandRows = 6;
+	/** Free zone: distance past the end lines (service zone depth). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Court|Dimensions")
+	float EndFreeZone = 650.0f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Court|Stands")
-	float StandStepHeight = 45.0f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Court|Stands")
-	float StandStepDepth = 90.0f;
-
-	/** Half extents (cm) of the enclosed hall interior. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Court|Hall")
-	float HallHalfLength = 2200.0f;
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Court|Hall")
-	float HallHalfWidth = 1600.0f;
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Court|Hall")
-	float HallHeight = 1200.0f;
+	/** Full play+free zone half extents. */
+	float GetFreeZoneHalfLength() const { return HalfCourtLength + EndFreeZone; } // 1550
+	float GetFreeZoneHalfWidth() const  { return HalfCourtWidth  + SideFreeZone; } // 950
 
 protected:
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UBoxComponent> Root;
 
-	// Floor layers
+	// Floor layers (court-owned; the arena owns the outer concourse)
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UStaticMeshComponent> CourtFloor;   // wood play area
-	UPROPERTY(VisibleAnywhere) TObjectPtr<UStaticMeshComponent> FreeZoneFloor; // surround
-	UPROPERTY(VisibleAnywhere) TObjectPtr<UStaticMeshComponent> ArenaFloor;    // outer concourse
+	UPROPERTY(VisibleAnywhere) TObjectPtr<UStaticMeshComponent> FreeZoneFloor; // sport surround
 
-	// Enclosed hall shell
-	UPROPERTY(VisibleAnywhere) TObjectPtr<UStaticMeshComponent> Roof;
-	UPROPERTY(VisibleAnywhere) TObjectPtr<UStaticMeshComponent> WallEndA;
-	UPROPERTY(VisibleAnywhere) TObjectPtr<UStaticMeshComponent> WallEndB;
-	UPROPERTY(VisibleAnywhere) TObjectPtr<UStaticMeshComponent> WallSideA;
-	UPROPERTY(VisibleAnywhere) TObjectPtr<UStaticMeshComponent> WallSideB;
-
-	// Net: instanced mesh grid (visual only, no physics) + opaque bands/posts
+	// Net: instanced mesh grid (visual only) + opaque bands/posts
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UInstancedStaticMeshComponent> NetGrid;
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UStaticMeshComponent> NetTopBand;
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UStaticMeshComponent> NetBottomBand;
@@ -93,26 +78,11 @@ protected:
 	// Lines
 	UPROPERTY(VisibleAnywhere) TObjectPtr<USceneComponent> LinesRoot;
 
-	// Stands & crowd (instanced)
-	UPROPERTY(VisibleAnywhere) TObjectPtr<UInstancedStaticMeshComponent> StandSteps;
-	UPROPERTY(VisibleAnywhere) TObjectPtr<UInstancedStaticMeshComponent> CrowdHeads;
-	UPROPERTY(VisibleAnywhere) TArray<TObjectPtr<UInstancedStaticMeshComponent>> CrowdBodies; // one ISM per clothing colour
-
-	// Court lighting (destroyed with the court; level lights are never touched)
-	UPROPERTY(VisibleAnywhere) TObjectPtr<USpotLightComponent> CourtLightA;
-	UPROPERTY(VisibleAnywhere) TObjectPtr<USpotLightComponent> CourtLightB;
-	UPROPERTY(VisibleAnywhere) TObjectPtr<USpotLightComponent> FillLight;
-	/** Dim corner fixtures that lift the stands/roof out of pure black. */
-	UPROPERTY(VisibleAnywhere) TArray<TObjectPtr<UPointLightComponent>> PerimeterLights;
-
 	UStaticMeshComponent* MakeLine(const TCHAR* Name, float X, float Y, float LenX, float LenY);
 	void BuildFloor(UStaticMesh* Cube);
-	void BuildHall(UStaticMesh* Cube);
 	void BuildNet(UStaticMesh* Cube, UStaticMesh* Cyl);
-	void BuildLighting();
-	void BuildStands(UStaticMesh* Cube, UStaticMesh* Sphere);
+	void BuildServeShortLines(UStaticMesh* Cube);
 	void PopulateNetGrid();
-	void PopulateStands();
 
 	/** Assign a wood material if the imported project asset exists, else tint. */
 	void ApplyFloorMaterial(UStaticMeshComponent* Comp, const FLinearColor& Fallback);

@@ -9,6 +9,7 @@
 
 class AVolleyballBall;
 class AVolleyballCourt;
+class AVolleyballArena;
 class ASpikeEliteCharacter;
 class UScoreboardWidget;
 
@@ -145,6 +146,11 @@ protected:
 
 	/** Log runtime actor counts (used to verify no duplicates across match cycles). */
 	void LogActorCounts(const TCHAR* Tag) const;
+
+	/** Persistent arena shell (hall/stands/lighting/LED). Created once; never rebuilt on Rematch. */
+	UPROPERTY()
+	TObjectPtr<AVolleyballArena> Arena;
+
 	UPROPERTY()
 	TObjectPtr<AVolleyballCourt> Court;
 

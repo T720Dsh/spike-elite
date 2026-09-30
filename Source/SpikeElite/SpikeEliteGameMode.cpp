@@ -4,6 +4,7 @@
 #include "SpikeElitePlayerController.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Volleyball/VolleyballCourt.h"
+#include "Volleyball/VolleyballArena.h"
 #include "Volleyball/VolleyballBall.h"
 #include "Engine/World.h"
 #include "Kismet/GameplayStatics.h"
@@ -128,8 +129,26 @@ void ASpikeEliteGameMode::StartMatch()
 
 	FActorSpawnParameters Params;
 	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-	Court = World->SpawnActor<AVolleyballCourt>(AVolleyballCourt::StaticClass(), FVector::ZeroVector, FRotator::ZeroRotator, Params);
-	Ball = World->SpawnActor<AVolleyballBall>(AVolleyballBall::StaticClass(), FVector(0,0,400), FRotator::ZeroRotator, Params);
+
+	// M11b-1: arena shell + court are persistent. They are created once and are
+	// never destroyed by CleanupMatch, so Rematch cannot duplicate them.
+	if (!Arena)
+	{
+		Arena = World->SpawnActor<AVolleyballArena>(AVolleyballArena::StaticClass(), FVector::ZeroVector, FRotator::ZeroRotator, Params);
+	}
+	if (!Court)
+	{
+		Court = World->SpawnActor<AVolleyballCourt>(AVolleyballCourt::StaticClass(), FVector::ZeroVector, FRotator::ZeroRotator, Params);
+	}
+	if (!Ball)
+	{
+		Ball = World->SpawnActor<AVolleyballBall>(AVolleyballBall::StaticClass(), FVector(0,0,400), FRotator::ZeroRotator, Params);
+	}
+	else
+	{
+		// Reuse the persistent ball: park it until the serve toss places it.
+		Ball->ResetBall(FVector(0, 0, 400));
+	}
 
 	const TArray<FVector> PosA = GetPositionsA();
 	TeamAPlayers.SetNum(6);
@@ -222,8 +241,10 @@ void ASpikeEliteGameMode::LogActorCounts(const TCHAR* Tag) const
 void ASpikeEliteGameMode::CleanupMatch()
 {
 	// Human player (roster slot 0 of Team A) is kept and parked; only bots die.
-	if (Court) { Court->Destroy(); Court = nullptr; }
-	if (Ball)  { Ball->Destroy(); Ball = nullptr; }
+	// M11b-1: arena shell, court and ball are persistent across matches and are
+	// deliberately NOT destroyed here (Rematch reuses them; counts must stay
+	// Court=1 Ball=1 Arena=1). Only bots, the scoreboard and transient state go.
+	if (Ball) { Ball->ResetBall(FVector(0, 0, 400)); }
 	for (auto& P : TeamAPlayers) if (P && P->bIsBot) P->Destroy();
 	for (auto& P : TeamBPlayers) if (P) P->Destroy();
 	TeamAPlayers.Reset();
