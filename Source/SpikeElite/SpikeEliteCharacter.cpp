@@ -1,5 +1,6 @@
-// SPDX-License-Identifier: MIT
+﻿// SPDX-License-Identifier: MIT
 #include "SpikeEliteCharacter.h"
+#include "SpikeEliteGameMode.h"
 #include "SpikeElitePlayerController.h"
 #include "Camera/CameraComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -26,7 +27,6 @@ ASpikeEliteCharacter::ASpikeEliteCharacter()
 	// Hinge-style placeholder humanoid (per design doc: simple articulated stand-in
 	// until proper rigged models are imported). Built from engine basic shapes with
 	// a normal human proportion: torso, head, two arms, two legs. Zero asset deps.
-	// TODO(M-models): swap this for a rigged skeletal mesh + animation blueprint.
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeMesh(TEXT("/Engine/BasicShapes/Cube.Cube"));
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> SphereMesh(TEXT("/Engine/BasicShapes/Sphere.Sphere"));
 
@@ -69,10 +69,20 @@ ASpikeEliteCharacter::ASpikeEliteCharacter()
 	MoveComp->AirControl = 0.5f;
 	MoveComp->MaxWalkSpeed = 450.0f;              // a bit faster for bots
 
+	// M10 camera pass: longer arm, raised + shoulder offset, collision tests and
+	// a slight lag so the ball at court centre is not hidden behind the body.
 	CameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
 	CameraBoom->SetupAttachment(RootComponent);
 	CameraBoom->TargetArmLength = ThirdPersonArmLength;
+	CameraBoom->SetRelativeLocation(FVector(0.f, 0.f, 70.f));
+	CameraBoom->SocketOffset = FVector(0.f, 55.f, 35.f);  // shoulder offset
 	CameraBoom->bUsePawnControlRotation = true;
+	CameraBoom->bDoCollisionTest = true;          // never clip through walls/stands/players
+	CameraBoom->ProbeSize = 14.f;
+	CameraBoom->bEnableCameraLag = true;
+	CameraBoom->CameraLagSpeed = 9.0f;
+	CameraBoom->bEnableCameraRotationLag = true;
+	CameraBoom->CameraRotationLagSpeed = 12.0f;
 
 	ThirdPersonCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("ThirdPersonCamera"));
 	ThirdPersonCamera->SetupAttachment(CameraBoom, USpringArmComponent::SocketName);
@@ -112,8 +122,6 @@ void ASpikeEliteCharacter::ApplyJerseyColor()
 	auto Tint = [&](UStaticMeshComponent* Comp, const FLinearColor& Col)
 	{
 		if (!Comp) return;
-		// Use the project M_Tint material (guaranteed "Color" parameter); the
-		// engine BasicShapes material does not tint reliably at runtime.
 		if (UMaterialInstanceDynamic* MID = SEMaterials::MakeTint(this, Col))
 		{
 			Comp->SetMaterial(0, MID);
@@ -151,81 +159,67 @@ void ASpikeEliteCharacter::Tick(float DeltaSeconds)
 
 void ASpikeEliteCharacter::TickBot(float DeltaSeconds)
 {
-	// Find the ball.
-	TArray<AActor*> Found;
-	UGameplayStatics::GetAllActorsOfClass(this, AVolleyballBall::StaticClass(), Found);
-	if (Found.Num() == 0) return;
-	AVolleyballBall* Ball = Cast<AVolleyballBall>(Found[0]);
-	if (!Ball) return;
-
-	const FVector MyLoc = GetActorLocation();
-	const FVector BallLoc = Ball->GetActorLocation();
-	const float DistToBall = FVector::Dist(MyLoc, BallLoc);
-
-	BotHitTimer -= DeltaSeconds;
-
-	// Is the ball on our side? (TeamSide +1 defends X>0, -1 defends X<0)
-	const bool bBallOnOurSide = (TeamSide > 0) ? (BallLoc.X > 0.0f) : (BallLoc.X < 0.0f);
-	const bool bBallHittable = BallLoc.Z > 120.0f && BallLoc.Z < 450.0f;
-
-	if (bBallOnOurSide && bBallHittable && DistToBall < 250.0f && BotHitTimer <= 0.0f)
+	// Cache the GameMode once; never call GetAllActorsOfClass every frame.
+	if (!AIGameMode.IsValid())
 	{
-		// Aim at the opponent's back court. A bounded error rate (wide / long /
-		// into the net) keeps rallies finite so points are actually awarded;
-		// without it bots perfectly return every ball forever.
-		const float Roll = FMath::FRand();
-		FVector Target;
-		float MinZ = 0.2f;
-		if (Roll < 0.06f)
+		if (ASpikeEliteGameMode* GM = Cast<ASpikeEliteGameMode>(UGameplayStatics::GetGameMode(this)))
 		{
-			// Wide: beyond a side line -> out.
-			const float SideY = (FMath::RandBool() ? 1.f : -1.f) * FMath::FRandRange(560.f, 720.f);
-			Target = FVector(-TeamSide * 700.f, SideY, BallLoc.Z);
+			AIGameMode = GM;
 		}
-		else if (Roll < 0.15f)
-		{
-			// Long / into the net: low trajectory.
-			Target = FVector(-TeamSide * FMath::FRandRange(700.f, 1050.f),
-			                 FMath::FRandRange(-200.f, 200.f), BallLoc.Z);
-			MinZ = FMath::FRandRange(-0.12f, 0.05f);
-		}
-		else
-		{
-			Target = FVector(-TeamSide * 700.0f, FMath::FRandRange(-250.0f, 250.0f), BallLoc.Z);
-		}
+	}
+	ASpikeEliteGameMode* GM = AIGameMode.Get();
+	if (!GM) return;
 
-		FVector Dir = (Target - BallLoc).GetSafeNormal();
-		Dir.Z = FMath::Max(Dir.Z, MinZ);
-		Dir.Normalize();
-		Ball->SetLastHitTeam(TeamSide > 0 ? EVolleyballTeam::TeamA : EVolleyballTeam::TeamB);
-		Ball->Strike(Dir, FMath::RandRange(900.0f, 1100.0f), 0.0f);
-		BotHitTimer = 0.7f;
-		return;
+	// Safety: keep simulated movement alive (deferred spawns can leave MOVE_None).
+	if (UCharacterMovementComponent* MC = GetCharacterMovement())
+	{
+		if (MC->MovementMode == MOVE_None) { MC->SetMovementMode(MOVE_Walking); }
 	}
 
-	// Otherwise: move toward the ball if it's coming our way, else go home.
-	FVector Dest = (bBallOnOurSide && BallLoc.Z < 300.0f) ? BallLoc : HomePosition;
-	Dest.Z = MyLoc.Z;
-	FVector ToDest = Dest - MyLoc;
+	// ---- Movement from the GameMode's directive ----
+	FVector Dest;
+	switch (AIBehavior)
+	{
+	case EAIBehavior::MoveToReceive:
+	case EAIBehavior::Set:
+	case EAIBehavior::Attack:
+		Dest = AITargetLocation;
+		break;
+	case EAIBehavior::Wait:
+	case EAIBehavior::ReturnHome:
+	default:
+		Dest = HomePosition;
+		break;
+	}
+	Dest.Z = GetActorLocation().Z;
+	FVector ToDest = Dest - GetActorLocation();
 	ToDest.Z = 0;
 	const float Dist = ToDest.Size();
+	const float BotSpeed = 450.0f;
 	if (Dist > 30.0f)
 	{
-		AddMovementInput(ToDest.GetSafeNormal(), FMath::Min(1.0f, Dist / 200.0f));
+		// Direct, deterministic movement (no reliance on character-movement input
+		// consumption, which deferred-spawned pawns without a controller may skip).
+		const float Step = FMath::Min(BotSpeed * DeltaSeconds, Dist);
+		FVector NewLoc = GetActorLocation() + ToDest.GetSafeNormal() * Step;
+		NewLoc.X = (TeamSide > 0) ? FMath::Clamp(NewLoc.X, 30.f, 950.f) : FMath::Clamp(NewLoc.X, -950.f, -30.f);
+		NewLoc.Y = FMath::Clamp(NewLoc.Y, -500.f, 500.f);
+		SetActorLocation(NewLoc, true);
 	}
 
-	// Don't cross the net or run out.
-	FVector Loc = MyLoc;
-	if (TeamSide > 0)
-	{
-		Loc.X = FMath::Clamp(Loc.X, 30.0f, 950.0f);
-	}
-	else
-	{
-		Loc.X = FMath::Clamp(Loc.X, -950.0f, -30.0f);
-	}
+	// ---- Boundary: stay on own half, don't run out ----
+	FVector Loc = GetActorLocation();
+	if (TeamSide > 0) { Loc.X = FMath::Clamp(Loc.X, 30.0f, 950.0f); }
+	else              { Loc.X = FMath::Clamp(Loc.X, -950.0f, -30.0f); }
 	Loc.Y = FMath::Clamp(Loc.Y, -500.0f, 500.0f);
-	if (Loc != MyLoc) SetActorLocation(Loc, true);
+	if (Loc != GetActorLocation()) { SetActorLocation(Loc, true); }
+
+	// ---- Touch: only the primary handler, and only via the GameMode ----
+	if (bIsPrimaryHandler)
+	{
+		// TryTouchBall does the reach/phase/rules checks; cheap per frame.
+		GM->TryTouchBall(this, EBallTouchType::Unknown);
+	}
 }
 
 void ASpikeEliteCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
@@ -308,35 +302,22 @@ void ASpikeEliteCharacter::HitBall()
 {
 	if (bIsBot) return;
 	if (GetWorld() && GetWorld()->IsPaused()) return;   // never hit while paused
-	TArray<AActor*> Found;
-	UGameplayStatics::GetAllActorsOfClass(this, AVolleyballBall::StaticClass(), Found);
-	if (Found.Num() == 0) return;
-	AVolleyballBall* Ball = Cast<AVolleyballBall>(Found[0]);
-	if (!Ball) return;
+	if (!bTouchArmed) return;
 
-	const FVector MyLoc = GetActorLocation();
-	const float Dist = FVector::Dist(MyLoc, Ball->GetActorLocation());
-	if (Dist > 220.0f) return;
-
-	FVector LookDir = Controller ? Controller->GetControlRotation().Vector() : FVector::ForwardVector;
-	LookDir.Z = FMath::Max(LookDir.Z, 0.15f);
-	LookDir.Normalize();
-	const bool bSpiking = !GetCharacterMovement()->IsMovingOnGround();
-	Ball->SetLastHitTeam(TeamSide > 0 ? EVolleyballTeam::TeamA : EVolleyballTeam::TeamB);
-	Ball->Strike(LookDir, bSpiking ? 1200.0f : 850.0f, 0.0f);
+	if (ASpikeEliteGameMode* GM = Cast<ASpikeEliteGameMode>(UGameplayStatics::GetGameMode(this)))
+	{
+		GM->TryTouchBall(this, EBallTouchType::Unknown);
+	}
 }
 
 void ASpikeEliteCharacter::ServeBall()
 {
 	if (bIsBot) return;
 	if (GetWorld() && GetWorld()->IsPaused()) return;
-	TArray<AActor*> Found;
-	UGameplayStatics::GetAllActorsOfClass(this, AVolleyballBall::StaticClass(), Found);
-	if (Found.Num() == 0) return;
-	AVolleyballBall* Ball = Cast<AVolleyballBall>(Found[0]);
-	if (!Ball) return;
-	const FVector MyLoc = GetActorLocation();
-	Ball->ResetBall(FVector(MyLoc.X, MyLoc.Y, MyLoc.Z + 180.0f));
-	Ball->SetLastHitTeam(TeamSide > 0 ? EVolleyballTeam::TeamA : EVolleyballTeam::TeamB);
-	Ball->Strike(FVector(-0.85f, FMath::FRandRange(-0.1f, 0.1f), 0.5f), 1200.0f, 0.0f);
+
+	// The GameMode is the sole authority for who may serve and when.
+	if (ASpikeEliteGameMode* GM = Cast<ASpikeEliteGameMode>(UGameplayStatics::GetGameMode(this)))
+	{
+		GM->RequestServe(this);
+	}
 }

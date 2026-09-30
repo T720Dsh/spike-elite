@@ -8,5 +8,7 @@ public class SpikeEliteEditorTarget : TargetRules
 		DefaultBuildSettings = BuildSettingsVersion.V7;
 		IncludeOrderVersion = EngineIncludeOrderVersion.Unreal5_8;
 		ExtraModuleNames.Add("SpikeElite");
+		// Developer-only automation test module (never shipped).
+		ExtraModuleNames.Add("SpikeEliteTests");
 	}
 }

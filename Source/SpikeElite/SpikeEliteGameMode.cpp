@@ -1,7 +1,8 @@
-// SPDX-License-Identifier: MIT
+﻿// SPDX-License-Identifier: MIT
 #include "SpikeEliteGameMode.h"
 #include "SpikeEliteCharacter.h"
 #include "SpikeElitePlayerController.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "Volleyball/VolleyballCourt.h"
 #include "Volleyball/VolleyballBall.h"
 #include "Engine/World.h"
@@ -17,6 +18,28 @@
 #include "Blueprint/UserWidget.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogVolleyballRules, Log, All);
+
+namespace
+{
+	/** Map the current touch count to its phase label (Receive -> Set -> Attack). */
+	EBallTouchType ResolveTouchType(int32 TouchCount)
+	{
+		switch (TouchCount)
+		{
+		case 0:  return EBallTouchType::Receive;
+		case 1:  return EBallTouchType::Set;
+		case 2:  return EBallTouchType::Attack;
+		default: return EBallTouchType::Unknown;
+		}
+	}
+
+	const TCHAR* TeamStr(EVolleyballTeam Team)
+	{
+		if (Team == EVolleyballTeam::TeamA) return TEXT("A");
+		if (Team == EVolleyballTeam::TeamB) return TEXT("B");
+		return TEXT("-");
+	}
+}
 
 TArray<FVector> ASpikeEliteGameMode::GetPositionsA()
 {
@@ -35,6 +58,16 @@ ASpikeEliteGameMode::ASpikeEliteGameMode()
 	DefaultPawnClass = ASpikeEliteCharacter::StaticClass();
 	PlayerControllerClass = ASpikeElitePlayerController::StaticClass();
 	PrimaryActorTick.bCanEverTick = true;
+
+	// -QuickMatch: one set to 3 points, but reuses the real rule code.
+	bQuickMatch = FParse::Param(FCommandLine::Get(), TEXT("QuickMatch"));
+
+	// Seeded AI randomness: -Seed=N makes automated runs reproducible.
+	int32 Seed = FDateTime::Now().GetTicks() % 1000000;
+	int32 SeedArg = 0;
+	if (FParse::Value(FCommandLine::Get(), TEXT("SEED="), SeedArg)) { Seed = SeedArg; }
+	AIStream.Initialize(Seed);
+	UE_LOG(LogVolleyballRules, Log, TEXT("AIStream seed=%d QuickMatch=%d"), Seed, bQuickMatch ? 1 : 0);
 }
 
 void ASpikeEliteGameMode::BeginPlay()
@@ -50,7 +83,8 @@ void ASpikeEliteGameMode::BeginPlay()
 
 void ASpikeEliteGameMode::StartMatch()
 {
-	if (bMatchActive) return;
+	// M10: "再来一场" re-enters here while a match is active -> full cleanup first.
+	if (bMatchActive) { CleanupMatch(); }
 	UWorld* World = GetWorld();
 	if (!World) return;
 
@@ -62,20 +96,28 @@ void ASpikeEliteGameMode::StartMatch()
 	TeamAScore = TeamBScore = 0;
 	TeamASetsWon = TeamBSetsWon = 0;
 	CurrentSet = 1;
-	PointsToWin = 25;
+	PointsToWin = bQuickMatch ? 3 : SEVolleyballRules::PointsToWinForSet(CurrentSet);
+	MatchWinsNeeded = bQuickMatch ? 1 : 3;
 	MatchWinner = EVolleyballTeam::None;
 	ServingTeam = EVolleyballTeam::TeamA;
 	TeamAPlayers.Reset();
 	TeamBPlayers.Reset();
+	SetScoresA.Reset();
+	SetScoresB.Reset();
+	SetScoresA.Add(0);
+	SetScoresB.Add(0);
 
 	// Reset rally timers / flags so a stale timer from a previous match cannot
 	// fire the moment the new match starts.
 	bInToss = false;
 	TossTimer = 0.0f;
 	InterRallyTimer = 0.0f;
-	AIHitCooldown = 0.0f;
 	NetTouchCooldown = 0.0f;
 	BallPrevX = 0.0f;
+	bNetContactLatched = false;
+	RallyResultText.Empty();
+	RallyResultDisplayTimer = 0.0f;
+	SEVolleyballRules::BeginRally(RallyState, ServingTeam);
 
 	FActorSpawnParameters Params;
 	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
@@ -95,6 +137,7 @@ void ASpikeEliteGameMode::StartMatch()
 			HC->HomePosition = PosA[0];
 			HC->SetActorEnableCollision(true);
 			HC->SetActorLocation(PosA[0] + FVector(0,0,100.0f));
+			HC->bTouchArmed = true;
 			TeamAPlayers[0] = HC;
 		}
 	}
@@ -113,7 +156,14 @@ void ASpikeEliteGameMode::StartMatch()
 			Bot->bIsBot = true;
 			Bot->TeamSide = Side;
 			Bot->HomePosition = Home;
+			Bot->bTouchArmed = true;
 			UGameplayStatics::FinishSpawningActor(Bot, FTransform(Rot.Quaternion(), Loc, FVector(1.f)));
+			// Deferred-spawned Characters can come up with MovementMode=None
+			// (no simulation). Force walking so the GameMode's directives move them.
+			if (UCharacterMovementComponent* MC = Bot->GetCharacterMovement())
+			{
+				MC->SetMovementMode(MOVE_Walking);
+			}
 		}
 		return Bot;
 	};
@@ -127,9 +177,6 @@ void ASpikeEliteGameMode::StartMatch()
 		const FVector BPos(-PosA[i].X, PosA[i].Y, 0.0f);
 		TeamBPlayers[i] = SpawnBot(BPos + FVector(0,0,100.0f), FRotator(0,90,0), -1, BPos);
 	}
-
-	// Indoor arena lighting is owned by the Court actor (and destroyed with it),
-	// so we never spawn or delete level lights here.
 
 	// Scoreboard.
 	if (APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0))
@@ -146,7 +193,8 @@ void ASpikeEliteGameMode::StartMatch()
 	MatchState = EMatchState::BetweenRallies;
 	InterRallyTimer = 1.0f;
 	bMatchActive = true;
-	UE_LOG(LogVolleyballRules, Log, TEXT("=== Match started ==="));
+	UE_LOG(LogVolleyballRules, Log, TEXT("=== Match started (QuickMatch=%d, PointsToWin=%d, MatchWinsNeeded=%d) ==="),
+		bQuickMatch ? 1 : 0, PointsToWin, MatchWinsNeeded);
 	LogActorCounts(TEXT("StartMatch"));
 }
 
@@ -175,19 +223,20 @@ void ASpikeEliteGameMode::CleanupMatch()
 	TeamBPlayers.Reset();
 	if (Scoreboard) { Scoreboard->RemoveFromParent(); Scoreboard = nullptr; }
 
-	// IMPORTANT: do NOT delete all DirectionalLights / SkyLights — that would
-	// remove lights owned by the loaded level. Match lighting lives on the Court
-	// and was destroyed above.
-
 	// Reset every piece of transient rally/match state.
 	bInToss = false;
 	TossTimer = 0.0f;
 	InterRallyTimer = 0.0f;
-	AIHitCooldown = 0.0f;
 	NetTouchCooldown = 0.0f;
 	BallPrevX = 0.0f;
+	bNetContactLatched = false;
 	bMatchActive = false;
 	MatchState = EMatchState::PreMatch;
+	RallyResultText.Empty();
+	RallyResultDisplayTimer = 0.0f;
+	SEVolleyballRules::BeginRally(RallyState, EVolleyballTeam::TeamA);
+	SetScoresA.Reset();
+	SetScoresB.Reset();
 
 	// Clear any pending timers (serve toss / inter-rally) from this match.
 	GetWorldTimerManager().ClearAllTimersForObject(this);
@@ -235,36 +284,65 @@ void ASpikeEliteGameMode::RespawnPlayersToPositions()
 	}
 }
 
+void ASpikeEliteGameMode::ShowBanner(const FString& Text, float Seconds)
+{
+	RallyResultText = Text;
+	RallyResultDisplayTimer = Seconds;
+}
+
+void ASpikeEliteGameMode::SetRallyResult(ERallyEndReason Reason, EVolleyballTeam ScoringTeam)
+{
+	const FString Text = FString::Printf(TEXT("%s · %s 队得分"),
+		*SEVolleyballRules::RallyReasonLabel(Reason), TeamStr(ScoringTeam));
+	ShowBanner(Text, 1.5f);
+}
+
 void ASpikeEliteGameMode::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
-	if (!bMatchActive) return;
+	if (!bMatchActive || !Ball || !Court) return;
 
-	if (MatchState == EMatchState::BetweenRallies)
+	switch (MatchState)
+	{
+	case EMatchState::BetweenRallies:
 	{
 		InterRallyTimer -= DeltaSeconds;
-		if (InterRallyTimer <= 0.f) ServeNextBall();
+		if (InterRallyTimer <= 0.f) { BeginAwaitingServe(); }
+		break;
 	}
-
-	if (bInToss && Ball)
+	case EMatchState::AwaitingServe:
 	{
-		TossTimer -= DeltaSeconds;
-		if (TossTimer <= 0.f)
+		// A bot server (or Team A's bot when the human rotated away) serves
+		// automatically after a short pause; the human waits for the E key.
+		if (bAIServePending)
 		{
-			Ball->Strike(TossDir, TossPower, 0.f);
-			bInToss = false;
-			MatchState = EMatchState::Playing;
+			AIServeTimer -= DeltaSeconds;
+			if (AIServeTimer <= 0.f)
+			{
+				bAIServePending = false;
+				TArray<TObjectPtr<ASpikeEliteCharacter>>& Roster = (ServingTeam == EVolleyballTeam::TeamA) ? TeamAPlayers : TeamBPlayers;
+				if (Roster.Num() > 0) { RequestServe(Roster[0].Get()); }
+			}
 		}
+		break;
 	}
-
-	// ---- Single-authority net collision (the visual net has NO physics) ----
-	// Detect the ball crossing the net plane while inside the real band
-	// (bottom 143 to top 243) and within net width; deflect it back once with a
-	// cooldown so it cannot be struck every frame. Ball below 143 or outside the
-	// net width passes freely under/around the net.
-	if (NetTouchCooldown > 0.f) NetTouchCooldown -= DeltaSeconds;
-	if (MatchState == EMatchState::Playing && Ball && Court)
+	case EMatchState::ServingToss:
 	{
+		if (bInToss)
+		{
+			TossTimer -= DeltaSeconds;
+			if (TossTimer <= 0.f) { ExecuteServe(); }
+		}
+		break;
+	}
+	case EMatchState::Rally:
+	{
+		// ---- Single-authority net collision (the visual net has NO physics) ----
+		// Detect the ball crossing the net plane while inside the real band
+		// (bottom 143 to top 243) and within net width; deflect it back once with a
+		// cooldown so it cannot be struck every frame.
+		if (NetTouchCooldown > 0.f) { NetTouchCooldown -= DeltaSeconds; }
+
 		const FVector BL = Ball->GetActorLocation();
 		const FVector BV = Ball->GetVelocity();
 		const float NetTop = Court->NetHeight;                 // 243
@@ -295,124 +373,740 @@ void ASpikeEliteGameMode::Tick(float DeltaSeconds)
 			// A net tap does NOT change the last touching team.
 			UE_LOG(LogVolleyballRules, Log, TEXT("Net touch at Z=%.0f -> rebound (last touch unchanged)"), BL.Z);
 		}
+
+		// ---- Legal net crossing (above the net): switch possession ----
+		const bool bCrossedToNegative = BallPrevX > 0.f && BL.X <= 0.f;
+		const bool bCrossedToPositive = BallPrevX < 0.f && BL.X >= 0.f;
+		if ((bCrossedToNegative || bCrossedToPositive) && BL.Z > NetTop)
+		{
+			OnBallCrossedNet();
+		}
 		BallPrevX = BL.X;
+
+		// ---- AI coordination ----
+		UpdateAIDirectives(DeltaSeconds);
+
+		// ---- Rearm touch protection once the ball leaves reach ----
+		RearmTouchers();
+
+		break;
+	}
+	case EMatchState::SetOver:
+	{
+		InterRallyTimer -= DeltaSeconds;
+		if (InterRallyTimer <= 0.f) { StartNextSet(); }
+		break;
+	}
+	default:
+		break;
 	}
 
-	if (Scoreboard)
+	// Rally-result banner fades after its window (unpaused timer is fine: the
+	// world is not paused during rallies; banners also expire between rallies).
+	if (RallyResultDisplayTimer > 0.f)
 	{
-		FString BallHint;
-		if (Ball)
+		RallyResultDisplayTimer -= DeltaSeconds;
+		if (RallyResultDisplayTimer <= 0.f) { RallyResultText.Empty(); }
+	}
+
+	UpdateScoreboard();
+}
+
+void ASpikeEliteGameMode::RearmTouchers()
+{
+	if (!Ball) return;
+	const FVector BL = Ball->GetActorLocation();
+	auto Rearm = [&](TObjectPtr<ASpikeEliteCharacter>& C)
+	{
+		if (C && !C->bTouchArmed && FVector::Dist(C->GetActorLocation(), BL) > TouchReach + 40.f)
 		{
-			APawn* Player = UGameplayStatics::GetPlayerPawn(this, 0);
-			if (Player)
+			C->bTouchArmed = true;
+		}
+	};
+	for (auto& C : TeamAPlayers) Rearm(C);
+	for (auto& C : TeamBPlayers) Rearm(C);
+}
+
+void ASpikeEliteGameMode::UpdateScoreboard()
+{
+	if (!Scoreboard) return;
+
+	FString BallHint;
+	if (Ball)
+	{
+		APawn* Player = UGameplayStatics::GetPlayerPawn(this, 0);
+		if (Player)
+		{
+			const FVector ToBall = Ball->GetActorLocation() - Player->GetActorLocation();
+			const float Dist = ToBall.Size();
+			if (Dist < TouchReach)
 			{
-				const FVector ToBall = Ball->GetActorLocation() - Player->GetActorLocation();
-				const float Dist = ToBall.Size();
-				if (Dist < 200.f) BallHint = TEXT("球在这里!");
-				else
-				{
-					const float Yaw = FRotationMatrix::MakeFromX(ToBall).Rotator().Yaw - Player->GetControlRotation().Yaw;
-					FString Dir;
-					if      (Yaw > 45 && Yaw <= 135)  Dir = TEXT("球 << 左");
-					else if (Yaw <= -45 && Yaw >= -135) Dir = TEXT("球 右 >>");
-					else if (Yaw > 135 || Yaw < -135)   Dir = TEXT("球在身后");
-					else                                   Dir = TEXT("球在前方");
-					BallHint = FString::Printf(TEXT("%s  (%.0fm)"), *Dir, Dist/100.f);
-				}
+				BallHint = TEXT("球在触球范围！");
+			}
+			else
+			{
+				// FMath::FindDeltaAngleDegrees avoids the ±180° wrap bug.
+				const float Yaw = FMath::FindDeltaAngleDegrees(
+					FRotationMatrix::MakeFromX(ToBall).Rotator().Yaw, Player->GetControlRotation().Yaw);
+				FString Dir;
+				if      (Yaw > 45 && Yaw <= 135)       Dir = TEXT("球 << 左");
+				else if (Yaw <= -45 && Yaw >= -135)    Dir = TEXT("球 右 >>");
+				else if (Yaw > 135 || Yaw < -135)      Dir = TEXT("球在身后");
+				else                                   Dir = TEXT("球在前方");
+				BallHint = FString::Printf(TEXT("%s  (%.0fm)"), *Dir, Dist/100.f);
 			}
 		}
-		Scoreboard->UpdateScore(CurrentSet, TeamAScore, TeamBScore, TeamASetsWon, TeamBSetsWon,
-			ServingTeam == EVolleyballTeam::TeamA, BallHint);
 	}
+
+	// Phase line (Chinese label for the current state machine node).
+	FString Phase;
+	switch (MatchState)
+	{
+	case EMatchState::PreMatch:       Phase = TEXT("赛前"); break;
+	case EMatchState::BetweenRallies: Phase = TEXT("回合间"); break;
+	case EMatchState::AwaitingServe:  Phase = TEXT("等待发球"); break;
+	case EMatchState::ServingToss:    Phase = TEXT("发球抛球"); break;
+	case EMatchState::Rally:          Phase = TEXT("回合进行"); break;
+	case EMatchState::SetOver:        Phase = TEXT("局间休息"); break;
+	case EMatchState::MatchOver:      Phase = TEXT("比赛结束"); break;
+	default:                          Phase = TEXT("-"); break;
+	}
+
+	// Serve hint ONLY in the legal state, for the legal server.
+	FString ServeHint;
+	if (MatchState == EMatchState::AwaitingServe && ServingTeam == EVolleyballTeam::TeamA)
+	{
+		if (ASpikeEliteCharacter* Player = Cast<ASpikeEliteCharacter>(UGameplayStatics::GetPlayerPawn(this, 0)))
+		{
+			if (TeamAPlayers.Num() > 0 && TeamAPlayers[0] == Player)
+			{
+				ServeHint = TEXT("按 E 发球");
+			}
+		}
+	}
+
+	// Possession / touch counter, e.g. "A 2/3".
+	const FString Possession = SEVolleyballRules::TouchLabel(RallyState);
+
+	Scoreboard->UpdateScore(CurrentSet, TeamAScore, TeamBScore, TeamASetsWon, TeamBSetsWon,
+		ServingTeam == EVolleyballTeam::TeamA, BallHint, Phase, Possession, ServeHint, RallyResultText);
 }
 
 void ASpikeEliteGameMode::OnBallLanded(const FVector& BallLocation)
 {
-	if (MatchState != EMatchState::Playing) return;
+	if (MatchState != EMatchState::Rally) return;
+	if (RallyState.bRallySettled) return;
 
-	// FIVB court: |X| <= 900 (end lines), |Y| <= 450 (side lines). Lines are in.
-	const bool bIn = FMath::Abs(BallLocation.X) <= 900.f
-	              && FMath::Abs(BallLocation.Y) <= 450.f;
+	const bool bIn = SEVolleyballRules::IsInBounds(BallLocation, Court->HalfCourtLength, Court->HalfCourtWidth);
+	const EVolleyballTeam Last = RallyState.LastTouchTeam;
+	const EVolleyballTeam Scoring = SEVolleyballRules::DetermineScoringTeamOnLand(bIn, Last, BallLocation.X >= 0.f);
 
-	const EVolleyballTeam Last = Ball ? Ball->GetLastHitTeam() : EVolleyballTeam::None;
-	EVolleyballTeam ScoringTeam;
+	ERallyEndReason Reason = bIn ? ERallyEndReason::BallIn : ERallyEndReason::BallOut;
 
-	if (bIn)
+	// Serve fault: only the serve touch happened and the ball never crossed the
+	// net -> it came down on the serving side (in or out).
+	if (Reason == ERallyEndReason::BallIn && RallyState.TouchCount == 1 && !bServeCrossedNet)
 	{
-		// Landed in a court: the side defending that half loses the rally.
-		// X > 0 is Team A's half, so Team B scores (and vice versa).
-		ScoringTeam = (BallLocation.X >= 0.f) ? EVolleyballTeam::TeamB : EVolleyballTeam::TeamA;
-	}
-	else
-	{
-		// Landed out: the opponent of the last touching team scores.
-		if (Last == EVolleyballTeam::TeamA)      ScoringTeam = EVolleyballTeam::TeamB;
-		else if (Last == EVolleyballTeam::TeamB) ScoringTeam = EVolleyballTeam::TeamA;
-		else                                     ScoringTeam = (BallLocation.X >= 0.f) ? EVolleyballTeam::TeamB : EVolleyballTeam::TeamA;
+		Reason = ERallyEndReason::ServeFault;
 	}
 
 	UE_LOG(LogVolleyballRules, Log,
-		TEXT("Ball landed %s at (%.0f, %.0f, %.0f) | LastTouch=%s | Scoring=%s"),
+		TEXT("Ball landed %s at (%.0f, %.0f, %.0f) | LastTouch=%s | TouchCount=%d | Scoring=%s"),
 		bIn ? TEXT("IN") : TEXT("OUT"),
 		BallLocation.X, BallLocation.Y, BallLocation.Z,
-		Last == EVolleyballTeam::TeamA ? TEXT("A") : Last == EVolleyballTeam::TeamB ? TEXT("B") : TEXT("None"),
-		ScoringTeam == EVolleyballTeam::TeamA ? TEXT("A") : TEXT("B"));
+		TeamStr(Last),
+		RallyState.TouchCount,
+		TeamStr(Scoring));
+
+	EndRally(Reason, Scoring);
+}
+
+void ASpikeEliteGameMode::EndRally(ERallyEndReason Reason, EVolleyballTeam ScoringTeam)
+{
+	if (!SEVolleyballRules::SettleRally(RallyState)) return;  // single settlement
+
+	SetRallyResult(Reason, ScoringTeam);
+
+	UE_LOG(LogVolleyballRules, Log,
+		TEXT("[RallyEnd] reason=%s scoring=%s lastTouch=%s touchCount=%d A:%d B:%d set=%d"),
+		*SEVolleyballRules::RallyReasonLabel(Reason), TeamStr(ScoringTeam),
+		TeamStr(RallyState.LastTouchTeam), RallyState.TouchCount, TeamAScore, TeamBScore, CurrentSet);
 
 	AwardPoint(ScoringTeam);
 }
 
 void ASpikeEliteGameMode::AwardPoint(EVolleyballTeam ScoringTeam)
 {
-	if (ScoringTeam == EVolleyballTeam::TeamA) TeamAScore++; else TeamBScore++;
+	if (ScoringTeam == EVolleyballTeam::TeamA) { TeamAScore++; }
+	else if (ScoringTeam == EVolleyballTeam::TeamB) { TeamBScore++; }
+	else { return; }
+
 	const bool bWasServeWin = (ServingTeam == ScoringTeam);
 	ServingTeam = ScoringTeam;
-	if (!bWasServeWin) RotateTeam(ScoringTeam);
-	UE_LOG(LogVolleyballRules, Log, TEXT("Point. A:%d B:%d"), TeamAScore, TeamBScore);
+	if (!bWasServeWin) { RotateTeam(ScoringTeam); }
+
+	// Record the current set's running score.
+	if (SetScoresA.Num() >= CurrentSet) { SetScoresA[CurrentSet-1] = TeamAScore; }
+	if (SetScoresB.Num() >= CurrentSet) { SetScoresB[CurrentSet-1] = TeamBScore; }
+
+	UE_LOG(LogVolleyballRules, Log, TEXT("Point. A:%d B:%d (serve=%s)"), TeamAScore, TeamBScore, TeamStr(ServingTeam));
 	CheckSetWin();
 }
 
 void ASpikeEliteGameMode::CheckSetWin()
 {
-	bool bA = TeamAScore >= PointsToWin && (TeamAScore-TeamBScore) >= 2;
-	bool bB = TeamBScore >= PointsToWin && (TeamBScore-TeamAScore) >= 2;
-	if (!bA && !bB) { MatchState = EMatchState::BetweenRallies; InterRallyTimer = 1.5f; return; }
-	EVolleyballTeam W = bA ? EVolleyballTeam::TeamA : EVolleyballTeam::TeamB;
-	if (W == EVolleyballTeam::TeamA) TeamASetsWon++; else TeamBSetsWon++;
-	if (TeamASetsWon >= 3 || TeamBSetsWon >= 3)
+	if (!SEVolleyballRules::IsSetWon(TeamAScore, TeamBScore, PointsToWin))
 	{
-		MatchWinner = (TeamASetsWon >= 3) ? EVolleyballTeam::TeamA : EVolleyballTeam::TeamB;
-		MatchState = EMatchState::MatchOver;
+		MatchState = EMatchState::BetweenRallies;
+		InterRallyTimer = InterRallyDelay;
+		bInToss = false;
+		UpdateScoreboard();
 		return;
 	}
-	StartNextSet();
+
+	const EVolleyballTeam W = (TeamAScore > TeamBScore) ? EVolleyballTeam::TeamA : EVolleyballTeam::TeamB;
+	if (W == EVolleyballTeam::TeamA) { TeamASetsWon++; } else { TeamBSetsWon++; }
+
+	if (SEVolleyballRules::IsMatchWon(TeamASetsWon, TeamBSetsWon, MatchWinsNeeded))
+	{
+		MatchWinner = W;
+		MatchState = EMatchState::MatchOver;
+		UpdateScoreboard();
+		NotifyMatchOver();
+		return;
+	}
+
+	// Set over: show banner, then start the next set after the pause.
+	MatchState = EMatchState::SetOver;
+	InterRallyTimer = SetOverDelay;
+	const FString Text = FString::Printf(TEXT("第 %d 局结束：%s 队获胜  %d : %d"),
+		CurrentSet, TeamStr(W), TeamAScore, TeamBScore);
+	ShowBanner(Text, SetOverDelay);
+	UpdateScoreboard();
 }
 
 void ASpikeEliteGameMode::StartNextSet()
 {
 	CurrentSet++;
 	TeamAScore = TeamBScore = 0;
-	PointsToWin = (CurrentSet >= 5) ? 15 : 25;
+	PointsToWin = bQuickMatch ? 3 : SEVolleyballRules::PointsToWinForSet(CurrentSet);
+	SetScoresA.Add(0);
+	SetScoresB.Add(0);
 	RespawnPlayersToPositions();
+	SEVolleyballRules::BeginRally(RallyState, ServingTeam);
 	MatchState = EMatchState::BetweenRallies;
-	InterRallyTimer = 3.5f;
+	InterRallyTimer = SetOverDelay * 0.6f;
+	UpdateScoreboard();
+	UE_LOG(LogVolleyballRules, Log, TEXT("Set %d begins (to %d)"), CurrentSet, PointsToWin);
 }
 
-void ASpikeEliteGameMode::ServeNextBall()
+void ASpikeEliteGameMode::BeginAwaitingServe()
 {
-	if (!Ball || !Court) return;
+	if (!Ball) return;
+
 	TArray<TObjectPtr<ASpikeEliteCharacter>>& Roster = (ServingTeam == EVolleyballTeam::TeamA) ? TeamAPlayers : TeamBPlayers;
-	FVector ServerPos = (Roster.Num() > 0 && Roster[0]) ? Roster[0]->GetActorLocation()
+	ASpikeEliteCharacter* Server = (Roster.Num() > 0) ? Roster[0].Get() : nullptr;
+	const FVector ServerPos = Server ? Server->GetActorLocation()
 		: FVector(ServingTeam == EVolleyballTeam::TeamA ? 770.f : -770.f, 0.f, 0.f);
+
 	Ball->ResetBall(ServerPos + FVector(0,0,180.f));
 	BallPrevX = Ball->GetActorLocation().X;
 	bNetContactLatched = false;
-	Ball->SetLastHitTeam(ServingTeam);   // serve counts as the serving team's touch
-	TossDir = (ServingTeam == EVolleyballTeam::TeamA) ? FVector(-0.878f,0,0.479f) : FVector(0.878f,0,0.479f);
+	bServeCrossedNet = false;
+	SEVolleyballRules::BeginRally(RallyState, ServingTeam);
+	ServerPlayerIndex = (Server && !Server->bIsBot) ? 0 : -1;
+
+	MatchState = EMatchState::AwaitingServe;
+	bInToss = false;
+
+	// A bot server serves itself after a short pause; a human server also gets
+	// a serve timeout so unattended -QuickMatch verification runs can finish a
+	// full match without keyboard input (normal play: the human presses E first).
+	bAIServePending = false;
+	AIServeTimer = 0.0f;
+	if (Server)
+	{
+		bAIServePending = true;
+		AIServeTimer = Server->bIsBot ? 1.0f : 3.0f;
+	}
+
+	UE_LOG(LogVolleyballRules, Log, TEXT("Awaiting serve: team=%s server=%s"), TeamStr(ServingTeam),
+		(Server && !Server->bIsBot) ? TEXT("human (press E)") : TEXT("bot (auto)"));
+	UpdateScoreboard();
+}
+
+bool ASpikeEliteGameMode::RequestServe(ASpikeEliteCharacter* Server)
+{
+	if (MatchState != EMatchState::AwaitingServe) { return false; }
+	if (!Server) { return false; }
+
+	const EVolleyballTeam Team = TeamOf(Server);
+	if (Team != ServingTeam)
+	{
+		ShowBanner(TEXT("现在不是你的发球"), 1.2f);
+		UpdateScoreboard();
+		return false;
+	}
+
+	TArray<TObjectPtr<ASpikeEliteCharacter>>& Roster = (Team == EVolleyballTeam::TeamA) ? TeamAPlayers : TeamBPlayers;
+	if (Roster.Num() == 0 || Roster[0] != Server)
+	{
+		ShowBanner(TEXT("当前发球员不是你"), 1.2f);
+		UpdateScoreboard();
+		return false;
+	}
+
+	// Legal: enter the toss.
+	TossDir = (Team == EVolleyballTeam::TeamA) ? FVector(-0.878f, 0.f, 0.479f) : FVector(0.878f, 0.f, 0.479f);
 	TossPower = 1300.f;
 	TossTimer = 0.6f;
 	bInToss = true;
-	// Leave BetweenRallies immediately: otherwise the Tick's BetweenRallies
-	// branch re-calls ServeNextBall every frame, resetting the toss timer so the
-	// ball is frozen at the serve spot and is never struck.
-	MatchState = EMatchState::Playing;
+	ServerPlayerIndex = GetPlayerIndex(Team, Server);
+	MatchState = EMatchState::ServingToss;
+	bAIServePending = false;
+
+	UE_LOG(LogVolleyballRules, Log, TEXT("Serve toss by team=%s player=%d"), TeamStr(Team), ServerPlayerIndex);
+	UpdateScoreboard();
+	return true;
+}
+
+void ASpikeEliteGameMode::ExecuteServe()
+{
+	if (!Ball) return;
+	bInToss = false;
+
+	Ball->Strike(TossDir, TossPower, 0.f);
+	bServeCrossedNet = false;
+
+	// The serve counts as the serving team's first touch.
+	if (ServerPlayerIndex >= 0)
+	{
+		const ETouchResult R = SEVolleyballRules::EvaluateTouch(RallyState, ServingTeam, ServerPlayerIndex);
+		if (R != ETouchResult::Allowed)
+		{
+			UE_LOG(LogVolleyballRules, Warning, TEXT("Serve touch unexpectedly rejected: %d"), (int32)R);
+		}
+	}
+
+	MatchState = EMatchState::Rally;
+	UE_LOG(LogVolleyballRules, Log, TEXT("[Serve] team=%s player=%d power=%.0f dir=(%.2f,%.2f,%.2f)"),
+		TeamStr(ServingTeam), ServerPlayerIndex, TossPower, TossDir.X, TossDir.Y, TossDir.Z);
+	UpdateScoreboard();
+}
+
+void ASpikeEliteGameMode::OnBallCrossedNet()
+{
+	if (MatchState != EMatchState::Rally || RallyState.bRallySettled) return;
+
+	const EVolleyballTeam NewPossessor = (Ball && Ball->GetActorLocation().X < 0.f) ? EVolleyballTeam::TeamB : EVolleyballTeam::TeamA;
+	SEVolleyballRules::OnBallCrossedNet(RallyState, NewPossessor);
+	bServeCrossedNet = true;
+
+	ShowBanner(FString::Printf(TEXT("球过网 → %s 队控球"), TeamStr(NewPossessor)), 0.8f);
+	UE_LOG(LogVolleyballRules, Log, TEXT("[NetCross] possession -> %s, touches reset"), TeamStr(NewPossessor));
+	UpdateScoreboard();
+}
+
+bool ASpikeEliteGameMode::CanTouchBall(const ASpikeEliteCharacter* Toucher) const
+{
+	if (!Toucher || !bMatchActive) return false;
+	if (MatchState != EMatchState::Rally) return false;   // 暂停/局间/发球准备一律不可触球
+	if (RallyState.bRallySettled) return false;
+	if (!Toucher->bTouchArmed) return false;
+	const EVolleyballTeam Team = (Toucher->TeamSide > 0) ? EVolleyballTeam::TeamA : EVolleyballTeam::TeamB;
+	if (RallyState.PossessingTeam != EVolleyballTeam::None && RallyState.PossessingTeam != Team) return false;
+	return true;
+}
+
+bool ASpikeEliteGameMode::TryTouchBall(ASpikeEliteCharacter* Toucher, EBallTouchType Type)
+{
+	if (!Toucher || !Ball || !bMatchActive) return false;
+	if (MatchState != EMatchState::Rally) return false;
+	if (RallyState.bRallySettled) return false;
+	if (!Toucher->bTouchArmed) return false;
+
+	const EVolleyballTeam Team = TeamOf(Toucher);
+	const int32 Index = GetPlayerIndex(Team, Toucher);
+	if (Index < 0) return false;
+
+	// Physical reach check: horizontal distance (players "jump" for a ball that is
+	// up to MaxTouchZ overhead) plus a vertical contact window. Using 3D distance
+	// made high sets/attacks unreachable even when the player stood right under
+	// the ball (3D dist ballooned with Z).
+	const EBallTouchType EffectiveType = (Type != EBallTouchType::Unknown) ? Type : ResolveTouchType(RallyState.TouchCount);
+	const FVector MyLoc = Toucher->GetActorLocation();
+	const FVector BallLoc = Ball->GetActorLocation();
+	const float Dist2D = FVector::Dist2D(MyLoc, BallLoc);
+	if (Dist2D > TouchReach || BallLoc.Z < MinTouchZ || BallLoc.Z > MaxTouchZ)
+	{
+		return false;
+	}
+	// An AI attack must contact the ball at a height that clears the net plane
+	// (243cm); a low contact either clips the net or produces a hopeless lob.
+	// The attacker waits for the high point instead of chasing a falling ball.
+	if (Toucher->bIsBot && EffectiveType == EBallTouchType::Attack && BallLoc.Z < 240.f)
+	{
+		return false;
+	}
+
+	const ETouchResult Result = SEVolleyballRules::EvaluateTouch(RallyState, Team, Index);
+
+	switch (Result)
+	{
+	case ETouchResult::Allowed:
+	{
+		// Direction: AI obeys phase rules; the human uses their view direction.
+		FVector Dir;
+		float Power;
+		if (Toucher->bIsBot)
+		{
+			Dir = ComputeAITouchDirection(Toucher, EffectiveType);
+			Power = (EffectiveType == EBallTouchType::Receive) ? 780.f
+				: (EffectiveType == EBallTouchType::Set) ? 550.f
+				: 850.f;
+		}
+		else
+		{
+			const FVector LookDir = Toucher->GetControlRotation().Vector();
+			Dir = LookDir;
+			Dir.Z = FMath::Max(Dir.Z, 0.15f);
+			Dir.Normalize();
+			const bool bSpiking = Toucher->GetCharacterMovement() && !Toucher->GetCharacterMovement()->IsMovingOnGround();
+			Power = bSpiking ? 1200.f : 850.f;
+		}
+
+		Ball->Strike(Dir, Power, 0.f);
+		Toucher->bTouchArmed = false;   // single-touch protection until rearmed
+
+		UE_LOG(LogVolleyballRules, Log, TEXT("[Touch] team=%s player=%d touch=%d/%d type=%s"),
+			TeamStr(Team), Index, RallyState.TouchCount, 3, TypeStr(EffectiveType));
+		UpdateScoreboard();
+		return true;
+	}
+	case ETouchResult::FourTouchesFault:
+	{
+		const EVolleyballTeam Opp = (Team == EVolleyballTeam::TeamA) ? EVolleyballTeam::TeamB : EVolleyballTeam::TeamA;
+		UE_LOG(LogVolleyballRules, Log, TEXT("Fault: 4th touch by team=%s -> %s scores"), TeamStr(Team), TeamStr(Opp));
+		EndRally(ERallyEndReason::FourTouches, Opp);
+		return false;
+	}
+	case ETouchResult::DoubleTouchFault:
+	{
+		const EVolleyballTeam Opp = (Team == EVolleyballTeam::TeamA) ? EVolleyballTeam::TeamB : EVolleyballTeam::TeamA;
+		UE_LOG(LogVolleyballRules, Log, TEXT("Fault: double touch by team=%s player=%d -> %s scores"), TeamStr(Team), Index, TeamStr(Opp));
+		EndRally(ERallyEndReason::DoubleTouch, Opp);
+		return false;
+	}
+	default:
+		return false;
+	}
+}
+
+// ---------------- M10: AI coordination ----------------
+
+void ASpikeEliteGameMode::SetAIDirective(ASpikeEliteCharacter* Bot, EAIBehavior Behavior, const FVector& Target, bool bPrimary)
+{
+	if (!Bot) return;
+	Bot->AIBehavior = Behavior;
+	Bot->AITargetLocation = Target;
+	Bot->bIsPrimaryHandler = bPrimary;
+}
+
+EVolleyballTeam ASpikeEliteGameMode::TeamOf(const ASpikeEliteCharacter* Player) const
+{
+	if (!Player) return EVolleyballTeam::None;
+	return (Player->TeamSide > 0) ? EVolleyballTeam::TeamA : EVolleyballTeam::TeamB;
+}
+
+int32 ASpikeEliteGameMode::GetPlayerIndex(EVolleyballTeam Team, const ASpikeEliteCharacter* Player) const
+{
+	const TArray<TObjectPtr<ASpikeEliteCharacter>>& Roster = (Team == EVolleyballTeam::TeamA) ? TeamAPlayers : TeamBPlayers;
+	for (int32 i = 0; i < Roster.Num(); i++)
+	{
+		if (Roster[i] == Player) return i;
+	}
+	return -1;
+}
+
+FVector ASpikeEliteGameMode::PredictBallLanding() const
+{
+	if (!Ball) return FVector::ZeroVector;
+	const FVector Pos = Ball->GetActorLocation();
+	const FVector Vel = Ball->GetVelocity();
+
+	// Solve 0.5*g*t^2 + vz*t + z0 = 0 for the floor (z = 0), projectile gravity = -980.
+	constexpr float G = -980.f;
+	const float A = 0.5f * G;
+	const float B = Vel.Z;
+	const float C = Pos.Z;
+	float T = -1.f;
+	const float Disc = B*B - 4.f*A*C;
+	if (Disc >= 0.f)
+	{
+		const float SqrtD = FMath::Sqrt(Disc);
+		const float T1 = (-B - SqrtD) / (2.f*A);
+		const float T2 = (-B + SqrtD) / (2.f*A);
+		if (T1 > 0.f && T2 > 0.f) { T = FMath::Min(T1, T2); }
+		else if (T1 > 0.f) { T = T1; }
+		else if (T2 > 0.f) { T = T2; }
+	}
+	if (T < 0.f) { T = 1.0f; }
+
+	FVector Landing = Pos + FVector(Vel.X, Vel.Y, Vel.Z) * T + 0.5f * FVector(0.f, 0.f, G) * T * T;
+	Landing.Z = 0.f;
+	return Landing;
+}
+
+int32 ASpikeEliteGameMode::SelectReceivePlayer(EVolleyballTeam Team, const FVector& Landing) const
+{
+	const TArray<TObjectPtr<ASpikeEliteCharacter>>& Roster = (Team == EVolleyballTeam::TeamA) ? TeamAPlayers : TeamBPlayers;
+	int32 Best = -1;
+	float BestDist = TNumericLimits<float>::Max();
+	for (int32 i = 0; i < Roster.Num(); i++)
+	{
+		if (!Roster[i]) continue;
+		const float D = FVector::Dist2D(Roster[i]->GetActorLocation(), Landing);
+		if (D < BestDist) { BestDist = D; Best = i; }
+	}
+	return Best;
+}
+
+int32 ASpikeEliteGameMode::SelectSetterPlayer(EVolleyballTeam Team) const
+{
+	const TArray<TObjectPtr<ASpikeEliteCharacter>>& Roster = (Team == EVolleyballTeam::TeamA) ? TeamAPlayers : TeamBPlayers;
+	const float SideX = (Team == EVolleyballTeam::TeamA) ? 250.f : -250.f;
+	const FVector SetZone(SideX, 0.f, 0.f);
+	int32 Best = -1;
+	float BestDist = TNumericLimits<float>::Max();
+	for (int32 i = 0; i < Roster.Num(); i++)
+	{
+		if (!Roster[i]) continue;
+		const float D = FVector::Dist2D(Roster[i]->GetActorLocation(), SetZone);
+		if (D < BestDist) { BestDist = D; Best = i; }
+	}
+	return Best;
+}
+
+int32 ASpikeEliteGameMode::SelectAttackerPlayer(EVolleyballTeam Team) const
+{
+	const TArray<TObjectPtr<ASpikeEliteCharacter>>& Roster = (Team == EVolleyballTeam::TeamA) ? TeamAPlayers : TeamBPlayers;
+	FVector AttackPoint;
+	if (Ball)
+	{
+		const float SideX = (Team == EVolleyballTeam::TeamA) ? 150.f : -150.f;
+		AttackPoint = FVector(SideX, FMath::Clamp(Ball->GetActorLocation().Y, -300.f, 300.f), 220.f);
+	}
+	else
+	{
+		AttackPoint = FVector((Team == EVolleyballTeam::TeamA) ? 150.f : -150.f, 0.f, 220.f);
+	}
+	int32 Best = -1;
+	float BestDist = TNumericLimits<float>::Max();
+	for (int32 i = 0; i < Roster.Num(); i++)
+	{
+		if (!Roster[i]) continue;
+		// The player who just set cannot attack (no consecutive touches).
+		if (i == RallyState.LastTouchPlayerIndex && RallyState.LastTouchTeam == Team) continue;
+		const float D = FVector::Dist2D(Roster[i]->GetActorLocation(), AttackPoint);
+		if (D < BestDist) { BestDist = D; Best = i; }
+	}
+	return Best;
+}
+
+FVector ASpikeEliteGameMode::ComputeAITouchDirection(const ASpikeEliteCharacter* Toucher, EBallTouchType Type) const
+{
+	const int32 Side = Toucher ? Toucher->TeamSide : 1;
+	const FVector BallLoc = Ball ? Ball->GetActorLocation() : FVector::ZeroVector;
+	const FVector MyLoc = Toucher ? Toucher->GetActorLocation() : FVector::ZeroVector;
+
+	FVector Target;
+	float MinZ = 0.15f;
+
+	switch (Type)
+	{
+	case EBallTouchType::Receive:
+		// First touch must go to the setter zone (front-middle), NEVER straight
+		// back over the net.
+		Target = FVector(Side * 250.f, FMath::Clamp(BallLoc.Y * 0.35f, -120.f, 120.f), 0.f);
+		break;
+
+	case EBallTouchType::Set:
+		// Second touch: loft a slow, high ball to the front attack point so the
+		// attacker (already moving there) has time to arrive. Power 550 with a
+		// ~0.5 min elevation keeps the ball above the net's 243cm plane and
+		// hangs for roughly half a second around the attack point.
+		Target = FVector(Side * 130.f, FMath::Clamp(BallLoc.Y, -280.f, 280.f), 350.f);
+		MinZ = 0.5f;
+		break;
+
+	case EBallTouchType::Attack:
+	default:
+	{
+		// Third touch: over the net. A seeded error rate keeps rallies finite:
+		// ~6% wide (out), ~9% long/into the net. The min elevation 0.45 with
+		// Attack power 850 clears the 243cm net from a ~190cm contact and lands
+		// inside the far court (~854cm flight, court half is 900cm).
+		const float Roll = AIStream.FRand();
+		if (Roll < 0.06f)
+		{
+			const float SideY = (AIStream.RandBool() ? 1.f : -1.f) * AIStream.FRandRange(560.f, 720.f);
+			Target = FVector(-Side * 650.f, SideY, BallLoc.Z);
+			MinZ = 0.2f;
+		}
+		else if (Roll < 0.15f)
+		{
+			Target = FVector(-Side * AIStream.FRandRange(700.f, 1050.f),
+				AIStream.FRandRange(-200.f, 200.f), BallLoc.Z);
+			MinZ = AIStream.FRandRange(0.05f, 0.2f);
+		}
+		else
+		{
+			Target = FVector(-Side * AIStream.FRandRange(480.f, 720.f),
+				AIStream.FRandRange(-220.f, 220.f), BallLoc.Z);
+			MinZ = 0.5f;
+		}
+		break;
+	}
+	}
+
+	FVector Dir = (Target - BallLoc).GetSafeNormal();
+	Dir.Z = FMath::Max(Dir.Z, MinZ);
+	Dir.Normalize();
+	return Dir;
+}
+
+void ASpikeEliteGameMode::UpdateAIDirectives(float DeltaSeconds)
+{
+	if (MatchState != EMatchState::Rally)
+	{
+		// Not a live rally: everyone returns to their home / defensive slot.
+		for (auto& C : TeamAPlayers)
+		{
+			if (C && C->bIsBot) { SetAIDirective(C, EAIBehavior::ReturnHome, C->HomePosition, false); }
+		}
+		for (auto& C : TeamBPlayers)
+		{
+			if (C && C->bIsBot) { SetAIDirective(C, EAIBehavior::ReturnHome, C->HomePosition, false); }
+		}
+		return;
+	}
+
+	const FVector Landing = PredictBallLanding();
+
+	auto DirectTeam = [&](EVolleyballTeam Team, TArray<TObjectPtr<ASpikeEliteCharacter>>& Roster)
+	{
+		const bool bPossess = (RallyState.PossessingTeam == Team);
+		int32 Primary = -1;
+		EAIBehavior PrimaryBehavior = EAIBehavior::ReturnHome;
+		FVector PrimaryTarget = FVector::ZeroVector;
+
+		if (bPossess)
+		{
+			switch (RallyState.TouchCount)
+			{
+			case 0: // Receive: closest to the predicted landing.
+				Primary = SelectReceivePlayer(Team, Landing);
+				PrimaryBehavior = EAIBehavior::MoveToReceive;
+				PrimaryTarget = Landing;
+				break;
+			case 1: // Set: designated setter zone.
+				Primary = SelectSetterPlayer(Team);
+				PrimaryBehavior = EAIBehavior::Set;
+				PrimaryTarget = FVector((Team == EVolleyballTeam::TeamA) ? 250.f : -250.f,
+					FMath::Clamp(Landing.Y, -150.f, 150.f), 0.f);
+				// Pre-select the attacker while the setter is still handling, so the
+				// attacker gets the whole flight time of the set to reach the front
+				// point and can contact the ball at a high Z (no net clips).
+				{
+					const float SideX = (Team == EVolleyballTeam::TeamA) ? 130.f : -130.f;
+					const FVector AttackPt = FVector(SideX,
+						FMath::Clamp(Ball ? Ball->GetActorLocation().Y : 0.f, -300.f, 300.f), 220.f);
+					int32 BestA = -1;
+					float BestDA = TNumericLimits<float>::Max();
+					for (int32 j = 0; j < Roster.Num(); j++)
+					{
+						if (!Roster[j]) continue;
+						if (j == Primary) continue;
+						if (j == RallyState.LastTouchPlayerIndex && RallyState.LastTouchTeam == Team) continue;
+						const float D = FVector::Dist2D(Roster[j]->GetActorLocation(), AttackPt);
+						if (D < BestDA) { BestDA = D; BestA = j; }
+					}
+					if (BestA >= 0)
+					{
+						SetAIDirective(Roster[BestA].Get(), EAIBehavior::Attack, AttackPt, false);
+					}
+				}
+				break;
+			case 2: // Attack: closest to the front attack point.
+				Primary = SelectAttackerPlayer(Team);
+				PrimaryBehavior = EAIBehavior::Attack;
+				PrimaryTarget = FVector((Team == EVolleyballTeam::TeamA) ? 150.f : -150.f,
+					FMath::Clamp(Ball ? Ball->GetActorLocation().Y : 0.f, -300.f, 300.f), 220.f);
+				break;
+			default:
+				break;
+			}
+		}
+
+		for (int32 i = 0; i < Roster.Num(); i++)
+		{
+			ASpikeEliteCharacter* C = Roster[i].Get();
+			if (!C || !C->bIsBot) continue;
+
+			if (i == Primary)
+			{
+				SetAIDirective(C, PrimaryBehavior, PrimaryTarget, true);
+			}
+			else if (bPossess)
+			{
+				// Front-row players (except the primary handler) run to the attack
+				// point as soon as the team gains possession, so the attacker is
+				// already in position when the set arrives; keep them there through
+				// the third touch so the attacker never chases a falling ball.
+				if (FMath::Abs(C->HomePosition.X) < 400.f && RallyState.TouchCount <= 2)
+				{
+					const FVector AttackPt = FVector((Team == EVolleyballTeam::TeamA) ? 150.f : -150.f,
+						FMath::Clamp(Ball ? Ball->GetActorLocation().Y : 0.f, -300.f, 300.f), 220.f);
+					SetAIDirective(C, EAIBehavior::Attack, AttackPt, false);
+				}
+				else
+				{
+					// Non-handlers hold their role position (don't all chase the ball).
+					SetAIDirective(C, EAIBehavior::ReturnHome, C->HomePosition, false);
+				}
+			}
+			else
+			{
+				// Defending: front row to the net, back row holds depth.
+				const FVector Home = C->HomePosition;
+				FVector Defensive = Home;
+				if (FMath::Abs(Home.X) > 400.f) { Defensive = Home; }
+				else { Defensive = FVector((Team == EVolleyballTeam::TeamA) ? 230.f : -230.f, Home.Y, Home.Z); }
+				SetAIDirective(C, EAIBehavior::Wait, Defensive, false);
+			}
+		}
+	};
+
+	DirectTeam(EVolleyballTeam::TeamA, TeamAPlayers);
+	DirectTeam(EVolleyballTeam::TeamB, TeamBPlayers);
+}
+
+const TCHAR* ASpikeEliteGameMode::TypeStr(EBallTouchType Type)
+{
+	switch (Type)
+	{
+	case EBallTouchType::Serve:   return TEXT("Serve");
+	case EBallTouchType::Receive: return TEXT("Receive");
+	case EBallTouchType::Set:     return TEXT("Set");
+	case EBallTouchType::Attack:  return TEXT("Attack");
+	default:                  return TEXT("Unknown");
+	}
+}
+
+void ASpikeEliteGameMode::NotifyMatchOver()
+{
+	if (ASpikeElitePlayerController* SEPC = Cast<ASpikeElitePlayerController>(UGameplayStatics::GetPlayerController(this, 0)))
+	{
+		SEPC->OnMatchOver(SetScoresA, SetScoresB, MatchWinner);
+	}
 }

@@ -4,6 +4,8 @@
 #include "UI/PauseMenuWidget.h"
 #include "UI/SettingsWidget.h"
 #include "UI/ScoreboardWidget.h"
+#include "UI/MatchEndWidget.h"
+#include "UI/ConfirmWidget.h"
 #include "SpikeEliteGameMode.h"
 #include "Blueprint/UserWidget.h"
 #include "Camera/CameraActor.h"
@@ -86,6 +88,14 @@ void ASpikeElitePlayerController::DevViewPlayer()
 
 void ASpikeElitePlayerController::DevAutoStart()
 {
+	// -QuickMatch: drive a full unattended quick match (menu -> match -> AI plays
+	// until MatchOver -> screenshot the result screen -> quit).
+	if (FParse::Param(FCommandLine::Get(), TEXT("QuickMatch")))
+	{
+		DevQuickMatch();
+		return;
+	}
+
 	// UE 5.8 removed per-timer bPauseable, and a paused game world no longer
 	// ticks its timer manager. Drive the whole sequence from the core ticker,
 	// which keeps running while the game is paused, so the pause-menu shot and
@@ -164,6 +174,61 @@ void ASpikeElitePlayerController::DevAutoStart()
 		return Index < Events.Num();
 	}));
 }
+
+void ASpikeElitePlayerController::DevQuickMatch()
+{
+	// Unattended -QuickMatch: menu shot, start the match, then poll until
+	// MatchOver, screenshot the result screen and quit. Serve timeouts let the
+	// AI finish a full match without keyboard input.
+	struct FDevEvent { float Delay; TFunction<void()> Fn; };
+	TArray<FDevEvent> Events;
+	auto At = [&Events](float Delay, TFunction<void()> Fn) { Events.Add(FDevEvent{ Delay, MoveTemp(Fn) }); };
+
+	At(1.5f, [this]() { DevShot(TEXT("shot_qm_01_menu")); });
+	At(4.0f, [this]() { UE_LOG(LogSEMenu, Log, TEXT("DEV QUICK MATCH: starting")); StartMatch(); });
+
+	TWeakObjectPtr<ASpikeElitePlayerController> Weak(this);
+	const double StartSeconds = FPlatformTime::Seconds();
+	int32 Index = 0;
+	float ShotAt = -1.0f;
+	FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda(
+		[Weak, StartSeconds, Index, Events = MoveTemp(Events), ShotAt](float) mutable -> bool
+	{
+		ASpikeElitePlayerController* PC = Weak.Get();
+		if (!PC) { return false; }
+		const double Elapsed = FPlatformTime::Seconds() - StartSeconds;
+		while (Index < Events.Num() && Elapsed >= static_cast<double>(Events[Index].Delay))
+		{
+			if (Events[Index].Fn) { Events[Index].Fn(); }
+			++Index;
+		}
+
+		if (ASpikeEliteGameMode* GM = Cast<ASpikeEliteGameMode>(UGameplayStatics::GetGameMode(PC)))
+		{
+			if (GM->MatchState == EMatchState::MatchOver && ShotAt < 0.0f)
+			{
+				ShotAt = static_cast<float>(Elapsed);
+				UE_LOG(LogSEMenu, Log, TEXT("DEV QUICK MATCH: MatchOver reached (winner A=%d B=%d), shooting result screen"),
+					GM->TeamASetsWon, GM->TeamBSetsWon);
+				PC->DevShot(TEXT("shot_qm_02_matchover"));
+			}
+			if (ShotAt > 0.0f && (Elapsed - ShotAt) > 3.0f)
+			{
+				UE_LOG(LogSEMenu, Log, TEXT("DEV QUICK MATCH: quitting"));
+				UKismetSystemLibrary::QuitGame(PC, PC, EQuitPreference::Quit, false);
+				return false;
+			}
+		}
+
+		if (Elapsed > 300.0)
+		{
+			UE_LOG(LogSEMenu, Error, TEXT("DEV QUICK MATCH: timed out waiting for MatchOver"));
+			UKismetSystemLibrary::QuitGame(PC, PC, EQuitPreference::Quit, false);
+			return false;
+		}
+		return true;
+	}));
+}
 #endif
 
 void ASpikeElitePlayerController::SetupInputComponent()
@@ -192,8 +257,13 @@ void ASpikeElitePlayerController::OnPausePressed()
 	case EMenuState::SettingsFromMenu:
 		CloseSettings();   // returns to the main menu
 		break;
-	case EMenuState::MainMenu:
+	case EMenuState::Confirm:
+		CancelConfirm();   // Esc backs out of the confirm dialog
+		break;
+	case EMenuState::MatchOver:
 	default:
+		// M10: on the result screen Esc deliberately does NOTHING — it must
+		// never revive a finished match. Use the on-screen buttons.
 		break;
 	}
 }
@@ -251,6 +321,9 @@ void ASpikeElitePlayerController::HideAllMenus()
 	if (MainMenu)     { MainMenu->RemoveFromParent();     MainMenu = nullptr; }
 	if (PauseMenu)    { PauseMenu->RemoveFromParent();    PauseMenu = nullptr; }
 	if (SettingsMenu) { SettingsMenu->RemoveFromParent(); SettingsMenu = nullptr; }
+	if (MatchEnd)     { MatchEnd->RemoveFromParent();     MatchEnd = nullptr; }
+	if (Confirm)      { Confirm->RemoveFromParent();      Confirm = nullptr; }
+	PendingConfirmAction = nullptr;
 }
 
 void ASpikeElitePlayerController::ShowMainMenu()
@@ -300,8 +373,8 @@ void ASpikeElitePlayerController::BuildPauseMenu()
 	{
 		PauseMenu->OnResume.BindUObject(this, &ASpikeElitePlayerController::ResumeGame);
 		PauseMenu->OnSettings.BindUObject(this, &ASpikeElitePlayerController::OpenSettingsFromPause);
-		PauseMenu->OnMainMenu.BindUObject(this, &ASpikeElitePlayerController::ReturnToMainMenu);
-		PauseMenu->OnQuit.BindUObject(this, &ASpikeElitePlayerController::QuitToDesktop);
+		PauseMenu->OnMainMenu.BindUObject(this, &ASpikeElitePlayerController::AskReturnToMainMenu);
+		PauseMenu->OnQuit.BindUObject(this, &ASpikeElitePlayerController::AskQuitToDesktop);
 		PauseMenu->AddToViewport(20);
 	}
 }
@@ -321,6 +394,133 @@ void ASpikeElitePlayerController::ResumeGame()
 	MenuState = EMenuState::Playing;
 	SetPause(false);
 	SetGameInputMode();
+}
+
+void ASpikeElitePlayerController::BuildMatchEnd()
+{
+	MatchEnd = CreateWidget<UMatchEndWidget>(this);
+	if (MatchEnd)
+	{
+		MatchEnd->OnRematch.BindUObject(this, &ASpikeElitePlayerController::Rematch);
+		MatchEnd->OnMainMenu.BindUObject(this, &ASpikeElitePlayerController::AskReturnToMainMenu);
+		MatchEnd->OnQuit.BindUObject(this, &ASpikeElitePlayerController::AskQuitToDesktop);
+		MatchEnd->AddToViewport(20);
+	}
+}
+
+void ASpikeElitePlayerController::OnMatchOver(const TArray<int32>& ScoresA, const TArray<int32>& ScoresB, EVolleyballTeam Winner)
+{
+	UE_LOG(LogSEMenu, Log, TEXT("Match over: winner=%s"), Winner == EVolleyballTeam::TeamA ? TEXT("A") : Winner == EVolleyballTeam::TeamB ? TEXT("B") : TEXT("-"));
+	// The match is finished; the world may stay unpaused (GameMode stops
+	// updating at MatchOver), but we must release the mouse.
+	SetPause(false);
+	MenuState = EMenuState::MatchOver;
+	BuildMatchEnd();
+	if (MatchEnd) { MatchEnd->SetResult(Winner, ScoresA, ScoresB); }
+	SetUIInputMode(MatchEnd);
+}
+
+void ASpikeElitePlayerController::Rematch()
+{
+	UE_LOG(LogSEMenu, Log, TEXT("Rematch requested"));
+	if (MatchEnd) { MatchEnd->RemoveFromParent(); MatchEnd = nullptr; }
+	HideAllMenus();
+	MenuState = EMenuState::Playing;
+	SetGameInputMode();
+	if (ASpikeEliteGameMode* GM = Cast<ASpikeEliteGameMode>(UGameplayStatics::GetGameMode(this)))
+	{
+		GM->StartMatch();   // StartMatch cleans up the finished match first.
+	}
+}
+
+void ASpikeElitePlayerController::ShowConfirm(const FString& Message, EMenuState RestoreState, TFunction<void()> Action)
+{
+	StateBeforeConfirm = RestoreState;
+	PendingConfirmAction = MoveTemp(Action);
+
+	Confirm = CreateWidget<UConfirmWidget>(this);
+	if (Confirm)
+	{
+		Confirm->SetMessage(Message);
+		Confirm->OnConfirm.BindUObject(this, &ASpikeElitePlayerController::AcceptConfirm);
+		Confirm->OnCancel.BindUObject(this, &ASpikeElitePlayerController::CancelConfirm);
+		Confirm->AddToViewport(40);
+		SetUIInputMode(Confirm);
+	}
+}
+
+void ASpikeElitePlayerController::AcceptConfirm()
+{
+	if (Confirm) { Confirm->RemoveFromParent(); Confirm = nullptr; }
+	TFunction<void()> Action = MoveTemp(PendingConfirmAction);
+	PendingConfirmAction = nullptr;
+	if (Action) { Action(); }
+}
+
+void ASpikeElitePlayerController::CancelConfirm()
+{
+	if (Confirm) { Confirm->RemoveFromParent(); Confirm = nullptr; }
+	PendingConfirmAction = nullptr;
+
+	if (StateBeforeConfirm == EMenuState::Paused && PauseMenu)
+	{
+		MenuState = EMenuState::Paused;
+		SetPause(true);
+		SetUIInputMode(PauseMenu);
+	}
+	else if (StateBeforeConfirm == EMenuState::MatchOver && MatchEnd)
+	{
+		MenuState = EMenuState::MatchOver;
+		SetPause(false);
+		SetUIInputMode(MatchEnd);
+	}
+	else
+	{
+		MenuState = EMenuState::MainMenu;
+		SetPause(false);
+		SetUIInputMode(MainMenu);
+	}
+}
+
+void ASpikeElitePlayerController::AskReturnToMainMenu()
+{
+	ShowConfirm(TEXT("返回主菜单？未结束的比赛进度将丢失。"), MenuState,
+		[this]() { LeaveToMainMenu(); });
+}
+
+void ASpikeElitePlayerController::AskQuitToDesktop()
+{
+	ShowConfirm(TEXT("确定退出游戏？"), MenuState,
+		[this]() { QuitNow(); });
+}
+
+void ASpikeElitePlayerController::LeaveToMainMenu()
+{
+	SetPause(false);
+	if (ASpikeEliteGameMode* GM = Cast<ASpikeEliteGameMode>(UGameplayStatics::GetGameMode(this)))
+	{
+		GM->ReturnToMainMenu();
+	}
+	Scoreboard = nullptr;   // GameMode destroyed its scoreboard widget.
+	if (MatchEnd) { MatchEnd->RemoveFromParent(); MatchEnd = nullptr; }
+	ShowMainMenu();
+}
+
+void ASpikeElitePlayerController::ReturnToMainMenu()
+{
+	// Direct version used by dev automation and lifecycle tests (no dialog).
+	LeaveToMainMenu();
+}
+
+void ASpikeElitePlayerController::QuitToDesktop()
+{
+	UE_LOG(LogSEMenu, Log, TEXT("Quit to desktop requested"));
+	QuitNow();
+}
+
+void ASpikeElitePlayerController::QuitNow()
+{
+	UKismetSystemLibrary::QuitGame(this, this, EQuitPreference::Quit, false);
 }
 
 void ASpikeElitePlayerController::OpenSettingsFromMenu()
@@ -376,23 +576,6 @@ void ASpikeElitePlayerController::CloseSettings()
 		BuildPauseMenu();
 		SetUIInputMode(PauseMenu);
 	}
-}
-
-void ASpikeElitePlayerController::ReturnToMainMenu()
-{
-	SetPause(false);
-	if (ASpikeEliteGameMode* GM = Cast<ASpikeEliteGameMode>(UGameplayStatics::GetGameMode(this)))
-	{
-		GM->ReturnToMainMenu();
-	}
-	Scoreboard = nullptr;   // GameMode destroyed its scoreboard widget.
-	ShowMainMenu();
-}
-
-void ASpikeElitePlayerController::QuitToDesktop()
-{
-	UE_LOG(LogSEMenu, Log, TEXT("Quit to desktop requested"));
-	UKismetSystemLibrary::QuitGame(this, this, EQuitPreference::Quit, false);
 }
 
 void ASpikeElitePlayerController::SaveSettings()

@@ -1,20 +1,28 @@
-// SPDX-License-Identifier: MIT
+﻿// SPDX-License-Identifier: MIT
 #pragma once
 
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
+#include "Volleyball/VolleyballRules.h"
 #include "SpikeEliteCharacter.generated.h"
 
 class UCameraComponent;
 class USpringArmComponent;
 class UStaticMeshComponent;
+class ASpikeEliteGameMode;
 
 /**
  * Player pawn for SPIKE ELITE.
  *
  * Can be controlled by a human (DefaultPawnClass) or spawned as AI bot:
- *  - bIsBot = true: Tick runs simple pursuit logic (go to ball, hit, return home)
- *  - bIsBot = false: human input via WASD/mouse/LMB/E
+ *  - bIsBot = true: Tick runs the GameMode-driven AI (the GameMode picks the
+ *    primary handler and assigns an EAIBehavior + target each frame; the bot
+ *    never searches for the ball itself).
+ *  - bIsBot = false: human input via WASD/mouse/LMB/E.
+ *
+ * M10: characters NEVER ResetBall or Strike on their own. They ask the
+ * GameMode (TryTouchBall / RequestServe), which is the single authority for
+ * serve rights, touch rights and the three-touch rule.
  */
 UCLASS()
 class SPIKEELITE_API ASpikeEliteCharacter : public ACharacter
@@ -39,8 +47,28 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Bot")
 	FVector HomePosition = FVector(500, 0, 0);
 
-	/** Per-bot cooldown between ball strikes so the rally can actually end. */
-	float BotHitTimer = 0.0f;
+	// ---- M10: single-touch protection ----
+	/** True while this character may touch the ball (rearmed when the ball leaves reach). */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Bot")
+	bool bTouchArmed = true;
+
+	// ---- M10: AI directives (written by the GameMode coordinator) ----
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Bot")
+	EAIBehavior AIBehavior = EAIBehavior::ReturnHome;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Bot")
+	FVector AITargetLocation = FVector::ZeroVector;
+
+	/** True if this bot is the team's current primary handler (may touch). */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Bot")
+	bool bIsPrimaryHandler = false;
+
+	/** Cached GameMode reference (no per-frame GetAllActorsOfClass). */
+	UPROPERTY()
+	TWeakObjectPtr<ASpikeEliteGameMode> AIGameMode;
+
+	/** Team enum derived from TeamSide. */
+	EVolleyballTeam GetTeam() const { return TeamSide > 0 ? EVolleyballTeam::TeamA : EVolleyballTeam::TeamB; }
 
 protected:
 	virtual void BeginPlay() override;
@@ -56,6 +84,7 @@ protected:
 
 	// Hinge-style placeholder humanoid built from engine basic shapes:
 	// torso + head + two arms + two legs, tinted per team. Zero asset deps.
+	// TODO(M-models): swap this for a rigged skeletal mesh + animation blueprint.
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Character")
 	TObjectPtr<UStaticMeshComponent> Torso;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Character")
@@ -73,7 +102,7 @@ protected:
 	bool bFirstPerson = false;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera", meta = (ClampMin = "50.0", ClampMax = "800.0"))
-	float ThirdPersonArmLength = 250.0f;
+	float ThirdPersonArmLength = 380.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera", meta = (ClampMin = "0.01", ClampMax = "5.0"))
 	float LookSensitivity = 1.0f;
@@ -84,15 +113,15 @@ protected:
 	void LookUpRate(float Value);
 	void ToggleFirstPerson();
 
-	/** Left mouse: hit the ball if it is within arm's reach. */
+	/** Left mouse: ask the GameMode to touch the ball if legal. */
 	void HitBall();
 
-	/** E key: serve. */
+	/** E key: ask the GameMode to serve (it validates serve rights). */
 	void ServeBall();
 
 	void UpdateCameraView();
 
-	/** AI bot per-frame logic. */
+	/** AI bot per-frame logic (GameMode-driven). */
 	void TickBot(float DeltaSeconds);
 
 	/** Set jersey color (Team A blue, Team B red). */
