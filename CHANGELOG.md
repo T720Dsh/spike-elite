@@ -8,6 +8,78 @@ for milestone tags once a first playable is tagged.
 
 ## [Unreleased]
 
+### Milestone M10 — Vertical slice: rules authority, 3-touch volleyball, team AI, tests, Win64 package
+
+Verified with headless runs (`-devauto`, `-QuickMatch -devauto`): a full
+QuickMatch is played unattended to MatchOver, the result screen is shot, then a
+Rematch (再来一场) starts a second clean match (score reset, no actor leaks).
+13 automation tests pass; packaged Win64 build runs without the editor.
+
+#### Rule authority (GameMode is the single source of truth)
+- `EMatchState` machine: PreMatch / BetweenRallies / AwaitingServe / ServingToss /
+  Rally / SetOver / MatchOver. ServingToss forbids normal and AI touches; paused
+  menus and set/match-over states forbid all touches.
+- Serve goes through `RequestServe` (GameMode checks AwaitingServe, correct
+  server team, legal server, toss-ready); Characters never reset the ball.
+- Every touch (player or AI) funnels through `TryTouchBall` / `CanTouchBall`:
+  touch-armed single-contact protection + per-character rearm when the ball
+  leaves the touch volume.
+- `EndRally` settles each rally exactly once (no double points) and always leads
+  to BetweenRallies; serve faults, four touches, double touch, in/out, net and
+  landing all use the same path with structured logs.
+- Scoring: in-bounds (lines count in) → opponent of defending half; out → opponent
+  of last touching team; five sets, 25/15, win by two.
+
+#### Simplified 3-touch rules (SEVolleyballRules, pure logic, no scene actors)
+- Possessing team, 0–3 touch count, last-touch team/player, last net-crossing
+  direction, rally-settled flag.
+- Possession switches on a legal cross; new side starts at 0 touches.
+- 4th touch → opponent scores; same player twice in a row → opponent scores;
+  first teammate touch after serve is legal. No fake "block doesn't count" logic
+  (no block system yet — documented as future work).
+- 13 automation tests cover in/out/line-in, touch sequences, double touch,
+  cross-net reset, single settlement, win-by-two at 24:24, deciding set 15,
+  side-out rotation, MatchOver blocking further play, and QuickMatch rules.
+
+#### Team AI coordination (GameMode-driven, no per-frame GetAllActorsOfClass)
+- Ball/match context handed to characters at spawn (weak refs, safe on teardown).
+- One primary handler per rally: receive (closest to predicted landing), set
+  (designated setter zone), attack (pre-selected front player runs during the
+  set); everyone else holds role positions instead of chasing the ball.
+- Attack requires high contact (Z ≥ 240) so it clears the 243 cm net plane;
+  seeded AIStream random errors (deterministic under -SEED).
+- Bots move via deterministic direct stepping (deferred-spawn pawns had
+  MOVE_None / unconsumed movement input); boundary clamped to own half.
+
+#### Feedback, camera, QuickMatch, packaging
+- HUD: match phase, possession + touch count ("A 2/3"), serve hint ("按 E 发球")
+  only when legal, rally-result banner, in-reach hint; `FMath::FindDeltaAngleDegrees`
+  for correct ±180° ball-direction hints.
+- MatchOver screen (winner, per-set scores, 再来一场 / 返回主菜单 / 退出到桌面)
+  with mouse released and Esc deliberately disabled; confirm dialogs before
+  returning to menu / quitting.
+- Camera: longer raised arm, shoulder offset, collision test, slight lag; first/
+  third-person switch keeps view direction.
+- `-QuickMatch`: one set, 3 points, reuses production rules; unattended flow
+  (serve timeout, auto-match to MatchOver, Rematch, screenshots, quit).
+- Win64 Development package built with BuildCookRun into git-ignored `Dist\`;
+  `Play_SPIKE_ELITE.bat` prefers the packaged exe and instructs developers to
+  build first when it is missing (no longer claims the editor is "no editor").
+- Mannequin skeletal upgrade intentionally NOT applied: asset references point at
+  the absent `/Game/Characters/Mannequins/*`, so the ABP cannot compile; blocky
+  placeholder bodies remain the supported fallback (see `MannequinAssetsLoad`
+  diagnostics in the M10b commit message).
+
+### Milestone M9 — Runtime UI fixes: RebuildWidget, mouse release, fonts, single-authority ball
+
+- Removed the bundled `msyh_source` font asset; UI now uses the engine core
+  composite font (`FCoreStyle::GetDefaultFontStyle`) with CJK fallback, so menus
+  render Chinese without bundling a proprietary Windows font.
+- Fixed `RebuildWidget`/font rebuild issues that broke runtime-updated widgets;
+  fixed mouse-release and capture transitions across pause/settings/menu flows.
+- Ball remains single-authority: `ProjectileMovement` only, no Mesh
+  SimulatePhysics (never both at once).
+
 ### Milestone M8 — Second-pass hardening: indoor arena, reliable materials, net authority, IN/OUT scoring, match lifecycle
 
 Verified with headless standalone runs (`-devauto`): full `Result: Succeeded`
@@ -86,8 +158,9 @@ cycles. No project `Error` / `Fatal` / `Ensure` / asset-load failures in the log
   with distinct Team A electric-blue / Team B red jerseys, dark shorts and skin
   heads; bots spawn deferred so colour is applied with the correct team.
 - **UI:** real volleyball icon, three-state button styles, one-shot title
-  fade-in + looping ball spin/bounce, Chinese text via a runtime-assembled font
-  from an imported `msyh_source` font face; settings read current
+  fade-in + looping ball spin/bounce, Chinese text via the engine core composite
+  font (CJK fallback; the earlier `msyh_source` font-face import was removed in
+  M9, see below); settings read current
   window-mode/resolution/quality (system resolution enumeration, current value
   appended if missing), sensitivity range unified to 0.1–3.0 and only saved on
   Apply, with an applied-confirmation hint.

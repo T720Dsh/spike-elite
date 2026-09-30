@@ -12,9 +12,7 @@ public class SpikeElite : ModuleRules
 			"CoreUObject",
 			"Engine",
 			"InputCore",
-			"EnhancedInput",
-			"UMG",
-			"Niagara"
+			"UMG"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[]
