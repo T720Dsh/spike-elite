@@ -178,8 +178,9 @@ void ASpikeElitePlayerController::DevAutoStart()
 void ASpikeElitePlayerController::DevQuickMatch()
 {
 	// Unattended -QuickMatch: menu shot, start the match, then poll until
-	// MatchOver, screenshot the result screen and quit. Serve timeouts let the
-	// AI finish a full match without keyboard input.
+	// MatchOver, screenshot the result screen, exercise "再来一场" (Rematch),
+	// play a second full match, screenshot again, then quit. Serve timeouts let
+	// the AI finish matches without keyboard input.
 	struct FDevEvent { float Delay; TFunction<void()> Fn; };
 	TArray<FDevEvent> Events;
 	auto At = [&Events](float Delay, TFunction<void()> Fn) { Events.Add(FDevEvent{ Delay, MoveTemp(Fn) }); };
@@ -191,8 +192,10 @@ void ASpikeElitePlayerController::DevQuickMatch()
 	const double StartSeconds = FPlatformTime::Seconds();
 	int32 Index = 0;
 	float ShotAt = -1.0f;
+	float RematchAt = -1.0f;
+	float ShotRematch = -1.0f;
 	FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda(
-		[Weak, StartSeconds, Index, Events = MoveTemp(Events), ShotAt](float) mutable -> bool
+		[Weak, StartSeconds, Index, Events = MoveTemp(Events), ShotAt, RematchAt, ShotRematch](float) mutable -> bool
 	{
 		ASpikeElitePlayerController* PC = Weak.Get();
 		if (!PC) { return false; }
@@ -205,24 +208,43 @@ void ASpikeElitePlayerController::DevQuickMatch()
 
 		if (ASpikeEliteGameMode* GM = Cast<ASpikeEliteGameMode>(UGameplayStatics::GetGameMode(PC)))
 		{
-			if (GM->MatchState == EMatchState::MatchOver && ShotAt < 0.0f)
+			if (GM->MatchState == EMatchState::MatchOver)
 			{
-				ShotAt = static_cast<float>(Elapsed);
-				UE_LOG(LogSEMenu, Log, TEXT("DEV QUICK MATCH: MatchOver reached (winner A=%d B=%d), shooting result screen"),
-					GM->TeamASetsWon, GM->TeamBSetsWon);
-				PC->DevShot(TEXT("shot_qm_02_matchover"));
+				if (ShotAt < 0.0f)
+				{
+					ShotAt = static_cast<float>(Elapsed);
+					UE_LOG(LogSEMenu, Log, TEXT("DEV QUICK MATCH: MatchOver reached (winner A=%d B=%d), shooting result screen"),
+						GM->TeamASetsWon, GM->TeamBSetsWon);
+					PC->DevShot(TEXT("shot_qm_02_matchover"));
+				}
+				if (ShotAt > 0.0f && RematchAt < 0.0f && (Elapsed - ShotAt) > 2.5f)
+				{
+					RematchAt = static_cast<float>(Elapsed);
+					UE_LOG(LogSEMenu, Log, TEXT("DEV QUICK MATCH: clicking 再来一场 (Rematch)"));
+					PC->Rematch();
+				}
+				// Second MatchOver (RematchAt>0 means we already rematched once).
+				if (RematchAt > 0.0f && ShotRematch < 0.0f && (Elapsed - RematchAt) > 3.0f)
+				{
+					ShotRematch = static_cast<float>(Elapsed);
+					UE_LOG(LogSEMenu, Log, TEXT("DEV QUICK MATCH: second MatchOver, shooting final screen"));
+					PC->DevShot(TEXT("shot_qm_03_rematch_over"));
+				}
+				if (ShotRematch > 0.0f && (Elapsed - ShotRematch) > 3.0f)
+				{
+					UE_LOG(LogSEMenu, Log, TEXT("DEV QUICK MATCH: quitting"));
+					UKismetSystemLibrary::QuitGame(PC, PC, EQuitPreference::Quit, false);
+					return false;
+				}
 			}
-			if (ShotAt > 0.0f && (Elapsed - ShotAt) > 3.0f)
-			{
-				UE_LOG(LogSEMenu, Log, TEXT("DEV QUICK MATCH: quitting"));
-				UKismetSystemLibrary::QuitGame(PC, PC, EQuitPreference::Quit, false);
-				return false;
-			}
+			// No MatchOver yet: if the rematch happened but the state left
+			// MatchOver (it always does via StartMatch), we simply wait for the
+			// second MatchOver above. Guard the whole sequence with a timeout.
 		}
 
 		if (Elapsed > 300.0)
 		{
-			UE_LOG(LogSEMenu, Error, TEXT("DEV QUICK MATCH: timed out waiting for MatchOver"));
+			UE_LOG(LogSEMenu, Error, TEXT("DEV QUICK MATCH: timed out waiting for MatchOver/Rematch"));
 			UKismetSystemLibrary::QuitGame(PC, PC, EQuitPreference::Quit, false);
 			return false;
 		}
