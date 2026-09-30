@@ -8,6 +8,78 @@ for milestone tags once a first playable is tagged.
 
 ## [Unreleased]
 
+### Milestone M11a — Stability, interaction state machine, performance & release hygiene
+
+Verified with headless runs: 18 automation tests pass; `-devauto` walks every
+menu + confirm dialog (cancel paths verified with PASS/FAIL logs); three
+`-QuickMatch -devauto -SEED=1/42/4242` runs each reach MatchOver, cancel a
+confirm dialog from the result screen, Rematch to a second MatchOver, then
+quit; the Win64 Development package was rebuilt from scratch and smoke-tested.
+
+#### Confirm-dialog state machine (the M11a headline fix)
+- `ShowConfirm` now sets `MenuState = Confirm` and refuses to stack a second
+  dialog (refocuses the existing one). Esc inside a confirm only closes the
+  dialog; the pause menu underneath stays paused and cannot be revived.
+- `CancelConfirm` restores exactly the state that opened the dialog: Paused →
+  Paused (menu intact), MatchOver → MatchOver (world stays paused), Playing →
+  Playing (mid-match confirm-cancel no longer dumps the player to the main
+  menu), MainMenu → MainMenu. Target widgets are rebuilt if lost.
+- Main menu "退出游戏" now routes through the same confirm dialog.
+- `ConfirmWidget` default keyboard focus = 取消 (safe); MatchEnd default focus =
+  再来一场; settings default focus = 返回; Tab/arrows/Enter/Esc work on
+  settings, pause, result and confirm screens.
+- `AcceptConfirm` still clears dialog + pending action before executing.
+
+#### Automation vs. normal play fully separated
+- `BeginAwaitingServe` uses `SEVolleyballRules::ShouldAutoServe(bot, devAuto)`:
+  bots always auto-serve; a human serves ONLY on E unless `-devauto` is on the
+  command line (non-Shipping builds). Normal `-QuickMatch` without `-devauto`
+  still requires real key input. The UI "按 E 发球" hint is now honest.
+
+#### MatchOver input gate
+- `OnMatchOver` now pauses the world (`SetPause(true)`): no character input,
+  no bot Tick, no ball projectile behind the result screen. UI (buttons, mouse,
+  keyboard) keeps working; `Rematch` and menu-return correctly unpause and
+  restore input, and Rematch resets score/set/rally state via the existing
+  `StartMatch` → `CleanupMatch` path.
+
+#### Production code reuses the tested rule core
+- `CanTouchBall` / `TryTouchBall` call `IsTouchLegalInPhase` (no second copy).
+- `RotateTeam` reorders via the same `RotateRoster` core the tests exercise.
+- `StartPlay()` is the single place that sets `bBallInPlay=true` (ExecuteServe);
+  settle/cleanup set it false. Tests assert the full lifecycle.
+- `IsServeFault` classifies any serve that never crossed the net — in or out —
+  as a serve fault (shared by GameMode and tests).
+- `[RallyEnd]` logs the score after awarding with explicit before -> after.
+- `ERallyEndReason::Cancelled` is now exercised: an un-settled rally at
+  cleanup is settled and logged as Cancelled (no point).
+- 13 → 18 automation tests (additions: BallInPlayLifecycle,
+  ServeFaultClassification, RotationMatchesCoreAlgorithm, PhaseGateMatrix,
+  AutoServePolicy).
+
+#### Update frequency (perf hygiene)
+- `UpdateScoreboard` is called immediately at state-change sites but only
+  ~6.7 Hz from Tick for the dynamic ball hint, and builds ONE compact signature
+  per call — SetText only when content changed (before M11a it rebuilt every
+  FString/FText and called SetText at 60+ Hz).
+- `UpdateAIDirectives` re-selects at ~12.5 Hz; bot movement stays per-frame.
+- Widgets add their own per-row change guards; scoreboard gained a translucent
+  backdrop, an aligned 8-row layout, a full controls help line that collapses
+  after ~5 s, and an in-pause-menu "操作说明" toggle.
+
+#### Release / config hygiene
+- `SpikeElite.Target.cs` sets `IncludeOrderVersion = Unreal5_8` (Game target
+  now matches the Editor target; include-order warning gone).
+- `DefaultEngine.ini`: the Android File Server block (including the committed
+  `SecurityToken=0676...`) is REMOVED, not just rewritten (M10c had swapped the
+  token value but left the block). Comment documents build-machine token
+  generation if mobile tooling is ever added.
+- `DefaultInput.ini`: the two leftover EnhancedInput class lines are deleted
+  (the project stays on legacy BindAxis/BindAction); `ToggleFirstPerson` now
+  maps both C (primary) and V (compat). README and in-game help match.
+- `-devauto` gained `DevVerify` PASS/FAIL checks (confirm-cancel from Paused /
+  mid-match / MainMenu / MatchOver) and screenshots shot_07–09 + shot_qm_03.
+
 ### Milestone M10 — Vertical slice: rules authority, 3-touch volleyball, team AI, tests, Win64 package
 
 Verified with headless runs (`-devauto`, `-QuickMatch -devauto`): a full

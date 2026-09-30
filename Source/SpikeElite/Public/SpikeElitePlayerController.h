@@ -161,6 +161,10 @@ protected:
 	/** Point the dev camera at a world transform, or back at the player pawn. */
 	void DevView(const FVector& Loc, const FRotator& Rot);
 	void DevViewPlayer();
+	/** Log a PASS/FAIL for an automated state-machine check and count failures. */
+	void DevVerify(bool bCondition, const FString& Label);
+	/** Non-zero means at least one DevVerify check failed (reported at exit). */
+	int32 DevVerifyFailures = 0;
 	FTimerHandle DevTimer;
 #endif
 };

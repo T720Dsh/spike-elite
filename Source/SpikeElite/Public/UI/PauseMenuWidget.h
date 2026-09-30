@@ -28,10 +28,13 @@ protected:
 	UPROPERTY() TObjectPtr<UButton> BtnSettings;
 	UPROPERTY() TObjectPtr<UButton> BtnMainMenu;
 	UPROPERTY() TObjectPtr<UButton> BtnQuit;
+	UPROPERTY() TObjectPtr<UButton> BtnHelp;
+	UPROPERTY() TObjectPtr<class UTextBlock> HelpText;
 	void BuildWidgetTree();
 
 	UFUNCTION() void HResume()   { OnResume.ExecuteIfBound(); }
 	UFUNCTION() void HSettings() { OnSettings.ExecuteIfBound(); }
 	UFUNCTION() void HMainMenu() { OnMainMenu.ExecuteIfBound(); }
 	UFUNCTION() void HQuit()     { OnQuit.ExecuteIfBound(); }
+	UFUNCTION() void ToggleHelp();
 };

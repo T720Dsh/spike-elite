@@ -62,6 +62,13 @@ ASpikeEliteGameMode::ASpikeEliteGameMode()
 	// -QuickMatch: one set to 3 points, but reuses the real rule code.
 	bQuickMatch = FParse::Param(FCommandLine::Get(), TEXT("QuickMatch"));
 
+	// M11: -devauto (non-Shipping) lets the automation path serve for a human
+	// after a timeout; without it a human server always waits for the E key.
+#if !UE_BUILD_SHIPPING
+	bDevAuto = FParse::Param(FCommandLine::Get(), TEXT("devauto"));
+#endif
+	UE_LOG(LogVolleyballRules, Log, TEXT("devauto=%d QuickMatch=%d"), bDevAuto ? 1 : 0, bQuickMatch ? 1 : 0);
+
 	// Seeded AI randomness: -Seed=N makes automated runs reproducible.
 	int32 Seed = FDateTime::Now().GetTicks() % 1000000;
 	int32 SeedArg = 0;
@@ -223,6 +230,18 @@ void ASpikeEliteGameMode::CleanupMatch()
 	TeamBPlayers.Reset();
 	if (Scoreboard) { Scoreboard->RemoveFromParent(); Scoreboard = nullptr; }
 
+	// M11: any un-settled rally at cleanup is explicitly cancelled (no point).
+	// This keeps ERallyEndReason::Cancelled a real, exercised state instead of a
+	// dead enum value.
+	if (!RallyState.bRallySettled)
+	{
+		SEVolleyballRules::SettleRally(RallyState);
+		UE_LOG(LogVolleyballRules, Log,
+			TEXT("[RallyEnd] reason=Cancelled scoring=- lastTouch=%s touchCount=%d A:%d B:%d set=%d"),
+			TeamStr(RallyState.LastTouchTeam), RallyState.TouchCount,
+			TeamAScore, TeamBScore, CurrentSet);
+	}
+
 	// Reset every piece of transient rally/match state.
 	bInToss = false;
 	TossTimer = 0.0f;
@@ -259,9 +278,17 @@ void ASpikeEliteGameMode::RotateTeam(EVolleyballTeam TeamToRotate)
 {
 	TArray<TObjectPtr<ASpikeEliteCharacter>>& Roster = (TeamToRotate == EVolleyballTeam::TeamA) ? TeamAPlayers : TeamBPlayers;
 	if (Roster.Num() != 6) return;
-	TObjectPtr<ASpikeEliteCharacter> OldP0 = Roster[0];
-	for (int32 i = 0; i < 5; i++) Roster[i] = Roster[i+1];
-	Roster[5] = OldP0;
+
+	// M11: reuse the ONE tested core rotation (RotateRoster). Production and the
+	// automation tests can no longer diverge on side-out order.
+	TArray<int32> Order;
+	for (int32 i = 0; i < Roster.Num(); i++) { Order.Add(i); }
+	SEVolleyballRules::RotateRoster(Order);
+	TArray<TObjectPtr<ASpikeEliteCharacter>> NewRoster;
+	NewRoster.SetNum(6);
+	for (int32 i = 0; i < 6; i++) { NewRoster[i] = Roster[Order[i]]; }
+	Roster = MoveTemp(NewRoster);
+
 	const TArray<FVector> PosA = GetPositionsA();
 	for (int32 i = 0; i < 6; i++)
 	{
@@ -383,9 +410,6 @@ void ASpikeEliteGameMode::Tick(float DeltaSeconds)
 		}
 		BallPrevX = BL.X;
 
-		// ---- AI coordination ----
-		UpdateAIDirectives(DeltaSeconds);
-
 		// ---- Rearm touch protection once the ball leaves reach ----
 		RearmTouchers();
 
@@ -409,7 +433,24 @@ void ASpikeEliteGameMode::Tick(float DeltaSeconds)
 		if (RallyResultDisplayTimer <= 0.f) { RallyResultText.Empty(); }
 	}
 
-	UpdateScoreboard();
+	// ---- M11 frequency control ----
+	// AI tactical re-selection at ~12.5 Hz; bot movement stays per-frame in the
+	// characters' own Tick. Scoreboard dynamic refresh (ball hint) at ~6.7 Hz;
+	// static fields (score/set/phase/possession/touches) still push immediately
+	// from their change sites via direct UpdateScoreboard() calls.
+	AIDirectiveTimer -= DeltaSeconds;
+	if (AIDirectiveTimer <= 0.f)
+	{
+		AIDirectiveTimer = 0.08f;
+		UpdateAIDirectives(DeltaSeconds);
+	}
+
+	ScoreboardUpdateTimer -= DeltaSeconds;
+	if (ScoreboardUpdateTimer <= 0.f)
+	{
+		ScoreboardUpdateTimer = 0.15f;
+		UpdateScoreboard();
+	}
 }
 
 void ASpikeEliteGameMode::RearmTouchers()
@@ -431,6 +472,8 @@ void ASpikeEliteGameMode::UpdateScoreboard()
 {
 	if (!Scoreboard) return;
 
+	// Ball direction/distance is dynamic: recompute on every call (throttled to
+	// ~6.7 Hz from Tick; immediate at state-change sites). Cheap FString only.
 	FString BallHint;
 	if (Ball)
 	{
@@ -488,6 +531,17 @@ void ASpikeEliteGameMode::UpdateScoreboard()
 	// Possession / touch counter, e.g. "A 2/3".
 	const FString Possession = SEVolleyballRules::TouchLabel(RallyState);
 
+	// M11 dirty-check: build ONE compact signature (cheap ints + a few FStrings)
+	// and skip every SetText unless something actually changed. Before M11 this
+	// function rebuilt every FString/FText and called SetText unconditionally at
+	// 60+ Hz; now the widget is only touched when its content really differs.
+	const FString Sig = FString::Printf(TEXT("%d|%d|%d|%d|%d|%d|%d|%d|%s|%s|%s|%s|%s"),
+		CurrentSet, TeamAScore, TeamBScore, TeamASetsWon, TeamBSetsWon,
+		(int32)ServingTeam, (int32)MatchState, RallyState.TouchCount,
+		*Phase, *Possession, *ServeHint, *RallyResultText, *BallHint);
+	if (Sig == LastScoreboardSignature) { return; }
+	LastScoreboardSignature = Sig;
+
 	Scoreboard->UpdateScore(CurrentSet, TeamAScore, TeamBScore, TeamASetsWon, TeamBSetsWon,
 		ServingTeam == EVolleyballTeam::TeamA, BallHint, Phase, Possession, ServeHint, RallyResultText);
 }
@@ -503,9 +557,10 @@ void ASpikeEliteGameMode::OnBallLanded(const FVector& BallLocation)
 
 	ERallyEndReason Reason = bIn ? ERallyEndReason::BallIn : ERallyEndReason::BallOut;
 
-	// Serve fault: only the serve touch happened and the ball never crossed the
-	// net -> it came down on the serving side (in or out).
-	if (Reason == ERallyEndReason::BallIn && RallyState.TouchCount == 1 && !bServeCrossedNet)
+	// M11: a serve that never legally crossed the net is a serve fault whether it
+	// lands IN (own side, impossible to be in-bounds there but keep the rule) or
+	// OUT — classification comes from the shared rule core, not a BallIn-only case.
+	if (SEVolleyballRules::IsServeFault(RallyState, bServeCrossedNet))
 	{
 		Reason = ERallyEndReason::ServeFault;
 	}
@@ -527,12 +582,17 @@ void ASpikeEliteGameMode::EndRally(ERallyEndReason Reason, EVolleyballTeam Scori
 
 	SetRallyResult(Reason, ScoringTeam);
 
-	UE_LOG(LogVolleyballRules, Log,
-		TEXT("[RallyEnd] reason=%s scoring=%s lastTouch=%s touchCount=%d A:%d B:%d set=%d"),
-		*SEVolleyballRules::RallyReasonLabel(Reason), TeamStr(ScoringTeam),
-		TeamStr(RallyState.LastTouchTeam), RallyState.TouchCount, TeamAScore, TeamBScore, CurrentSet);
-
+	// M11: award FIRST, then log with explicit before -> after so [RallyEnd] never
+	// dresses up a stale score as the final one.
+	const int32 BeforeA = TeamAScore;
+	const int32 BeforeB = TeamBScore;
 	AwardPoint(ScoringTeam);
+
+	UE_LOG(LogVolleyballRules, Log,
+		TEXT("[RallyEnd] reason=%s scoring=%s lastTouch=%s touchCount=%d A:%d->%d B:%d->%d set=%d"),
+		*SEVolleyballRules::RallyReasonLabel(Reason), TeamStr(ScoringTeam),
+		TeamStr(RallyState.LastTouchTeam), RallyState.TouchCount,
+		BeforeA, TeamAScore, BeforeB, TeamBScore, CurrentSet);
 }
 
 void ASpikeEliteGameMode::AwardPoint(EVolleyballTeam ScoringTeam)
@@ -571,6 +631,10 @@ void ASpikeEliteGameMode::CheckSetWin()
 	{
 		MatchWinner = W;
 		MatchState = EMatchState::MatchOver;
+		// The end-of-match screen shows the result itself; drop the last rally
+		// banner so the scoreboard reads clean under MatchOver.
+		RallyResultText.Empty();
+		RallyResultDisplayTimer = 0.0f;
 		UpdateScoreboard();
 		NotifyMatchOver();
 		return;
@@ -619,19 +683,20 @@ void ASpikeEliteGameMode::BeginAwaitingServe()
 	MatchState = EMatchState::AwaitingServe;
 	bInToss = false;
 
-	// A bot server serves itself after a short pause; a human server also gets
-	// a serve timeout so unattended -QuickMatch verification runs can finish a
-	// full match without keyboard input (normal play: the human presses E first).
+	// M11 auto-serve policy: bots always auto-serve after a short pause; a human
+	// server serves ONLY when the automation flag (-devauto) is present. Normal
+	// play never substitutes keyboard input, so "按 E 发球" is honest.
 	bAIServePending = false;
 	AIServeTimer = 0.0f;
 	if (Server)
 	{
-		bAIServePending = true;
+		const bool bAuto = SEVolleyballRules::ShouldAutoServe(Server->bIsBot, bDevAuto);
+		bAIServePending = bAuto;
 		AIServeTimer = Server->bIsBot ? 1.0f : 3.0f;
 	}
 
-	UE_LOG(LogVolleyballRules, Log, TEXT("Awaiting serve: team=%s server=%s"), TeamStr(ServingTeam),
-		(Server && !Server->bIsBot) ? TEXT("human (press E)") : TEXT("bot (auto)"));
+	UE_LOG(LogVolleyballRules, Log, TEXT("Awaiting serve: team=%s server=%s auto=%d"), TeamStr(ServingTeam),
+		(Server && !Server->bIsBot) ? TEXT("human") : TEXT("bot"), bAIServePending ? 1 : 0);
 	UpdateScoreboard();
 }
 
@@ -689,7 +754,10 @@ void ASpikeEliteGameMode::ExecuteServe()
 	}
 
 	MatchState = EMatchState::Rally;
-	UE_LOG(LogVolleyballRules, Log, TEXT("[Serve] team=%s player=%d power=%.0f dir=(%.2f,%.2f,%.2f)"),
+	// M11: the serve is actually out -> the ball is now in play. This is the one
+	// place that sets bBallInPlay true; cleanup/end-of-rally set it back to false.
+	SEVolleyballRules::StartPlay(RallyState);
+	UE_LOG(LogVolleyballRules, Log, TEXT("[Serve] team=%s player=%d power=%.0f dir=(%.2f,%.2f,%.2f) ballInPlay=1"),
 		TeamStr(ServingTeam), ServerPlayerIndex, TossPower, TossDir.X, TossDir.Y, TossDir.Z);
 	UpdateScoreboard();
 }
@@ -710,10 +778,11 @@ void ASpikeEliteGameMode::OnBallCrossedNet()
 bool ASpikeEliteGameMode::CanTouchBall(const ASpikeEliteCharacter* Toucher) const
 {
 	if (!Toucher || !bMatchActive) return false;
-	if (MatchState != EMatchState::Rally) return false;   // 暂停/局间/发球准备一律不可触球
-	if (RallyState.bRallySettled) return false;
+	// M11: the SAME phase gate the tests exercise (Rally && !settled); no second
+	// copy of the rule in production code.
+	if (!SEVolleyballRules::IsTouchLegalInPhase(MatchState, RallyState.bRallySettled)) return false;
 	if (!Toucher->bTouchArmed) return false;
-	const EVolleyballTeam Team = (Toucher->TeamSide > 0) ? EVolleyballTeam::TeamA : EVolleyballTeam::TeamB;
+	const EVolleyballTeam Team = TeamOf(Toucher);
 	if (RallyState.PossessingTeam != EVolleyballTeam::None && RallyState.PossessingTeam != Team) return false;
 	return true;
 }
@@ -721,8 +790,8 @@ bool ASpikeEliteGameMode::CanTouchBall(const ASpikeEliteCharacter* Toucher) cons
 bool ASpikeEliteGameMode::TryTouchBall(ASpikeEliteCharacter* Toucher, EBallTouchType Type)
 {
 	if (!Toucher || !Ball || !bMatchActive) return false;
-	if (MatchState != EMatchState::Rally) return false;
-	if (RallyState.bRallySettled) return false;
+	// M11: shared phase gate (Rally && !settled) — same as CanTouchBall and tests.
+	if (!SEVolleyballRules::IsTouchLegalInPhase(MatchState, RallyState.bRallySettled)) return false;
 	if (!Toucher->bTouchArmed) return false;
 
 	const EVolleyballTeam Team = TeamOf(Toucher);

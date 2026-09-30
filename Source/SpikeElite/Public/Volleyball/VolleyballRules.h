@@ -163,6 +163,31 @@ namespace SEVolleyballRules
 		return State == EMatchState::Rally && !bRallySettled;
 	}
 
+	/** Mark the rally as live. Called by GameMode when the serve is actually hit
+	 *  out (ExecuteServe) and the state enters Rally. Tests assert the lifecycle
+	 *  BeginRally(false) -> StartPlay(true) -> SettleRally(false). */
+	inline void StartPlay(FVolleyballRallyState& State)
+	{
+		State.bBallInPlay = true;
+	}
+
+	/** Serve-fault classification (M11): a serve that never legally crossed the
+	 *  net counts as a serve fault whether it lands in or out, so both landings
+	 *  are reported as 发球失误 instead of a generic IN/OUT. */
+	inline bool IsServeFault(const FVolleyballRallyState& State, bool bServeCrossedNet)
+	{
+		return State.TouchCount == 1 && !bServeCrossedNet;
+	}
+
+	/** Whether the serving player may auto-serve without pressing E (M11).
+	 *  Bots always auto-serve; a human serves manually unless the automation
+	 *  flag (-devauto) explicitly delegates control. Single source of truth so
+	 *  the GameMode and the tests share one decision. */
+	inline bool ShouldAutoServe(bool bIsBot, bool bDevAuto)
+	{
+		return bIsBot || bDevAuto;
+	}
+
 	/** FIVB §7.4 side-out rotation: the new serving team rotates clockwise, i.e.
 	 *  the position-1 player (index 0) moves to the last slot. Pure array op so
 	 *  the GameMode and the tests share one implementation. */

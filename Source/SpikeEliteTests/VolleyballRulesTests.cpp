@@ -18,11 +18,14 @@ using SEVolleyballRules::IsInBounds;
 using SEVolleyballRules::IsMatchWon;
 using SEVolleyballRules::IsSetWon;
 using SEVolleyballRules::IsTouchLegalInPhase;
+using SEVolleyballRules::IsServeFault;
 using SEVolleyballRules::OnBallCrossedNet;
 using SEVolleyballRules::PointsToWinForSet;
 using SEVolleyballRules::RotateRoster;
 using SEVolleyballRules::BeginRally;
 using SEVolleyballRules::SettleRally;
+using SEVolleyballRules::StartPlay;
+using SEVolleyballRules::ShouldAutoServe;
 
 // ---------------------------------------------------------------- 1/2: IN / OUT scoring
 
@@ -257,6 +260,96 @@ bool FSEQuickMatchRules::RunTest(const FString& Parameters)
 	TestFalse(TEXT("2:2 not won in quick"), IsSetWon(2, 2, QuickTarget));
 	TestTrue(TEXT("3:1 won in quick"), IsSetWon(3, 1, QuickTarget));
 	TestFalse(TEXT("3:2 not won in quick (lead 1)"), IsSetWon(3, 2, QuickTarget));
+	return true;
+}
+
+// ================================================================ M11a tests
+// The GameMode now calls these exact helpers (IsTouchLegalInPhase / RotateRoster
+// / StartPlay / IsServeFault / ShouldAutoServe); passing here means the
+// production code path and the tests cannot diverge.
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSEMatchWinByTwo2, "SpikeElite.Tests.BallInPlayLifecycle",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FSEMatchWinByTwo2::RunTest(const FString& Parameters)
+{
+	FVolleyballRallyState S;
+	BeginRally(S, EVolleyballTeam::TeamA);
+	TestFalse(TEXT("ball not in play right after BeginRally"), S.bBallInPlay);
+
+	// ExecuteServe path: the GameMode calls StartPlay() when the serve is struck.
+	StartPlay(S);
+	TestTrue(TEXT("ball in play after StartPlay (ExecuteServe)"), S.bBallInPlay);
+
+	// EndRally / cleanup path: SettleRally() puts it back to false.
+	TestTrue(TEXT("settle succeeds"), SettleRally(S));
+	TestFalse(TEXT("ball not in play after SettleRally"), S.bBallInPlay);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSEServeFaultClassification, "SpikeElite.Tests.ServeFaultClassification",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FSEServeFaultClassification::RunTest(const FString& Parameters)
+{
+	// A serve that never crossed the net is a fault whether it lands in or out.
+	FVolleyballRallyState S;
+	BeginRally(S, EVolleyballTeam::TeamA);
+	EvaluateTouch(S, EVolleyballTeam::TeamA, 0); // serve = touch 1
+	TestTrue(TEXT("touch-1 serve that never crossed -> fault"), IsServeFault(S, false));
+	TestFalse(TEXT("touch-1 serve that DID cross -> not a fault"), IsServeFault(S, true));
+
+	// A landed ball after the second touch is never a serve fault.
+	EvaluateTouch(S, EVolleyballTeam::TeamA, 1);
+	TestFalse(TEXT("touch-2 ball not a serve fault"), IsServeFault(S, false));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSERotationMatchesCoreAlgorithm, "SpikeElite.Tests.RotationMatchesCoreAlgorithm",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FSERotationMatchesCoreAlgorithm::RunTest(const FString& Parameters)
+{
+	// Production GameMode::RotateTeam reorders its roster by applying RotateRoster
+	// to {0..5} and reading the result; simulate that here and verify the final
+	// roster order equals the old hand-rolled shift (P0 -> P5).
+	TArray<int32> Order = {0, 1, 2, 3, 4, 5};
+	SEVolleyballRules::RotateRoster(Order);
+	const TArray<int32> Expected = {1, 2, 3, 4, 5, 0};
+	TestEqual(TEXT("GameMode rotation equals RotateRoster output"), Order, Expected);
+
+	// Two side-outs in a row (e.g. B wins serve twice): still stable.
+	SEVolleyballRules::RotateRoster(Order);
+	TestEqual(TEXT("second rotation"), Order, TArray<int32>({2, 3, 4, 5, 0, 1}));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSEPhaseGateMatrix, "SpikeElite.Tests.PhaseGateMatrix",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FSEPhaseGateMatrix::RunTest(const FString& Parameters)
+{
+	// Full phase matrix over every EMatchState; this is exactly the gate the
+	// GameMode's CanTouchBall/TryTouchBall call (M11: no second copy).
+	const EMatchState All[] = {
+		EMatchState::PreMatch, EMatchState::BetweenRallies, EMatchState::AwaitingServe,
+		EMatchState::ServingToss, EMatchState::Rally, EMatchState::SetOver, EMatchState::MatchOver
+	};
+	for (EMatchState State : All)
+	{
+		const bool bLegal = (State == EMatchState::Rally);
+		TestEqual(TEXT("unsettled gate matches"), IsTouchLegalInPhase(State, false), bLegal);
+		TestFalse(TEXT("settled rally never touchable"), IsTouchLegalInPhase(State, true));
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSEAutoServePolicy, "SpikeElite.Tests.AutoServePolicy",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FSEAutoServePolicy::RunTest(const FString& Parameters)
+{
+	// M11: normal human NEVER auto-serves; bots always do; -devauto re-enables
+	// the human timeout. This is the exact predicate BeginAwaitingServe uses.
+	TestFalse(TEXT("human without -devauto waits for E"), ShouldAutoServe(false, false));
+	TestTrue(TEXT("human under -devauto may auto-serve"), ShouldAutoServe(false, true));
+	TestTrue(TEXT("bot always auto-serves"), ShouldAutoServe(true, false));
+	TestTrue(TEXT("bot under -devauto auto-serves"), ShouldAutoServe(true, true));
 	return true;
 }
 

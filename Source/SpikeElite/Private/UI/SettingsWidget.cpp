@@ -245,6 +245,13 @@ void USettingsWidget::NativeConstruct()
 	if (BtnApply) BtnApply->OnClicked.AddUniqueDynamic(this, &USettingsWidget::ApplySettings);
 	if (BtnBack) BtnBack->OnClicked.AddUniqueDynamic(this, &USettingsWidget::Back);
 
+	// M11a: keyboard focus starts on 返回 (Esc-equivalent safe action); Tab /
+	// arrow keys move through the combo boxes and slider from there.
+	if (BtnBack)
+	{
+		BtnBack->SetKeyboardFocus();
+	}
+
 	// Reflect the live settings after the controls exist.
 	InitFromCurrentSettings();
 	SetCurrentSensitivity(PendingSensitivity);

@@ -94,6 +94,13 @@ void UConfirmWidget::NativeConstruct()
 	Super::NativeConstruct();
 	if (BtnConfirm) BtnConfirm->OnClicked.AddUniqueDynamic(this, &UConfirmWidget::HConfirm);
 	if (BtnCancel)  BtnCancel->OnClicked.AddUniqueDynamic(this, &UConfirmWidget::HCancel);
+
+	// M11a: keyboard focus starts on 取消 so Enter/Space can never accidentally
+	// confirm a destructive action. Tab/arrow keys then navigate both buttons.
+	if (BtnCancel)
+	{
+		BtnCancel->SetKeyboardFocus();
+	}
 }
 
 void UConfirmWidget::SetMessage(const FString& Text)

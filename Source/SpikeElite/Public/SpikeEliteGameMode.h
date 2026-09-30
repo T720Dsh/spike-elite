@@ -196,6 +196,23 @@ protected:
 	/** True when -QuickMatch is on the command line (1 set to 3, reuse real rules). */
 	bool bQuickMatch = false;
 
+	/** True when -devauto is on the command line (non-Shipping only). In normal
+	 *  play a human server must press E; only under -devauto may the automation
+	 *  path serve for the human after a 3 s timeout. See ShouldAutoServe. */
+	bool bDevAuto = false;
+
+	/** Throttle for dynamic scoreboard refresh (ball hint): ~6.7 Hz. Static fields
+	 *  (score/set/phase/possession) still push immediately on change via direct
+	 *  UpdateScoreboard() calls at the change sites. */
+	float ScoreboardUpdateTimer = 0.0f;
+
+	/** Signature of the last pushed scoreboard state; unchanged -> skip SetText. */
+	FString LastScoreboardSignature;
+
+	/** Throttle for AI tactical re-selection: ~12.5 Hz. Bot movement itself stays
+	 *  per-frame inside ASpikeEliteCharacter::Tick. */
+	float AIDirectiveTimer = 0.0f;
+
 	/** Maximum distance (cm) at which a character may touch the ball. */
 	static constexpr float TouchReach = 220.0f;
 

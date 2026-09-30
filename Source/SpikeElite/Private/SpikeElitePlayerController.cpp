@@ -58,6 +58,13 @@ void ASpikeElitePlayerController::DevShot(const FString& Name)
 	UE_LOG(LogSEMenu, Log, TEXT("DEV AUTO: shot requested: %s"), *Name);
 }
 
+void ASpikeElitePlayerController::DevVerify(bool bCondition, const FString& Label)
+{
+	UE_LOG(LogSEMenu, Log, TEXT("DEV VERIFY: %s -> %s"),
+		*Label, bCondition ? TEXT("PASS") : TEXT("FAIL"));
+	if (!bCondition) { DevVerifyFailures++; }
+}
+
 void ASpikeElitePlayerController::DevView(const FVector& Loc, const FRotator& Rot)
 {
 	if (!DevCam)
@@ -142,7 +149,24 @@ void ASpikeElitePlayerController::DevAutoStart()
 	At(15.0f, [this]() { DevViewPlayer(); });
 	At(15.4f, [this]() { PauseGame(); });
 	At(16.3f, [this]() { DevShot(TEXT("shot_06_pause")); });
-	At(17.6f, [this]() { ResumeGame(); });
+
+	// --- M11 confirm-dialog cancel path (pause): open 返回主菜单 confirm, shoot
+	// it, cancel, and verify the game stays PAUSED with the pause menu intact. ---
+	At(17.0f, [this]()
+	{
+		UE_LOG(LogSEMenu, Log, TEXT("DEV AUTO: opening confirm from pause"));
+		AskReturnToMainMenu();
+	});
+	At(17.4f, [this]() { DevShot(TEXT("shot_07_confirm_pause")); });
+	At(17.8f, [this]()
+	{
+		CancelConfirm();
+		DevVerify(MenuState == EMenuState::Paused && PauseMenu != nullptr,
+			TEXT("confirm-cancel from Paused restores Paused (menu intact)"));
+		DevVerify(GetWorld() && GetWorld()->IsPaused(),
+			TEXT("game still paused after confirm-cancel from Paused"));
+	});
+	At(18.3f, [this]() { ResumeGame(); });
 
 	// --- Lifecycle cycle test: menu -> match -> menu -> match (twice) to prove
 	// cleanup leaves no duplicate court/ball/players and level lights survive.
@@ -151,9 +175,40 @@ void ASpikeElitePlayerController::DevAutoStart()
 	At(26.5f, [this]() { UE_LOG(LogSEMenu, Log, TEXT("DEV AUTO: return to menu #2")); ReturnToMainMenu(); });
 	At(28.5f, [this]() { UE_LOG(LogSEMenu, Log, TEXT("DEV AUTO: start match #3")); StartMatch(); });
 
-	At(32.0f, [this]()
+	// --- M11 confirm from a LIVE match (Playing): open quit confirm mid-match,
+	// cancel, and verify the match is NOT abandoned (stays Playing). ---
+	At(30.8f, [this]()
 	{
-		UE_LOG(LogSEMenu, Log, TEXT("DEV AUTO: quitting"));
+		UE_LOG(LogSEMenu, Log, TEXT("DEV AUTO: opening quit confirm mid-match"));
+		AskQuitToDesktop();
+	});
+	At(31.2f, [this]() { DevShot(TEXT("shot_08_confirm_quit_match")); });
+	At(31.6f, [this]()
+	{
+		CancelConfirm();
+		DevVerify(MenuState == EMenuState::Playing,
+			TEXT("confirm-cancel mid-match restores Playing (match not abandoned)"));
+		DevVerify(!(GetWorld() && GetWorld()->IsPaused()),
+			TEXT("world unpaused after confirm-cancel mid-match"));
+	});
+
+	// --- M11 main-menu quit confirm: cancel keeps us on the main menu. ---
+	At(32.2f, [this]() { ReturnToMainMenu(); });
+	At(32.7f, [this]()
+	{
+		UE_LOG(LogSEMenu, Log, TEXT("DEV AUTO: opening quit confirm from main menu"));
+		AskQuitToDesktop();
+	});
+	At(33.1f, [this]() { DevShot(TEXT("shot_09_confirm_quit_menu")); });
+	At(33.5f, [this]()
+	{
+		CancelConfirm();
+		DevVerify(MenuState == EMenuState::MainMenu && MainMenu != nullptr,
+			TEXT("confirm-cancel from main menu stays on main menu"));
+	});
+	At(34.0f, [this]()
+	{
+		UE_LOG(LogSEMenu, Log, TEXT("DEV AUTO: quitting (DevVerifyFailures=%d)"), DevVerifyFailures);
 		UKismetSystemLibrary::QuitGame(this, this, EQuitPreference::Quit, false);
 	});
 
@@ -178,9 +233,11 @@ void ASpikeElitePlayerController::DevAutoStart()
 void ASpikeElitePlayerController::DevQuickMatch()
 {
 	// Unattended -QuickMatch: menu shot, start the match, then poll until
-	// MatchOver, screenshot the result screen, exercise "再来一场" (Rematch),
-	// play a second full match, screenshot again, then quit. Serve timeouts let
-	// the AI finish matches without keyboard input.
+	// MatchOver, screenshot the result screen, exercise the confirm dialog
+	// cancel path from MatchOver (Esc-equivalent must return to MatchOver),
+	// click 再来一场 (Rematch), play a second full match, screenshot again,
+	// then quit. Serve timeouts (under -devauto) let the AI finish matches
+	// without keyboard input.
 	struct FDevEvent { float Delay; TFunction<void()> Fn; };
 	TArray<FDevEvent> Events;
 	auto At = [&Events](float Delay, TFunction<void()> Fn) { Events.Add(FDevEvent{ Delay, MoveTemp(Fn) }); };
@@ -192,10 +249,12 @@ void ASpikeElitePlayerController::DevQuickMatch()
 	const double StartSeconds = FPlatformTime::Seconds();
 	int32 Index = 0;
 	float ShotAt = -1.0f;
+	float ConfirmAt = -1.0f;
+	float ConfirmShotAt = -1.0f;
 	float RematchAt = -1.0f;
 	float ShotRematch = -1.0f;
 	FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda(
-		[Weak, StartSeconds, Index, Events = MoveTemp(Events), ShotAt, RematchAt, ShotRematch](float) mutable -> bool
+		[Weak, StartSeconds, Index, Events = MoveTemp(Events), ShotAt, ConfirmAt, ConfirmShotAt, RematchAt, ShotRematch](float) mutable -> bool
 	{
 		ASpikeElitePlayerController* PC = Weak.Get();
 		if (!PC) { return false; }
@@ -217,9 +276,28 @@ void ASpikeElitePlayerController::DevQuickMatch()
 						GM->TeamASetsWon, GM->TeamBSetsWon);
 					PC->DevShot(TEXT("shot_qm_02_matchover"));
 				}
-				if (ShotAt > 0.0f && RematchAt < 0.0f && (Elapsed - ShotAt) > 2.5f)
+				// M11: open the 返回主菜单 confirm from the result screen, shoot
+				// it, cancel, and verify we are still on MatchOver (never revived
+				// a finished match behind the dialog).
+				if (ShotAt > 0.0f && ConfirmAt < 0.0f && (Elapsed - ShotAt) > 1.0f)
+				{
+					ConfirmAt = static_cast<float>(Elapsed);
+					UE_LOG(LogSEMenu, Log, TEXT("DEV QUICK MATCH: opening confirm from MatchOver"));
+					PC->AskReturnToMainMenu();
+				}
+				if (ConfirmAt > 0.0f && ConfirmShotAt < 0.0f && (Elapsed - ConfirmAt) > 0.5f)
+				{
+					ConfirmShotAt = static_cast<float>(Elapsed);
+					PC->DevShot(TEXT("shot_qm_03_confirm_matchover"));
+				}
+				if (ConfirmShotAt > 0.0f && RematchAt < 0.0f && (Elapsed - ConfirmShotAt) > 0.8f)
 				{
 					RematchAt = static_cast<float>(Elapsed);
+					PC->CancelConfirm();
+					PC->DevVerify(PC->MenuState == EMenuState::MatchOver && PC->MatchEnd != nullptr,
+						TEXT("confirm-cancel from MatchOver restores MatchOver"));
+					PC->DevVerify(PC->GetWorld() && PC->GetWorld()->IsPaused(),
+						TEXT("world stays paused after confirm-cancel from MatchOver"));
 					UE_LOG(LogSEMenu, Log, TEXT("DEV QUICK MATCH: clicking 再来一场 (Rematch)"));
 					PC->Rematch();
 				}
@@ -228,11 +306,11 @@ void ASpikeElitePlayerController::DevQuickMatch()
 				{
 					ShotRematch = static_cast<float>(Elapsed);
 					UE_LOG(LogSEMenu, Log, TEXT("DEV QUICK MATCH: second MatchOver, shooting final screen"));
-					PC->DevShot(TEXT("shot_qm_03_rematch_over"));
+					PC->DevShot(TEXT("shot_qm_04_rematch_over"));
 				}
 				if (ShotRematch > 0.0f && (Elapsed - ShotRematch) > 3.0f)
 				{
-					UE_LOG(LogSEMenu, Log, TEXT("DEV QUICK MATCH: quitting"));
+					UE_LOG(LogSEMenu, Log, TEXT("DEV QUICK MATCH: quitting (DevVerifyFailures=%d)"), PC->DevVerifyFailures);
 					UKismetSystemLibrary::QuitGame(PC, PC, EQuitPreference::Quit, false);
 					return false;
 				}
@@ -360,7 +438,9 @@ void ASpikeElitePlayerController::ShowMainMenu()
 	{
 		MainMenu->OnStart.BindUObject(this, &ASpikeElitePlayerController::StartMatch);
 		MainMenu->OnSettings.BindUObject(this, &ASpikeElitePlayerController::OpenSettingsFromMenu);
-		MainMenu->OnQuit.BindUObject(this, &ASpikeElitePlayerController::QuitToDesktop);
+		// M11: the main menu "退出游戏" button also goes through the confirm dialog
+		// so a stray click cannot kill the process while a match is in progress.
+		MainMenu->OnQuit.BindUObject(this, &ASpikeElitePlayerController::AskQuitToDesktop);
 		MainMenu->AddToViewport(10);
 		SetUIInputMode(MainMenu);
 		UE_LOG(LogSEMenu, Log, TEXT("MainMenu added. InViewport=%s"),
@@ -433,9 +513,11 @@ void ASpikeElitePlayerController::BuildMatchEnd()
 void ASpikeElitePlayerController::OnMatchOver(const TArray<int32>& ScoresA, const TArray<int32>& ScoresB, EVolleyballTeam Winner)
 {
 	UE_LOG(LogSEMenu, Log, TEXT("Match over: winner=%s"), Winner == EVolleyballTeam::TeamA ? TEXT("A") : Winner == EVolleyballTeam::TeamB ? TEXT("B") : TEXT("-"));
-	// The match is finished; the world may stay unpaused (GameMode stops
-	// updating at MatchOver), but we must release the mouse.
-	SetPause(false);
+	// M11 input gate: FREEZE the world. Without this, character input, bot Tick
+	// directives and the ball's projectile all kept running behind the result
+	// screen even though MatchState was MatchOver. UI stays fully interactive
+	// (buttons/mouse/keyboard are driven by this controller, not the world tick).
+	SetPause(true);
 	MenuState = EMenuState::MatchOver;
 	BuildMatchEnd();
 	if (MatchEnd) { MatchEnd->SetResult(Winner, ScoresA, ScoresB); }
@@ -457,6 +539,14 @@ void ASpikeElitePlayerController::Rematch()
 
 void ASpikeElitePlayerController::ShowConfirm(const FString& Message, EMenuState RestoreState, TFunction<void()> Action)
 {
+	// M11: never stack a second dialog. If one is already up, just refocus it
+	// (the caller was a duplicate "返回主菜单"/"退出" press).
+	if (Confirm)
+	{
+		SetUIInputMode(Confirm);
+		return;
+	}
+
 	StateBeforeConfirm = RestoreState;
 	PendingConfirmAction = MoveTemp(Action);
 
@@ -467,6 +557,10 @@ void ASpikeElitePlayerController::ShowConfirm(const FString& Message, EMenuState
 		Confirm->OnConfirm.BindUObject(this, &ASpikeElitePlayerController::AcceptConfirm);
 		Confirm->OnCancel.BindUObject(this, &ASpikeElitePlayerController::CancelConfirm);
 		Confirm->AddToViewport(40);
+		// M11: the confirm dialog BECOMES the active state. Esc then routes to
+		// CancelConfirm instead of accidentally resuming the game, and the pause/
+		// result screens underneath can never be operated behind the dialog.
+		MenuState = EMenuState::Confirm;
 		SetUIInputMode(Confirm);
 	}
 }
@@ -484,6 +578,9 @@ void ASpikeElitePlayerController::CancelConfirm()
 	if (Confirm) { Confirm->RemoveFromParent(); Confirm = nullptr; }
 	PendingConfirmAction = nullptr;
 
+	// M11: restore exactly the state that opened the dialog — including Playing
+	// (a confirm opened mid-match and cancelled must NOT kick the player back to
+	// the main menu) — and rebuild the target widget if it was lost somehow.
 	if (StateBeforeConfirm == EMenuState::Paused && PauseMenu)
 	{
 		MenuState = EMenuState::Paused;
@@ -493,14 +590,21 @@ void ASpikeElitePlayerController::CancelConfirm()
 	else if (StateBeforeConfirm == EMenuState::MatchOver && MatchEnd)
 	{
 		MenuState = EMenuState::MatchOver;
-		SetPause(false);
+		SetPause(true);
 		SetUIInputMode(MatchEnd);
+	}
+	else if (StateBeforeConfirm == EMenuState::Playing)
+	{
+		MenuState = EMenuState::Playing;
+		SetPause(false);
+		SetGameInputMode();
 	}
 	else
 	{
 		MenuState = EMenuState::MainMenu;
 		SetPause(false);
-		SetUIInputMode(MainMenu);
+		if (MainMenu) { SetUIInputMode(MainMenu); }
+		else { ShowMainMenu(); }
 	}
 }
 

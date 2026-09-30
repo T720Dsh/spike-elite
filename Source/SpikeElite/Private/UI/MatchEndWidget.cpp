@@ -110,6 +110,12 @@ void UMatchEndWidget::NativeConstruct()
 	if (BtnRematch)  BtnRematch->OnClicked.AddUniqueDynamic(this, &UMatchEndWidget::HRematch);
 	if (BtnMainMenu) BtnMainMenu->OnClicked.AddUniqueDynamic(this, &UMatchEndWidget::HMainMenu);
 	if (BtnQuit)     BtnQuit->OnClicked.AddUniqueDynamic(this, &UMatchEndWidget::HQuit);
+
+	// M11a: keyboard focus starts on 再来一场 (the safe, forward action).
+	if (BtnRematch)
+	{
+		BtnRematch->SetKeyboardFocus();
+	}
 }
 
 void UMatchEndWidget::SetResult(EVolleyballTeam Winner, const TArray<int32>& ScoresA, const TArray<int32>& ScoresB)

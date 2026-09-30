@@ -48,7 +48,7 @@
 
 ## 当前状态
 
-✅ **可玩垂直切片（PC 原型 → M10 里程碑）** — 引擎 UE 5.8，纯 C++/UMG，无蓝图依赖。
+✅ **可玩垂直切片（PC 原型 → M11a 里程碑）** — 引擎 UE 5.8，纯 C++/UMG，无蓝图依赖。
 
 - [x] M0 市场调研、设计理念、GDD、技术选型
 - [x] M1 工程初始化（C++ 项目、输入、渲染基础）
@@ -61,6 +61,7 @@
 - [x] M8 比赛反馈：回合结果横幅、阶段/控球/触球 HUD、发球提示、触球范围提示
 - [x] M9 比赛结束界面（胜者/各局比分/再来一场/回主菜单/退桌面）、确认模态、Esc 行为明确
 - [x] M10 规则自动化测试（13 项，纯逻辑无地图）、`-QuickMatch` 快速对局、Win64 打包
+- [x] M11a 确认弹窗状态机、自动化与正常游戏隔离、MatchOver 输入门、规则核心复用、HUD/AI 更新节流、发布卫生（18 项测试）
 - [ ] 战术 AI（拦网、后排进攻、自由人）、角色动画模型、网络同步
 
 下一步具体行动见 [docs/05-roadmap.md](docs/05-roadmap.md)。
@@ -83,7 +84,7 @@ D:\Epic\UE_5.8\Engine\Build\BatchFiles\RunUAT.bat BuildCookRun `
   -archive -archivedirectory="D:\projects\spike-elite\Dist"
 
 # 4) 运行打包后的游戏（不启动 UnrealEditor）
-.\Dist\Windows\SpikeElite\Binaries\Win64\SpikeElite.exe
+.\Dist\Windows\SpikeElite.exe
 ```
 
 玩家入口：双击 **`Play_SPIKE_ELITE.bat`**（优先启动打包版 exe，无打包时提示先执行构建脚本）。
@@ -95,17 +96,28 @@ D:\Epic\UE_5.8\Engine\Build\BatchFiles\RunUAT.bat BuildCookRun `
 | 移动 | WASD |
 | 视角 | 鼠标 |
 | 击球 | 鼠标左键（跳跃中为扣球） |
-| 发球 | E（发球准备时；无人操作 3 秒后自动发球） |
-| 第一/第三人称 | C |
+| 发球 | E（真人须按 E；AI 自动发球；`-devauto` 下自动化可代发） |
+| 第一/第三人称 | C（兼容 V） |
 | 暂停 / 释放鼠标 | Esc |
 | 快速对局（开发） | `-QuickMatch`（一局 3 分制，复用正式规则） |
+
+> 发球规则（M11a）：真人玩家必须按 `E` 才能发球，不会在 3 秒后自动发球；
+> 机器人发球员会自动发球。只有显式带 `-devauto` 的无人值守自动化运行才会
+> 代替真人按键。
 
 ## 规则自动化测试
 
 ```powershell
-# 无地图纯逻辑测试（13 项）：
+# 无地图纯逻辑测试（18 项）：
 D:\Epic\UE_5.8\Engine\Binaries\Win64\UnrealEditor.exe .\SpikeElite.uproject `
   -ExecCmds="Automation RunTests SpikeElite.Tests; Quit" -unattended -nosplash -nopause -log
+```
+
+```powershell
+# 无人值守冒烟（开发机；多次运行可用 -SEED=1/42/4242 复现）：
+D:\Epic\UE_5.8\Engine\Binaries\Win64\UnrealEditor.exe .\SpikeElite.uproject `
+  -game -windowed -ResX=1280 -ResY=720 -QuickMatch -devauto -SEED=42 `
+  -unattended -nosplash -log -abslog="D:\projects\spike-elite\Saved\Logs\devauto.log"
 ```
 
 ## 路线图速览
@@ -114,6 +126,7 @@ D:\Epic\UE_5.8\Engine\Binaries\Win64\UnrealEditor.exe .\SpikeElite.uproject `
 M0–M4 原型基础 (已完成)      → 场馆、场地线、球网、菜单、6v6 方块人、球运动
 M5–M9 规则与反馈 (已完成)    → 规则状态机、三次触球、AI 协作、反馈/结束界面
 M10 垂直切片 (已完成)        → 规则测试、QuickMatch、Win64 打包、文档
+M11a 稳定收口 (已完成)       → 确认弹窗状态机、devauto 隔离、MatchOver 输入门、性能与发布卫生
 M11 战术 AI (进行中)         → 拦网、后排进攻、自由人、动画模型升级
 M12 PC 封测 (规划)           → PvP 局域网/Steam 匹配、卡牌系统雏形
 M13 Steam EA (规划)          → Early Access 上线
