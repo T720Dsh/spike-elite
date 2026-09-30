@@ -66,6 +66,20 @@
 
 下一步具体行动见 [docs/05-roadmap.md](docs/05-roadmap.md)。
 
+## 玩家下载（解压即玩）
+
+无需安装 Unreal Engine、无需编译源码。直接下载 Windows 版压缩包：
+
+- 发布页：**<https://github.com/T720Dsh/spike-elite/releases>**
+- 直链：<https://github.com/T720Dsh/spike-elite/releases/download/v1.0.0/SpikeElite-v1.0.0-win64.zip>（约 283MB）
+
+**运行步骤：**
+1. 解压 `SpikeElite-v1.0.0-win64.zip` 到任意目录（绿色版，免安装）。
+2. 双击 `SpikeElite.exe`（或 `Play_SPIKE_ELITE.bat`）。
+3. 主菜单选择开始比赛，按 `E` 发球即可开打。
+
+**系统要求：** Windows 10/11 64 位，显卡支持 DirectX 12（UE5 最低要求），键鼠操作。操作说明见下表。
+
 ## 快速开始（给开发者）
 
 引擎版本：**Unreal Engine 5.8**（`.uproject` 的 `EngineAssociation` 为 `5.8`）。
