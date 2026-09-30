@@ -6,6 +6,8 @@
 #include "SpikeEliteGameMode.h"
 #include "SpikeElitePlayerController.generated.h"
 
+class UTrajectoryPreviewComponent;
+class UTacticalContactComponent;
 class UMainMenuWidget;
 class UPauseMenuWidget;
 class USettingsWidget;
@@ -79,6 +81,16 @@ public:
 	/** Ask for confirmation, then quit to desktop. */
 	UFUNCTION(BlueprintCallable, Category = "UI")
 	void QuitToDesktop();
+
+	/** True while any menu / confirm dialog is on screen (gameplay input blocked). */
+	bool IsMenuOpen() const
+	{
+		return MenuState != EMenuState::Playing;
+	}
+
+	/** Tactical slow-motion shot planner (human only). Created in BeginPlay. */
+	UPROPERTY()
+	TObjectPtr<UTacticalContactComponent> Tactical;
 
 	/** UI button path: confirm dialog before returning to the menu. */
 	void AskReturnToMainMenu();

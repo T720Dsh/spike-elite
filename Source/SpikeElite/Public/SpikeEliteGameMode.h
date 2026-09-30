@@ -5,6 +5,7 @@
 #include "GameFramework/GameModeBase.h"
 #include "Volleyball/VolleyballEnums.h"
 #include "Volleyball/VolleyballRules.h"
+#include "Volleyball/VolleyballTrajectory.h"
 #include "SpikeEliteGameMode.generated.h"
 
 class AVolleyballBall;
@@ -49,6 +50,7 @@ public:
 	AMatchOfficialManager* GetOfficials() const { return Officials; }
 	URotationWidget* GetRotationWidget() const { return RotationWidget; }
 	float GetServeDeadlineRemaining() const { return ServeDeadlineTimer; }
+	AVolleyballBall* GetBall() const { return Ball; }
 
 	/** Build the authoritative rotation snapshot from the current rosters. */
 	void BuildRotationView(FRotationViewState& Out) const;
@@ -85,6 +87,14 @@ public:
 	 * settle the rally against the touching team.
 	 */
 	bool TryTouchBall(ASpikeEliteCharacter* Toucher, EBallTouchType Type);
+
+	/**
+	 * Tactical (slow-motion) touch: the human validated a FShotIntent through the
+	 * planning UI. Goes through the exact same DoTouch path as TryTouchBall, so
+	 * the tested rules and phase gates are shared. TimingError (-1..1) biases the
+	 * direction/power (0 = perfect).
+	 */
+	bool ExecuteTacticalShot(ASpikeEliteCharacter* Toucher, const FShotIntent& Intent);
 
 	/** Whether the given character is allowed to touch the ball right now. */
 	bool CanTouchBall(const ASpikeEliteCharacter* Toucher) const;
@@ -306,6 +316,13 @@ protected:
 
 	/** Single-settlement rally end shared by land / faults / serve faults. */
 	void EndRally(ERallyEndReason Reason, EVolleyballTeam ScoringTeam);
+
+	/**
+	 * Shared core of TryTouchBall / ExecuteTacticalShot: phase gate, touch-armed,
+	 * reach, EvaluateTouch and the strike + post-touch bookkeeping. The caller
+	 * supplies the already-computed direction/power/spin.
+	 */
+	bool DoTouch(ASpikeEliteCharacter* Toucher, EBallTouchType Type, const FVector& Dir, float Power, float SpinRadS);
 
 	/** Ball legally crossed the net plane above the net: switch possession. */
 	void OnBallCrossedNet();

@@ -7,6 +7,7 @@
 #include "UI/MatchEndWidget.h"
 #include "UI/ConfirmWidget.h"
 #include "UI/RotationWidget.h"
+#include "UI/TacticalContactComponent.h"
 #include "SpikeEliteGameMode.h"
 #include "SpikeEliteCharacter.h"
 #include "Blueprint/UserWidget.h"
@@ -29,6 +30,16 @@ ASpikeElitePlayerController::ASpikeElitePlayerController()
 void ASpikeElitePlayerController::BeginPlay()
 {
 	Super::BeginPlay();
+
+	// M11b-4: tactical slow-motion shot planner (human only, runtime component).
+	Tactical = NewObject<UTacticalContactComponent>(this);
+	Tactical->RegisterComponent();
+	// Under -devauto the automation flow is unattended; the tactical planning
+	// UI must not freeze the world waiting for a human to pick a target.
+	if (FParse::Param(FCommandLine::Get(), TEXT("devauto")))
+	{
+		Tactical->TacticalMode = 0;
+	}
 
 	// Load persisted sensitivity from GameUserSettings ini.
 	float Saved = 1.0f;
@@ -387,6 +398,14 @@ void ASpikeElitePlayerController::OnToggleRotation()
 
 void ASpikeElitePlayerController::OnPausePressed()
 {
+	// M11b-4: while the tactical planning UI is open, Esc cancels the tactical
+	// shot instead of opening the pause menu.
+	if (Tactical && Tactical->State == ETacticalState::TacticalPlanning)
+	{
+		Tactical->CancelShot();
+		return;
+	}
+
 	switch (MenuState)
 	{
 	case EMenuState::Playing:

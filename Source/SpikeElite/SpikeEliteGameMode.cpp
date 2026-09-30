@@ -960,33 +960,104 @@ bool ASpikeEliteGameMode::TryTouchBall(ASpikeEliteCharacter* Toucher, EBallTouch
 		return false;
 	}
 
+	// Direction: AI obeys phase rules; the human uses their view direction.
+	FVector Dir;
+	float Power;
+	if (Toucher->bIsBot)
+	{
+		Dir = ComputeAITouchDirection(Toucher, EffectiveType);
+		Power = (EffectiveType == EBallTouchType::Receive) ? 780.f
+			: (EffectiveType == EBallTouchType::Set) ? 550.f
+			: 850.f;
+	}
+	else
+	{
+		const FVector LookDir = Toucher->GetControlRotation().Vector();
+		Dir = LookDir;
+		Dir.Z = FMath::Max(Dir.Z, 0.15f);
+		Dir.Normalize();
+		const bool bSpiking = Toucher->GetCharacterMovement() && !Toucher->GetCharacterMovement()->IsMovingOnGround();
+		Power = bSpiking ? 1200.f : 850.f;
+	}
+
+	return DoTouch(Toucher, EffectiveType, Dir, Power, 0.f);
+}
+
+bool ASpikeEliteGameMode::ExecuteTacticalShot(ASpikeEliteCharacter* Toucher, const FShotIntent& Intent)
+{
+	if (!Toucher || !Ball || !bMatchActive) return false;
+	if (!SEVolleyballRules::IsTouchLegalInPhase(MatchState, RallyState.bRallySettled)) return false;
+	if (!Toucher->bTouchArmed) return false;
+
+	const EVolleyballTeam Team = TeamOf(Toucher);
+	const int32 Index = GetPlayerIndex(Team, Toucher);
+	if (Index < 0) return false;
+
+	const FVector MyLoc = Toucher->GetActorLocation();
+	const FVector BallLoc = Ball->GetActorLocation();
+	const float Dist2D = FVector::Dist2D(MyLoc, BallLoc);
+	if (Dist2D > TouchReach + 30.f || BallLoc.Z < MinTouchZ || BallLoc.Z > MaxTouchZ)
+	{
+		return false;
+	}
+
+	// Re-derive the intended velocity from the validated intent and predict.
+	const FVector Start = BallLoc;
+	const float T = FMath::Clamp(Intent.DesiredFlightTime, 0.3f, 3.0f);
+	FVector Vel = SEVolleyballTrajectory::SolveVelocity(Start, Intent.TargetLocation, T);
+	// Timing error biases direction (lateral) and power.
+	const float Err = FMath::Clamp(Intent.TimingError, -1.f, 1.f);
+	{
+		FRotator Rot = Vel.Rotation();
+		Rot.Yaw += Err * 14.f;   // early/late -> lateral bias
+		Rot.Pitch -= Err * 6.f;  // early/late -> flatter/lofted
+		Vel = Rot.Vector() * Vel.Size();
+	}
+	const float PowerScale = FMath::Clamp(1.f + Err * 0.25f, 0.6f, 1.4f);
+
+	FVector Dir = Vel.GetSafeNormal();
+	Dir.Z = FMath::Max(Dir.Z, 0.05f);
+	Dir.Normalize();
+	const float Power = (Intent.Power * 1100.f) * PowerScale;
+
+	UE_LOG(LogVolleyballRules, Log, TEXT("[TacticalShot] team=%s player=%d target=(%.0f,%.0f) flight=%.2f power=%.2f err=%.2f net=%d in=%d"),
+		TeamStr(Team), Index, Intent.TargetLocation.X, Intent.TargetLocation.Y, T, Intent.Power, Err,
+		Intent.bPredictedCrossedNet ? 1 : 0, Intent.bPredictedInBounds ? 1 : 0);
+
+	return DoTouch(Toucher, (Intent.TouchType != EBallTouchType::Unknown) ? Intent.TouchType : EBallTouchType::Attack,
+		Dir, Power, Intent.SpinRadS);
+}
+
+bool ASpikeEliteGameMode::DoTouch(ASpikeEliteCharacter* Toucher, EBallTouchType Type, const FVector& Dir, float Power, float SpinRadS)
+{
+	if (!Toucher || !Ball || !bMatchActive) return false;
+	if (!SEVolleyballRules::IsTouchLegalInPhase(MatchState, RallyState.bRallySettled)) return false;
+	if (!Toucher->bTouchArmed) return false;
+
+	const EVolleyballTeam Team = TeamOf(Toucher);
+	const int32 Index = GetPlayerIndex(Team, Toucher);
+	if (Index < 0) return false;
+
+	const EBallTouchType EffectiveType = (Type != EBallTouchType::Unknown) ? Type : ResolveTouchType(RallyState.TouchCount);
+	const FVector MyLoc = Toucher->GetActorLocation();
+	const FVector BallLoc = Ball->GetActorLocation();
+	const float Dist2D = FVector::Dist2D(MyLoc, BallLoc);
+	if (Dist2D > TouchReach || BallLoc.Z < MinTouchZ || BallLoc.Z > MaxTouchZ)
+	{
+		return false;
+	}
+	if (Toucher->bIsBot && EffectiveType == EBallTouchType::Attack && BallLoc.Z < 240.f)
+	{
+		return false;
+	}
+
 	const ETouchResult Result = SEVolleyballRules::EvaluateTouch(RallyState, Team, Index);
 
 	switch (Result)
 	{
 	case ETouchResult::Allowed:
 	{
-		// Direction: AI obeys phase rules; the human uses their view direction.
-		FVector Dir;
-		float Power;
-		if (Toucher->bIsBot)
-		{
-			Dir = ComputeAITouchDirection(Toucher, EffectiveType);
-			Power = (EffectiveType == EBallTouchType::Receive) ? 780.f
-				: (EffectiveType == EBallTouchType::Set) ? 550.f
-				: 850.f;
-		}
-		else
-		{
-			const FVector LookDir = Toucher->GetControlRotation().Vector();
-			Dir = LookDir;
-			Dir.Z = FMath::Max(Dir.Z, 0.15f);
-			Dir.Normalize();
-			const bool bSpiking = Toucher->GetCharacterMovement() && !Toucher->GetCharacterMovement()->IsMovingOnGround();
-			Power = bSpiking ? 1200.f : 850.f;
-		}
-
-		Ball->Strike(Dir, Power, 0.f);
+		Ball->Strike(Dir, Power, SpinRadS);
 		Toucher->bTouchArmed = false;   // single-touch protection until rearmed
 		// M11b-2: a successful touch must immediately retire the player from the
 		// primary-handler role. Without this the setter (who is still flagged

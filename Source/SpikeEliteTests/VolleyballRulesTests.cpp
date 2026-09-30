@@ -9,6 +9,7 @@
 
 #include "Misc/AutomationTest.h"
 #include "Volleyball/VolleyballRules.h"
+#include "Volleyball/VolleyballTrajectory.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
 
@@ -352,6 +353,73 @@ bool FSEAutoServePolicy::RunTest(const FString& Parameters)
 	TestTrue(TEXT("human under -devauto may auto-serve"), ShouldAutoServe(false, true));
 	TestTrue(TEXT("bot always auto-serves"), ShouldAutoServe(true, false));
 	TestTrue(TEXT("bot under -devauto auto-serves"), ShouldAutoServe(true, true));
+	return true;
+}
+
+// ---------------- M11b-4: trajectory prediction (pure, no scene) ----------------
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSETrajectorySolveLanding, "SpikeElite.Tests.TrajectorySolveLanding",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FSETrajectorySolveLanding::RunTest(const FString& Parameters)
+{
+	// Given a start, target and flight time, the solver produces a velocity
+	// whose integrated landing is within tolerance of the requested target.
+	// (Start is kept off the net plane X=0 so the net-crossing test is not
+	// confused by an origin exactly on the plane.)
+	const FVector Start(100.f, 0.f, 243.f);
+	const FVector Target(700.f, 100.f, 0.f);
+	const FVector Vel = SEVolleyballTrajectory::SolveVelocity(Start, Target, 1.0f);
+	TestTrue(TEXT("solver produced a finite velocity"), !Vel.ContainsNaN() && !Vel.IsNearlyZero());
+	const SEVolleyballTrajectory::FTrajectoryResult R = SEVolleyballTrajectory::Predict(Start, Vel);
+	TestTrue(TEXT("prediction valid"), R.bValid);
+	const float ErrX = FMath::Abs(R.Landing.X - Target.X);
+	const float ErrY = FMath::Abs(R.Landing.Y - Target.Y);
+	TestTrue(TEXT("landing X within 40cm"), ErrX < 40.f);
+	TestTrue(TEXT("landing Y within 40cm"), ErrY < 40.f);
+	TestTrue(TEXT("flight time within 0.05s"), FMath::Abs(R.FlightTime - 1.0f) < 0.05f);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSETrajectoryPredictNetTouch, "SpikeElite.Tests.TrajectoryNetTouch",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FSETrajectoryPredictNetTouch::RunTest(const FString& Parameters)
+{
+	// A flat low drive toward the net plane must be flagged as a net touch.
+	const FVector Start(300.f, 0.f, 200.f);
+	const FVector Vel(-700.f, 0.f, -50.f);   // crosses X=0 low, inside the net band
+	const SEVolleyballTrajectory::FTrajectoryResult R = SEVolleyballTrajectory::Predict(Start, Vel);
+	TestTrue(TEXT("valid prediction"), R.bValid);
+	TestTrue(TEXT("net touch detected"), R.bNetTouch);
+	TestFalse(TEXT("net touch is not in bounds"), R.bInBounds);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSETrajectoryPredictLegalSpike, "SpikeElite.Tests.TrajectoryLegalSpike",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FSETrajectoryPredictLegalSpike::RunTest(const FString& Parameters)
+{
+	// A hard spike from above the net that clears it and lands in bounds.
+	const FVector Start(150.f, 50.f, 300.f);
+	const FVector Vel(-900.f, 120.f, 80.f);
+	const SEVolleyballTrajectory::FTrajectoryResult R = SEVolleyballTrajectory::Predict(Start, Vel);
+	TestTrue(TEXT("valid prediction"), R.bValid);
+	TestTrue(TEXT("crossed the net"), R.bCrossedNet);
+	TestFalse(TEXT("no net touch"), R.bNetTouch);
+	TestTrue(TEXT("lands in bounds"), R.bInBounds);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSETrajectoryPredictOut, "SpikeElite.Tests.TrajectoryOutBounds",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FSETrajectoryPredictOut::RunTest(const FString& Parameters)
+{
+	// A ball hit hard past the far baseline must be flagged out.
+	const FVector Start(300.f, 0.f, 250.f);
+	const FVector Vel(-1600.f, 0.f, 200.f);   // sails over the court and past X=-900
+	const SEVolleyballTrajectory::FTrajectoryResult R = SEVolleyballTrajectory::Predict(Start, Vel);
+	TestTrue(TEXT("valid prediction"), R.bValid);
+	TestTrue(TEXT("crossed the net"), R.bCrossedNet);
+	TestFalse(TEXT("not in bounds"), R.bInBounds);
 	return true;
 }
 
