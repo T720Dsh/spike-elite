@@ -390,6 +390,14 @@ void ASpikeEliteGameMode::Tick(float DeltaSeconds)
 	Super::Tick(DeltaSeconds);
 	if (!bMatchActive || !Ball || !Court) return;
 
+	// M11b-6: 5 s performance heartbeat (frame time, actor count) for the report.
+	{ static float PerfTimer = 0.f; PerfTimer += DeltaSeconds;
+	if (PerfTimer >= 5.f) { PerfTimer = 0.f;
+		UE_LOG(LogVolleyballRules, Log, TEXT("[Perf] fps=%.0f frame=%.1fms actors=%d"),
+			1.f / FMath::Max(DeltaSeconds, 0.0001f), DeltaSeconds * 1000.f,
+			GetWorld() ? GetWorld()->GetActorCount() : 0);
+	} }
+
 	// M11b-5c: detect a fast ball crossing the net into the opposing side and
 	// keep a short dive window for the defending team (resets on any touch by
 	// TryTouchBall/DoTouch via EndRally... touch itself is handled elsewhere).

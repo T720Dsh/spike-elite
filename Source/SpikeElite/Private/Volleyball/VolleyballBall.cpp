@@ -35,14 +35,35 @@ AVolleyballBall::AVolleyballBall()
 	{
 		Mesh->SetStaticMesh(SphereMesh.Object);
 		Mesh->SetRelativeScale3D(FVector(0.21f, 0.21f, 0.21f));
-		// Volleyball white (the project material adds panel colour later).
+		// M11b-6: un-branded yellow/blue placeholder (UI label: 比赛用球).
+		// No Mikasa/FIVB/Olympic logos. Swap in LicensedBallMesh/Material when the
+		// user supplies a legally licensed V200W asset set (see ASSET_LICENSE.md).
 		if (UMaterialInterface* Base = Mesh->GetMaterial(0))
 		{
 			UMaterialInstanceDynamic* MID = UMaterialInstanceDynamic::Create(Base, this);
-			MID->SetVectorParameterValue(TEXT("Color"), FLinearColor(0.92f, 0.92f, 0.88f));
+			MID->SetVectorParameterValue(TEXT("Color"), FLinearColor(0.85f, 0.62f, 0.10f));
 			Mesh->SetMaterial(0, MID);
 		}
 	}
+
+	// Yellow-blue center band: a thin cylinder around the equator reads as the
+	// classic volleyball panel stripe without any trademarked art.
+	BandMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("BandMesh"));
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> CylMesh(TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
+	if (CylMesh.Succeeded())
+	{
+		BandMesh->SetStaticMesh(CylMesh.Object);
+		BandMesh->SetRelativeScale3D(FVector(0.212f, 0.212f, 0.030f));
+		if (UMaterialInterface* BBase = BandMesh->GetMaterial(0))
+		{
+			UMaterialInstanceDynamic* BMID = UMaterialInstanceDynamic::Create(BBase, this);
+			BMID->SetVectorParameterValue(TEXT("Color"), FLinearColor(0.10f, 0.22f, 0.55f));
+			BandMesh->SetMaterial(0, BMID);
+		}
+	}
+	BandMesh->SetupAttachment(Mesh);
+	BandMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	BandMesh->SetCastShadow(false);
 
 	Projectile = CreateDefaultSubobject<UProjectileMovementComponent>(TEXT("Projectile"));
 	Projectile->SetUpdatedComponent(Mesh);

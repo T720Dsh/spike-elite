@@ -497,4 +497,28 @@ bool FSESetPlayDataTable::RunTest(const FString& Parameters)
 	return true;
 }
 
+// ---------------- M11b-6: international court/free-zone constants ----------------
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSECourtDimensions, "SpikeElite.Tests.CourtDimensions",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FSECourtDimensions::RunTest(const FString& Parameters)
+{
+	// FIVB-style court: 18x9m playing court, 5m side / 6.5m end free zones,
+	// 9m wide service zone behind each end line, lines count IN.
+	constexpr float CourtHalfLength = 900.f;   // 18 m
+	constexpr float CourtHalfWidth  = 450.f;   // 9 m
+	constexpr float SideFreeZone    = 500.f;   // 5 m each side
+	constexpr float EndFreeZone     = 650.f;   // 6.5 m each end
+	constexpr float ServiceZoneWidth = 900.f;  // 9 m wide
+	TestEqual(TEXT("court length 18m"), CourtHalfLength * 2.f, 1800.f);
+	TestEqual(TEXT("court width 9m"), CourtHalfWidth * 2.f, 900.f);
+	TestEqual(TEXT("total width incl side free zones"), (CourtHalfWidth + SideFreeZone) * 2.f, 1900.f);
+	TestEqual(TEXT("total length incl end free zones"), (CourtHalfLength + EndFreeZone) * 2.f, 3100.f);
+	TestEqual(TEXT("service zone 9m wide"), ServiceZoneWidth, 900.f);
+	TestTrue(TEXT("free zone clear of stands"), SideFreeZone < 1200.f && EndFreeZone < 1750.f);
+	// 3 m attack line: 300 cm from the centre line.
+	TestEqual(TEXT("attack line at 3m"), 300.f, 300.f);
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

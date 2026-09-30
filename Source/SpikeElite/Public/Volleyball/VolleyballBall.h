@@ -50,6 +50,22 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ball")
 	TObjectPtr<UStaticMeshComponent> Mesh;
 
+	/** Yellow-blue center band (no brand; engine basic cylinder). */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ball")
+	TObjectPtr<UStaticMeshComponent> BandMesh;
+
+	/**
+	 * Licensed V200W ball asset slots (M11b-6). Empty until the user provides a
+	 * legally licensed Mikasa V200W model + textures with ASSET_LICENSE.md next
+	 * to it. Until then the game shows the un-branded yellow/blue placeholder;
+	 * the UI labels it 比赛用球, never claiming an official license.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ball|Licensed")
+	TObjectPtr<UStaticMesh> LicensedBallMesh;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ball|Licensed")
+	TObjectPtr<UMaterialInterface> LicensedBallMaterial;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ball")
 	TObjectPtr<UProjectileMovementComponent> Projectile;
 

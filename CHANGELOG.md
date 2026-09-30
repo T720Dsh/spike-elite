@@ -8,6 +8,58 @@ for milestone tags once a first playable is tagged.
 
 ## [Unreleased]
 
+### Milestone M11b — International arena, officials, rotation HUD, visible procedural limbs, tactical shot & dive systems
+
+Verified: 27 automation tests pass; `-QuickMatch -devauto -FastFlow -SEED=1/42/4242`
+each reach MatchOver, Rematch to a second MatchOver and quit with no duplicate
+actors, Fatal or Ensure; Low/Medium/High crowd density all run the full match
+(~7–15 ms frame at 1280×720); Win64 Development package rebuilt and smoke-tested.
+
+#### M11b-1 Arena lifecycle split
+- New `AVolleyballArena` (persistent shell: 60×44×15 m hall, 10-row tiered
+  stands on all four sides via ISM, LED boards, dark far walls, roof, lights).
+- `AVolleyballCourt` persists and only resets match state; free zone 5 m
+  (side) × 6.5 m (end) — total 31×19 m; service-zone short lines added.
+- StartMatch/Rematch no longer respawn the arena, court, ball or officials;
+  continuous Rematch keeps actor counts stable.
+
+#### M11b-2 Officials, rally buffer, whistle & rotation HUD
+- `AMatchOfficialManager`: first referee on a stand (+50 cm above net top),
+  second referee, scorer's table with a live UMG-independent scoreboard
+  (TextRender, event-driven from GameMode), benches with lightweight subs.
+- Ceremony state machine: ResettingPositions → AwaitingReady → ServiceAuthorized
+  (whistle + 8 s serve deadline) → ServingToss → Rally; early serve rejected;
+  serve delay is a fault; `-FastFlow` shortens all delays; TimerManager only.
+- `URotationWidget` (top-right): P1–P6 slots, front/back row divider, serving
+  team, 3 m line, current handler highlight; H toggles.
+
+#### M11b-3 Visible articulated procedural characters
+- Characters upgraded from 6-block figures to segmented joints (head, torso,
+  upper/lower arms, hands, thighs, calves, feet) with Idle/Run/Jump/Receive/Set/
+  Spike/Block/Dive/Recover/Serve/RaiseHands poses, RInterpTo smoothing.
+- RMB hold = continuous RaiseHands; first-person hides own head.
+
+#### M11b-4 Tactical slow-motion & dotted trajectory preview
+- `SEVolleyballTrajectory` (pure, tested): gravity-consistent integrator,
+  net/antenna/court detection, IN/OUT/net-touch classification.
+- `UTrajectoryPreviewComponent`: pooled dotted path + landing ring, green/
+  yellow/red legality colors; `UTacticalContactComponent`: freeze-plan-aim-confirm
+  state machine, TimeDilation 0 → 0.15 armed window, Esc-safe.
+
+#### M11b-5 Data-driven sets, real blocking, dive defense
+- `SESetPlays`: 13 named Chinese set plays + free trajectory, team-local
+  coordinates mirrored per half (no per-play magic constants).
+- Real blocking: front-row gate (home X), block not counted as a touch, blocker
+  may touch again, off-the-hands out gives the point to the attacker; AI
+  front-row block directives.
+- Dive defense: net-cross detection opens a dive window; receiver lunges
+  (extended reach/lower Z), recovery gates re-dive and touch.
+
+#### M11b-6 Ball, performance, tests, docs
+- Ball: un-branded yellow/blue placeholder (no Mikasa/FIVB logos), licensed
+  V200W slots + `Content/Balls/ASSET_LICENSE.md`.
+- Crowd density `-CrowdLow/-CrowdHigh`; 5 s performance heartbeat; 27 tests.
+
 ### Milestone M11a — Stability, interaction state machine, performance & release hygiene
 
 Verified with headless runs: 18 automation tests pass; `-devauto` walks every

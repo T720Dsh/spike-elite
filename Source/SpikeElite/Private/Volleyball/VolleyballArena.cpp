@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+﻿// SPDX-License-Identifier: MIT
 #include "Volleyball/VolleyballArena.h"
 #include "Components/BoxComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -141,6 +141,16 @@ void AVolleyballArena::BuildStands(UStaticMesh* Cube)
 {
 	if (!Cube) return;
 
+	// M11b-6: crowd density presets -CrowdLow / -CrowdHigh (default Medium 10).
+	const int32 Rows = [this]() -> int32
+	{
+		const FString Cmd = FCommandLine::Get();
+		if (FParse::Param(*Cmd, TEXT("CrowdLow")))  return 5;
+		if (FParse::Param(*Cmd, TEXT("CrowdHigh"))) return 12;
+		return StandRows;
+	}();
+	const int32 CrowdRows = FMath::Clamp(Rows, 5, 12);
+
 	StandSteps = CreateDefaultSubobject<UInstancedStaticMeshComponent>(TEXT("StandSteps"));
 	StandSteps->SetupAttachment(Root);
 	StandSteps->SetStaticMesh(Cube);
@@ -189,6 +199,12 @@ void AVolleyballArena::BeginPlay()
 void AVolleyballArena::PopulateStands()
 {
 	if (!StandSteps || !CrowdHeads || CrowdBodies.Num() == 0) return;
+	// M11b-6: crowd density presets -CrowdLow / -CrowdHigh (default Medium 10).
+	const FString Cmd = FCommandLine::Get();
+	int32 CrowdRows = StandRows;
+	if (FParse::Param(*Cmd, TEXT("CrowdLow")))  CrowdRows = 5;
+	if (FParse::Param(*Cmd, TEXT("CrowdHigh"))) CrowdRows = 12;
+	CrowdRows = FMath::Clamp(CrowdRows, 5, 12);
 	StandSteps->ClearInstances();
 	CrowdHeads->ClearInstances();
 	Railings->ClearInstances();
@@ -209,7 +225,7 @@ void AVolleyballArena::PopulateStands()
 	};
 
 	// Side stands (along X), 10 rows, central aisle gap + corner aisles.
-	for (int32 Row = 0; Row < StandRows; ++Row)
+	for (int32 Row = 0; Row < CrowdRows; ++Row)
 	{
 		const float Y = SideY0 + Row * StandStepDepth;
 		const float Z = Row * StandStepHeight;
@@ -231,7 +247,7 @@ void AVolleyballArena::PopulateStands()
 		}
 	}
 	// End stands (along Y), 10 rows, central + corner aisles.
-	for (int32 Row = 0; Row < StandRows; ++Row)
+	for (int32 Row = 0; Row < CrowdRows; ++Row)
 	{
 		const float X = EndX0 + Row * StandStepDepth;
 		const float Z = Row * StandStepHeight;
