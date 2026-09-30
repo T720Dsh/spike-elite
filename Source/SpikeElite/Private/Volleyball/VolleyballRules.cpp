@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+﻿// SPDX-License-Identifier: MIT
 #include "Volleyball/VolleyballRules.h"
 
 namespace SEVolleyballRules
@@ -20,10 +20,24 @@ namespace SEVolleyballRules
 		return bLandedOnPositiveX ? EVolleyballTeam::TeamB : EVolleyballTeam::TeamA;
 	}
 
-	ETouchResult EvaluateTouch(FVolleyballRallyState& State, EVolleyballTeam Team, int32 PlayerIndex)
+	ETouchResult EvaluateTouch(FVolleyballRallyState& State, EVolleyballTeam Team, int32 PlayerIndex, EBallTouchType Type)
 	{
 		if (State.bRallySettled) { return ETouchResult::RallySettled; }
 		if (Team == EVolleyballTeam::None || PlayerIndex < 0) { return ETouchResult::WrongTeam; }
+
+		// M11b-5 block: a front-row block is legal at any touch count, does not
+		// consume one of the team's three touches and does not trip the
+		// double-touch rule (the blocker may touch again right after). It also
+		// bypasses the possession check — a block is a defensive action against
+		// the possessing attacker's ball. It still records LastTouch so an
+		// off-the-hands out call goes to the attacker.
+		if (Type == EBallTouchType::Block)
+		{
+			State.LastTouchTeam = Team;
+			State.LastTouchPlayerIndex = PlayerIndex;
+			State.LastTouchType = EBallTouchType::Block;
+			return ETouchResult::Allowed;
+		}
 
 		// If a team is in possession, only that team may touch.
 		if (State.PossessingTeam != EVolleyballTeam::None && State.PossessingTeam != Team)
@@ -37,8 +51,10 @@ namespace SEVolleyballRules
 			return ETouchResult::FourTouchesFault;
 		}
 
-		// Same player touching twice in a row: fault -> opponent scores.
-		if (State.LastTouchTeam == Team && State.LastTouchPlayerIndex == PlayerIndex)
+		// Same player touching twice in a row: fault -> opponent scores
+		// (a block does NOT arm the double-touch rule: the blocker may touch again).
+		if (State.LastTouchType != EBallTouchType::Block
+			&& State.LastTouchTeam == Team && State.LastTouchPlayerIndex == PlayerIndex)
 		{
 			return ETouchResult::DoubleTouchFault;
 		}
@@ -46,6 +62,7 @@ namespace SEVolleyballRules
 		// Legal touch.
 		State.LastTouchTeam = Team;
 		State.LastTouchPlayerIndex = PlayerIndex;
+		State.LastTouchType = Type;
 		State.TouchCount += 1;
 		if (State.PossessingTeam == EVolleyballTeam::None)
 		{
@@ -67,6 +84,7 @@ namespace SEVolleyballRules
 		State.TouchCount = 0;
 		State.LastTouchTeam = EVolleyballTeam::None;
 		State.LastTouchPlayerIndex = -1;
+		State.LastTouchType = EBallTouchType::Unknown;
 		State.bRallySettled = false;
 		State.bBallInPlay = false;
 	}

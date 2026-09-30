@@ -96,6 +96,13 @@ public:
 	 */
 	bool ExecuteTacticalShot(ASpikeEliteCharacter* Toucher, const FShotIntent& Intent);
 
+	/**
+	 * Front-row block attempt (M11b-5). Legal only in a live rally, for a
+	 * front-row player, inside touch reach, and with the ball armed. A block
+	 * does not consume a touch and the blocker may touch again immediately.
+	 */
+	bool TryBlockBall(ASpikeEliteCharacter* Toucher);
+
 	/** Whether the given character is allowed to touch the ball right now. */
 	bool CanTouchBall(const ASpikeEliteCharacter* Toucher) const;
 

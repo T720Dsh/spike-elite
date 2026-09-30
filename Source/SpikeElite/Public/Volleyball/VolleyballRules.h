@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+﻿// SPDX-License-Identifier: MIT
 #pragma once
 
 #include "CoreMinimal.h"
@@ -58,6 +58,7 @@ enum class EAIBehavior : uint8
 	MoveToReceive   UMETA(DisplayName = "Move to predicted landing (receive)"),
 	Set             UMETA(DisplayName = "Move to set position"),
 	Attack          UMETA(DisplayName = "Move to attack point"),
+	MoveToBlock     UMETA(DisplayName = "Move to front-row block point"),
 	Wait            UMETA(DisplayName = "Hold defensive position")
 };
 
@@ -69,6 +70,7 @@ enum class EBallTouchType : uint8
 	Receive UMETA(DisplayName = "Receive (first touch)"),
 	Set     UMETA(DisplayName = "Set (second touch)"),
 	Attack  UMETA(DisplayName = "Attack (third touch)"),
+	Block   UMETA(DisplayName = "Block (not counted, front-row only)"),
 	Unknown UMETA(DisplayName = "Unknown")
 };
 
@@ -148,6 +150,11 @@ struct FVolleyballRallyState
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
 	int32 LastTouchPlayerIndex = -1;
 
+	/** Type of the last touch (Block disables the double-touch check for the
+	 *  blocker, who may legally touch again right after a block). */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+	EBallTouchType LastTouchType = EBallTouchType::Unknown;
+
 	/** True once the rally has been settled; blocks re-scoring / further touches. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
 	bool bRallySettled = false;
@@ -196,7 +203,8 @@ namespace SEVolleyballRules
 	 * Team==None or PlayerIndex<0 is rejected. Faults (4th touch / double touch)
 	 * are reported but do NOT mutate state — the caller settles the rally.
 	 */
-	SPIKEELITE_API ETouchResult EvaluateTouch(FVolleyballRallyState& State, EVolleyballTeam Team, int32 PlayerIndex);
+	SPIKEELITE_API ETouchResult EvaluateTouch(FVolleyballRallyState& State, EVolleyballTeam Team, int32 PlayerIndex,
+		EBallTouchType Type = EBallTouchType::Attack);
 
 	/** The ball legally crossed the net into NewPossessor's half: switch possession, reset counter. */
 	SPIKEELITE_API void OnBallCrossedNet(FVolleyballRallyState& State, EVolleyballTeam NewPossessor);

@@ -232,6 +232,7 @@ void ASpikeEliteCharacter::TickBot(float DeltaSeconds)
 	case EAIBehavior::MoveToReceive:
 	case EAIBehavior::Set:
 	case EAIBehavior::Attack:
+	case EAIBehavior::MoveToBlock:
 		Dest = AITargetLocation;
 		break;
 	case EAIBehavior::Wait:
@@ -266,8 +267,17 @@ void ASpikeEliteCharacter::TickBot(float DeltaSeconds)
 	// ---- Touch: only the primary handler, and only via the GameMode ----
 	if (bIsPrimaryHandler)
 	{
-		// TryTouchBall does the reach/phase/rules checks; cheap per frame.
-		GM->TryTouchBall(this, EBallTouchType::Unknown);
+		// M11b-5: a blocker asks for a block (front-row gate inside), everyone
+		// else uses the normal touch path. TryTouchBall / TryBlockBall do the
+		// reach/phase/rules checks; cheap per frame.
+		if (AIBehavior == EAIBehavior::MoveToBlock)
+		{
+			GM->TryBlockBall(this);
+		}
+		else
+		{
+			GM->TryTouchBall(this, EBallTouchType::Unknown);
+		}
 	}
 }
 

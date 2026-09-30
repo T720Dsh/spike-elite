@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+﻿// SPDX-License-Identifier: MIT
 #include "SpikeEliteGameMode.h"
 #include "SpikeEliteCharacter.h"
 #include "SpikeElitePlayerController.h"
@@ -1051,7 +1051,7 @@ bool ASpikeEliteGameMode::DoTouch(ASpikeEliteCharacter* Toucher, EBallTouchType 
 		return false;
 	}
 
-	const ETouchResult Result = SEVolleyballRules::EvaluateTouch(RallyState, Team, Index);
+	const ETouchResult Result = SEVolleyballRules::EvaluateTouch(RallyState, Team, Index, EffectiveType);
 
 	switch (Result)
 	{
@@ -1066,6 +1066,22 @@ bool ASpikeEliteGameMode::DoTouch(ASpikeEliteCharacter* Toucher, EBallTouchType 
 		Toucher->bIsPrimaryHandler = false;
 		// M11b-3: drive the short contact pose (receive/set/spike/serve).
 		Toucher->NotifyContact(EffectiveType);
+
+		// M11b-5 block: the touch did not consume a team touch, but if the ball
+		// stayed on the blocker's side of the net (soft block into the block
+		// coverage), the blocking team now takes possession with a fresh count
+		// — the classic "block then still have three touches" rule.
+		if (EffectiveType == EBallTouchType::Block)
+		{
+			const bool bOwnSide = (Team == EVolleyballTeam::TeamA)
+				? (Ball->GetActorLocation().X > 0.f)
+				: (Ball->GetActorLocation().X < 0.f);
+			if (bOwnSide)
+			{
+				RallyState.PossessingTeam = Team;
+				RallyState.TouchCount = 0;
+			}
+		}
 
 		UE_LOG(LogVolleyballRules, Log, TEXT("[Touch] team=%s player=%d touch=%d/%d type=%s"),
 			TeamStr(Team), Index, RallyState.TouchCount, 3, TypeStr(EffectiveType));
@@ -1089,6 +1105,65 @@ bool ASpikeEliteGameMode::DoTouch(ASpikeEliteCharacter* Toucher, EBallTouchType 
 	default:
 		return false;
 	}
+}
+
+bool ASpikeEliteGameMode::TryBlockBall(ASpikeEliteCharacter* Toucher)
+{
+	if (!Toucher || !Ball || !bMatchActive) return false;
+	if (!SEVolleyballRules::IsTouchLegalInPhase(MatchState, RallyState.bRallySettled)) return false;
+	if (!Toucher->bTouchArmed) return false;
+
+	const EVolleyballTeam Team = TeamOf(Toucher);
+	const int32 Index = GetPlayerIndex(Team, Toucher);
+	if (Index < 0) return false;
+
+	// M11b-5: only front-row players may block. Front row is judged by the
+	// home/defensive position X (|X| < 400 near the net), the same rule the AI
+	// directive uses, so rotation order cannot wrongly demote a front-row player.
+	if (FMath::Abs(Toucher->HomePosition.X) >= 400.f)
+	{
+		return false;
+	}
+
+	const FVector MyLoc = Toucher->GetActorLocation();
+	const FVector BallLoc = Ball->GetActorLocation();
+	const float Dist2D = FVector::Dist2D(MyLoc, BallLoc);
+	if (Dist2D > TouchReach || BallLoc.Z < 150.f || BallLoc.Z > 480.f)
+	{
+		return false;
+	}
+
+	// A block pushes the ball back over the net plane at medium-low power (the
+	// live net collision absorbs anything below the tape). If it stays on our
+	// side the DoTouch block branch hands us possession with a fresh count.
+	FVector Dir = -MyLoc;
+	Dir.Z = FMath::Max(Dir.Z, 0.1f);
+	Dir.Normalize();
+	const float Power = 420.f;
+
+	const ETouchResult Result = SEVolleyballRules::EvaluateTouch(RallyState, Team, Index, EBallTouchType::Block);
+	if (Result != ETouchResult::Allowed)
+	{
+		return false;
+	}
+	Ball->Strike(Dir, Power, 0.f);
+	Toucher->bTouchArmed = false;
+	Toucher->bIsPrimaryHandler = false;
+	Toucher->NotifyContact(EBallTouchType::Block);
+
+	const bool bOwnSide = (Team == EVolleyballTeam::TeamA)
+		? (Ball->GetActorLocation().X > 0.f)
+		: (Ball->GetActorLocation().X < 0.f);
+	if (bOwnSide)
+	{
+		RallyState.PossessingTeam = Team;
+		RallyState.TouchCount = 0;
+	}
+
+	UE_LOG(LogVolleyballRules, Log, TEXT("[Block] team=%s player=%d (front-row) hand-contact, ball %s"),
+		TeamStr(Team), Index, bOwnSide ? TEXT("stayed own side") : TEXT("over the net"));
+	UpdateScoreboard();
+	return true;
 }
 
 // ---------------- M10: AI coordination ----------------
@@ -1371,12 +1446,37 @@ void ASpikeEliteGameMode::UpdateAIDirectives(float DeltaSeconds)
 			}
 			else
 			{
-				// Defending: front row to the net, back row holds depth.
+				// Defending (opponent possesses).
 				const FVector Home = C->HomePosition;
-				FVector Defensive = Home;
-				if (FMath::Abs(Home.X) > 400.f) { Defensive = Home; }
-				else { Defensive = FVector((Team == EVolleyballTeam::TeamA) ? 230.f : -230.f, Home.Y, Home.Z); }
-				SetAIDirective(C, EAIBehavior::Wait, Defensive, false);
+				const bool bFrontRow = FMath::Abs(Home.X) < 400.f;
+				const bool bBallOnOwnSide = Ball && ((Team == EVolleyballTeam::TeamA)
+					? (Ball->GetActorLocation().X > 0.f) : (Ball->GetActorLocation().X < 0.f));
+				const float BallZ = Ball ? Ball->GetActorLocation().Z : 0.f;
+				// Low ball on our side -> the closest receiver digs it (primary).
+				const int32 RecvIdx = (bBallOnOwnSide && BallZ < 130.f)
+					? SelectReceivePlayer(Team, Landing) : -1;
+				if (i == RecvIdx)
+				{
+					SetAIDirective(C, EAIBehavior::MoveToReceive, Landing, true);
+				}
+				// M11b-5 block: when the opponent is about to attack (2 touches done)
+				// — or a high ball is on our side — the front row slides to the
+				// front point at the ball's Y and attempts a block (primary handler
+				// asks TryBlockBall, which re-checks the front-row gate and reach).
+				else if (bFrontRow
+					&& (RallyState.TouchCount >= 2 || (bBallOnOwnSide && BallZ > 130.f)))
+				{
+					const float SideX = (Team == EVolleyballTeam::TeamA) ? 120.f : -120.f;
+					const FVector BlockPt = FVector(SideX,
+						FMath::Clamp(Ball ? Ball->GetActorLocation().Y : 0.f, -350.f, 350.f), Home.Z);
+					SetAIDirective(C, EAIBehavior::MoveToBlock, BlockPt, true);
+				}
+				else
+				{
+					FVector Defensive = Home;
+					if (bFrontRow) { Defensive = FVector((Team == EVolleyballTeam::TeamA) ? 230.f : -230.f, Home.Y, Home.Z); }
+					SetAIDirective(C, EAIBehavior::Wait, Defensive, false);
+				}
 			}
 		}
 	};
@@ -1393,6 +1493,7 @@ const TCHAR* ASpikeEliteGameMode::TypeStr(EBallTouchType Type)
 	case EBallTouchType::Receive: return TEXT("Receive");
 	case EBallTouchType::Set:     return TEXT("Set");
 	case EBallTouchType::Attack:  return TEXT("Attack");
+	case EBallTouchType::Block:   return TEXT("Block");
 	default:                  return TEXT("Unknown");
 	}
 }

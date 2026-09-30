@@ -423,4 +423,52 @@ bool FSETrajectoryPredictOut::RunTest(const FString& Parameters)
 	return true;
 }
 
+// ---------------- M11b-5: block rules (pure logic) ----------------
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSEBlockNotCounted, "SpikeElite.Tests.BlockNotCounted",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FSEBlockNotCounted::RunTest(const FString& Parameters)
+{
+	// The attacker possesses; the defender's front-row block is legal (bypasses
+	// the possession gate), records LastTouch, and does NOT consume a team touch.
+	FVolleyballRallyState S;
+	SEVolleyballRules::BeginRally(S, EVolleyballTeam::TeamA);
+	S.TouchCount = 2;   // attacker on its third touch
+	TestEqual(TEXT("block allowed for defender"), SEVolleyballRules::EvaluateTouch(S, EVolleyballTeam::TeamB, 0, EBallTouchType::Block), ETouchResult::Allowed);
+	TestEqual(TEXT("block records last touch team"), S.LastTouchTeam, EVolleyballTeam::TeamB);
+	TestEqual(TEXT("touch count unchanged by block"), S.TouchCount, 2);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSEBlockThenTouchAgain, "SpikeElite.Tests.BlockThenTouchAgain",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FSEBlockThenTouchAgain::RunTest(const FString& Parameters)
+{
+	// The blocker may legally touch again immediately after a block (the block
+	// did not arm the double-touch rule).
+	FVolleyballRallyState S;
+	SEVolleyballRules::BeginRally(S, EVolleyballTeam::TeamA);
+	TestEqual(TEXT("block allowed"), SEVolleyballRules::EvaluateTouch(S, EVolleyballTeam::TeamB, 3, EBallTouchType::Block), ETouchResult::Allowed);
+	// Ball stayed on the defender's side -> the GameMode hands possession to the
+	// defender with a fresh count (this is exactly what DoTouch's block branch
+	// does); the rule core then must not double-touch the same player.
+	S.PossessingTeam = EVolleyballTeam::TeamB;
+	S.TouchCount = 0;
+	TestEqual(TEXT("blocker may touch again"), SEVolleyballRules::EvaluateTouch(S, EVolleyballTeam::TeamB, 3, EBallTouchType::Receive), ETouchResult::Allowed);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSELastTouchOffHands, "SpikeElite.Tests.BlockOffHandsOut",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FSELastTouchOffHands::RunTest(const FString& Parameters)
+{
+	// Ball off the blocker's hands and out -> the attacker's team scores.
+	FVolleyballRallyState S;
+	SEVolleyballRules::BeginRally(S, EVolleyballTeam::TeamA);
+	SEVolleyballRules::EvaluateTouch(S, EVolleyballTeam::TeamB, 0, EBallTouchType::Block);
+	const EVolleyballTeam Scorer = SEVolleyballRules::DetermineScoringTeamOnLand(false, S.LastTouchTeam, true);
+	TestEqual(TEXT("off-hands out gives point to the attacker"), Scorer, EVolleyballTeam::TeamA);
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS
