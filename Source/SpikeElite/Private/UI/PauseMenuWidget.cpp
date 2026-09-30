@@ -84,7 +84,7 @@ void UPauseMenuWidget::BuildWidgetTree()
 	HelpText->SetColorAndOpacity(FSlateColor(FLinearColor(0.8f,0.85f,0.9f)));
 	HelpText->SetJustification(ETextJustify::Center);
 	HelpText->SetText(FText::FromString(
-		TEXT("WASD 移动 · 空格 跳 · 左键 击球 · E 发球 · C/V 切视角 · Esc 暂停")));
+		TEXT("WASD 移动 · 空格 跳 · 左键 击球 · 右键 抬手 · E 发球 · C/V 切视角 · Esc 暂停")));
 	HelpText->SetVisibility(ESlateVisibility::Collapsed);
 	if (UVerticalBoxSlot* V = Col->AddChildToVerticalBox(HelpText))
 	{

@@ -75,8 +75,8 @@ void UScoreboardWidget::BuildWidgetTree()
 
 	// M11a: full controls help appears at match start and collapses after a few
 	// seconds; the pause menu offers the same list on demand.
-	Text_Help->SetText(FText::FromString(TEXT("WASD 移动 · 空格 跳 · 左键 击球 · E 发球 · C/V 切视角 · Esc 暂停")));
-	LastHelp = TEXT("WASD 移动 · 空格 跳 · 左键 击球 · E 发球 · C/V 切视角 · Esc 暂停");
+	Text_Help->SetText(FText::FromString(TEXT("WASD移动·空格跳·左键击球·右键抬手·E发球·C/V切视角·Esc暂停")));
+	LastHelp = TEXT("WASD移动·空格跳·左键击球·右键抬手·E发球·C/V切视角·Esc暂停");
 	HelpTimer = 5.0f;
 	bHelpCollapsed = false;
 }

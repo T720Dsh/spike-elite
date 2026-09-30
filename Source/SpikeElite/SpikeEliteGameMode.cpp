@@ -891,6 +891,14 @@ void ASpikeEliteGameMode::ExecuteServe()
 	// M11: the serve is actually out -> the ball is now in play. This is the one
 	// place that sets bBallInPlay true; cleanup/end-of-rally set it back to false.
 	SEVolleyballRules::StartPlay(RallyState);
+	// M11b-3: serve pose for the server.
+	{
+		const TArray<TObjectPtr<ASpikeEliteCharacter>>& Roster = (ServingTeam == EVolleyballTeam::TeamA) ? TeamAPlayers : TeamBPlayers;
+		if (Roster.IsValidIndex(ServerPlayerIndex) && Roster[ServerPlayerIndex])
+		{
+			Roster[ServerPlayerIndex]->NotifyContact(EBallTouchType::Serve);
+		}
+	}
 	UE_LOG(LogVolleyballRules, Log, TEXT("[Serve] team=%s player=%d power=%.0f dir=(%.2f,%.2f,%.2f) ballInPlay=1"),
 		TeamStr(ServingTeam), ServerPlayerIndex, TossPower, TossDir.X, TossDir.Y, TossDir.Z);
 	UpdateScoreboard();
@@ -985,6 +993,8 @@ bool ASpikeEliteGameMode::TryTouchBall(ASpikeEliteCharacter* Toucher, EBallTouch
 		// Primary on the frame after the set) could touch the ball again before
 		// UpdateAIDirectives picks the attacker, producing a DoubleTouch fault.
 		Toucher->bIsPrimaryHandler = false;
+		// M11b-3: drive the short contact pose (receive/set/spike/serve).
+		Toucher->NotifyContact(EffectiveType);
 
 		UE_LOG(LogVolleyballRules, Log, TEXT("[Touch] team=%s player=%d touch=%d/%d type=%s"),
 			TeamStr(Team), Index, RallyState.TouchCount, 3, TypeStr(EffectiveType));

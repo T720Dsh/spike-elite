@@ -8,6 +8,7 @@
 #include "UI/ConfirmWidget.h"
 #include "UI/RotationWidget.h"
 #include "SpikeEliteGameMode.h"
+#include "SpikeEliteCharacter.h"
 #include "Blueprint/UserWidget.h"
 #include "Camera/CameraActor.h"
 #include "Camera/CameraComponent.h"
@@ -256,7 +257,7 @@ void ASpikeElitePlayerController::DevQuickMatch()
 	float ShotRematch = -1.0f;
 	float RallyShotAt = -1.0f;
 	FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda(
-		[Weak, StartSeconds, Index, Events = MoveTemp(Events), ShotAt, ConfirmAt, ConfirmShotAt, RematchAt, ShotRematch, RallyShotAt](float) mutable -> bool
+		[Weak, StartSeconds, Index, Events = MoveTemp(Events), ShotAt, ConfirmAt, ConfirmShotAt, RematchAt, ShotRematch, RallyShotAt, bCloseupShotPending = false](float) mutable -> bool
 	{
 		ASpikeElitePlayerController* PC = Weak.Get();
 		if (!PC) { return false; }
@@ -271,10 +272,32 @@ void ASpikeElitePlayerController::DevQuickMatch()
 		{
 			// M11b-2: one live-rally screenshot to verify the rotation HUD and
 			// officials are actually rendered during play (not just logged).
+			// M11b-3: -Closeup shortens the spring arm (and disables motion blur)
+			// so the articulated body is clearly visible; the shot fires once the
+			// camera has settled, ~0.5s later.
 			if (GM->MatchState == EMatchState::Rally && RallyShotAt < 0.0f)
 			{
 				RallyShotAt = static_cast<float>(Elapsed);
-				UE_LOG(LogSEMenu, Log, TEXT("DEV QUICK MATCH: rally in progress, shooting rotation HUD"));
+				if (FParse::Param(FCommandLine::Get(), TEXT("Closeup")))
+				{
+					if (ASpikeEliteCharacter* C = Cast<ASpikeEliteCharacter>(PC->GetPawn()))
+					{
+						C->SetThirdPersonArmLength(140.f);
+					}
+					PC->ConsoleCommand(TEXT("r.MotionBlur.Max 0"));
+					PC->ConsoleCommand(TEXT("r.MotionBlurQuality 0"));
+					bCloseupShotPending = true;
+				}
+				else
+				{
+					UE_LOG(LogSEMenu, Log, TEXT("DEV QUICK MATCH: rally in progress, shooting rotation HUD"));
+					PC->DevShot(TEXT("shot_qm_05_rally"));
+				}
+			}
+			if (bCloseupShotPending && (Elapsed - RallyShotAt) > 0.5f)
+			{
+				bCloseupShotPending = false;
+				UE_LOG(LogSEMenu, Log, TEXT("DEV QUICK MATCH: rally in progress (closeup), shooting rotation HUD"));
 				PC->DevShot(TEXT("shot_qm_05_rally"));
 			}
 			if (GM->MatchState == EMatchState::MatchOver)

@@ -1,4 +1,4 @@
-﻿// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: MIT
 #pragma once
 
 #include "CoreMinimal.h"
@@ -9,7 +9,55 @@
 class UCameraComponent;
 class USpringArmComponent;
 class UStaticMeshComponent;
+class USceneComponent;
 class ASpikeEliteGameMode;
+
+/**
+ * Articulated placeholder pose used by the procedural animation system.
+ * Priority order (highest first) is applied inside UpdateProceduralAnimation.
+ */
+UENUM()
+enum class EAnimPose : uint8
+{
+	Idle,
+	Run,
+	Jump,
+	Receive,   // 垫球: arms pressed together forward, knees bent
+	Set,       // 二传: hands raised to forehead height
+	Spike,     // 扣球: wind-up -> swing -> follow-through (PoseTimer staged)
+	Block,     // 拦网: both hands straight up overhead
+	Dive,      // 倒地救球: forward/side lunge
+	Recover,   // 恢复: low crouch, no second dive
+	Serve,     // 发球: toss + arm swing
+	RaiseHands // 抬手: continuous 0..1 arm raise (block/set/receive prep)
+};
+
+/**
+ * One articulated limb: a pivot joint (shoulder/hip) with upper, lower and tip
+ * segments. The lower segment attaches to an elbow/knee joint at the bottom of
+ * the upper segment so it can bend independently. Pure reflection (no Blueprint
+ * exposure — UHT rejects struct-of-component properties on BP-visible UPROPERTYs).
+ */
+USTRUCT()
+struct FProceduralLimb
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	TObjectPtr<USceneComponent> Joint;
+
+	UPROPERTY()
+	TObjectPtr<UStaticMeshComponent> Upper;
+
+	UPROPERTY()
+	TObjectPtr<USceneComponent> BendJoint;
+
+	UPROPERTY()
+	TObjectPtr<UStaticMeshComponent> Lower;
+
+	UPROPERTY()
+	TObjectPtr<UStaticMeshComponent> Tip;
+};
 
 /**
  * Player pawn for SPIKE ELITE.
@@ -18,11 +66,16 @@ class ASpikeEliteGameMode;
  *  - bIsBot = true: Tick runs the GameMode-driven AI (the GameMode picks the
  *    primary handler and assigns an EAIBehavior + target each frame; the bot
  *    never searches for the ball itself).
- *  - bIsBot = false: human input via WASD/mouse/LMB/E.
+ *  - bIsBot = false: human input via WASD/mouse/LMB/E/C/V/RMB.
  *
  * M10: characters NEVER ResetBall or Strike on their own. They ask the
  * GameMode (TryTouchBall / RequestServe), which is the single authority for
  * serve rights, touch rights and the three-touch rule.
+ *
+ * M11b-3: the blocky placeholder was upgraded to a fully articulated procedural
+ * humanoid (head/torso/upper-arm/forearm/hand/thigh/shin/foot per side) driven
+ * by joint SceneComponents and per-frame pose interpolation. No external model
+ * or animation assets are required.
  */
 UCLASS()
 class SPIKEELITE_API ASpikeEliteCharacter : public ACharacter
@@ -78,6 +131,28 @@ public:
 	/** Team enum derived from TeamSide. */
 	EVolleyballTeam GetTeam() const { return TeamSide > 0 ? EVolleyballTeam::TeamA : EVolleyballTeam::TeamB; }
 
+	// ---- M11b-3: raise-hands input (RMB held). 0..1 continuous. ----
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Character")
+	float RaiseHandsAmount = 0.f;
+
+	/** Last successful touch type, used to drive a short contact pose. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Character")
+	EBallTouchType LastContactType = EBallTouchType::Unknown;
+
+	/** True while the character is diving (blocks re-dive + second touches). */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Character")
+	bool bDiving = false;
+
+	/** Pose shown for this frame (drives the procedural joints). */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Character")
+	EAnimPose CurrentPose = EAnimPose::Idle;
+
+	/** Remember a successful contact so the contact pose plays for a short window. */
+	void NotifyContact(EBallTouchType Type);
+
+	/** Dev aid (-Closeup): shorten the spring arm so the body fills the view. */
+	void SetThirdPersonArmLength(float NewLength);
+
 protected:
 	virtual void BeginPlay() override;
 
@@ -90,21 +165,35 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera")
 	TObjectPtr<UCameraComponent> FirstPersonCamera;
 
-	// Hinge-style placeholder humanoid built from engine basic shapes:
-	// torso + head + two arms + two legs, tinted per team. Zero asset deps.
-	// TODO(M-models): swap this for a rigged skeletal mesh + animation blueprint.
+	// ---- M11b-3: articulated procedural humanoid ----
+	// Torso and head attach straight to the capsule root; each limb hangs from
+	// a shoulder/hip joint SceneComponent. All segments are engine basic shapes
+	// (zero external assets) tinted per team.
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Character")
+	TObjectPtr<USceneComponent> TorsoJoint;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Character")
 	TObjectPtr<UStaticMeshComponent> Torso;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Character")
 	TObjectPtr<UStaticMeshComponent> Head;
+
+	UPROPERTY()
+	FProceduralLimb ArmL;
+	UPROPERTY()
+	FProceduralLimb ArmR;
+	UPROPERTY()
+	FProceduralLimb LegL;
+	UPROPERTY()
+	FProceduralLimb LegR;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Character")
-	TObjectPtr<UStaticMeshComponent> ArmL;
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Character")
-	TObjectPtr<UStaticMeshComponent> ArmR;
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Character")
-	TObjectPtr<UStaticMeshComponent> LegL;
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Character")
-	TObjectPtr<UStaticMeshComponent> LegR;
+	bool bDiveRecovering = false;
+
+	/** Seconds since the last successful touch (drives short contact poses). */
+	float ContactPoseTimer = 0.f;
+	/** Seconds until the dive recovery finishes. */
+	float DiveRecoveryTimer = 0.f;
+	/** Local swing phase for the run cycle (radians). */
+	float RunPhase = 0.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera")
 	bool bFirstPerson = false;
@@ -127,11 +216,27 @@ protected:
 	/** E key: ask the GameMode to serve (it validates serve rights). */
 	void ServeBall();
 
+	/** Right mouse (held): raise hands; released: lower them. */
+	void StartRaiseHands();
+	void StopRaiseHands();
+
 	void UpdateCameraView();
 
 	/** AI bot per-frame logic (GameMode-driven). */
 	void TickBot(float DeltaSeconds);
 
-	/** Set jersey color (Team A blue, Team B red). */
+	/** Set jersey color (Team A blue, Team B red) on every body segment. */
 	void ApplyJerseyColor();
+
+	/** M11b-3: drive the articulated joints from pose + locomotion state. */
+	void UpdateProceduralAnimation(float DeltaSeconds);
+
+	/** Compute the target pose for this frame from movement/contact/AI state. */
+	EAnimPose ResolvePose(float DeltaSeconds);
+
+	/** Apply a pose to all joints (with smoothing toward the previous pose). */
+	void ApplyPose(EAnimPose Pose, float DeltaSeconds);
+
+	/** Reset every joint to the natural idle rest pose. */
+	void SetPoseIdle();
 };
