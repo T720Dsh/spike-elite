@@ -59,6 +59,7 @@ enum class EAIBehavior : uint8
 	Set             UMETA(DisplayName = "Move to set position"),
 	Attack          UMETA(DisplayName = "Move to attack point"),
 	MoveToBlock     UMETA(DisplayName = "Move to front-row block point"),
+	Dive            UMETA(DisplayName = "Dive to save a low ball beyond normal reach"),
 	Wait            UMETA(DisplayName = "Hold defensive position")
 };
 

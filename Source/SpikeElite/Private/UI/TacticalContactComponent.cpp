@@ -5,6 +5,7 @@
 #include "SpikeEliteCharacter.h"
 #include "SpikeElitePlayerController.h"
 #include "Volleyball/VolleyballBall.h"
+#include "Volleyball/SetPlay.h"
 #include "Components/TextRenderComponent.h"
 #include "Components/InputComponent.h"
 #include "GameFramework/Pawn.h"
@@ -170,16 +171,25 @@ void UTacticalContactComponent::EnterPlanning(EBallTouchType Type)
 	Intent.TouchType = Type;
 	Intent.DesiredFlightTime = (Type == EBallTouchType::Attack) ? 0.75f : 0.9f;
 	Intent.Power = 0.8f;
+	// M11b-5b: a set opens the data-driven tactic picker (starts at 四号位高球).
+	SelectedPlay = (Type == EBallTouchType::Set) ? 0 : -1;
 	RebuildPreview();
 }
 
 void UTacticalContactComponent::TickPlanning(float DeltaTime)
 {
-	// Mouse -> landing spot.
-	const FVector Ground = PickGroundPoint();
-	if (!Ground.IsZero())
+	// Mouse -> landing spot (only for free aim; a selected set tactic locks the
+	// target to the mirrored play target).
+	const bool bSetTacticLocked = (PendingTouchType == EBallTouchType::Set && SelectedPlay >= 0
+		&& SESetPlays::GetPlays().IsValidIndex(SelectedPlay)
+		&& SESetPlays::GetPlays()[SelectedPlay].PlayId != 14);
+	if (!bSetTacticLocked)
 	{
-		Intent.TargetLocation = Ground;
+		const FVector Ground = PickGroundPoint();
+		if (!Ground.IsZero())
+		{
+			Intent.TargetLocation = Ground;
+		}
 	}
 
 	// Power: wheel (fast) or W/S (held).
@@ -192,8 +202,39 @@ void UTacticalContactComponent::TickPlanning(float DeltaTime)
 	if (OwnerPC->IsInputKeyDown(EKeys::S)) { Intent.Power = FMath::Clamp(Intent.Power - DeltaTime * 0.4f, 0.15f, 1.f); }
 
 	// Arc / flight time: Q up (higher), E down.
-	if (OwnerPC->IsInputKeyDown(EKeys::Q)) { Intent.DesiredFlightTime = FMath::Clamp(Intent.DesiredFlightTime + DeltaTime * 0.6f, 0.3f, 2.5f); }
-	if (OwnerPC->IsInputKeyDown(EKeys::E)) { Intent.DesiredFlightTime = FMath::Clamp(Intent.DesiredFlightTime - DeltaTime * 0.6f, 0.3f, 2.5f); }
+	// M11b-5b: while setting, Q/E cycle the data-driven tactic list instead;
+	// free trajectory (id 14) falls back to manual arc control.
+	const bool bSetTactics = (PendingTouchType == EBallTouchType::Set && SelectedPlay >= 0);
+	if (bSetTactics)
+	{
+		const TArray<FSetPlayDefinition>& Plays = SESetPlays::GetPlays();
+		if (OwnerPC->WasInputKeyJustPressed(EKeys::Q))
+		{
+			SelectedPlay = (SelectedPlay + 1) % Plays.Num();
+		}
+		if (OwnerPC->WasInputKeyJustPressed(EKeys::E))
+		{
+			SelectedPlay = (SelectedPlay - 1 + Plays.Num()) % Plays.Num();
+		}
+		// Mouse still picks the landing when free trajectory is selected.
+		if (Plays.IsValidIndex(SelectedPlay) && Plays[SelectedPlay].PlayId != 14)
+		{
+			const FSetPlayDefinition& Play = Plays[SelectedPlay];
+			const FVector Target = SESetPlays::MirrorLocal(Play.TargetLocal, Pawn->TeamSide);
+			Intent.TargetLocation = Target;
+			Intent.DesiredFlightTime = Play.DesiredFlightTime;
+		}
+		if (HintText)
+		{
+			const FString Name = Plays.IsValidIndex(SelectedPlay) ? Plays[SelectedPlay].DisplayName : TEXT("?");
+			HintText->SetText(FText::FromString(FString::Printf(TEXT("二传战术：%s  Q/E切换 · 左键确认 · 右键取消"), *Name)));
+		}
+	}
+	else
+	{
+		if (OwnerPC->IsInputKeyDown(EKeys::Q)) { Intent.DesiredFlightTime = FMath::Clamp(Intent.DesiredFlightTime + DeltaTime * 0.6f, 0.3f, 2.5f); }
+		if (OwnerPC->IsInputKeyDown(EKeys::E)) { Intent.DesiredFlightTime = FMath::Clamp(Intent.DesiredFlightTime - DeltaTime * 0.6f, 0.3f, 2.5f); }
+	}
 
 	RebuildPreview();
 

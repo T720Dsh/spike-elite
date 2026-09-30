@@ -10,6 +10,7 @@
 #include "Misc/AutomationTest.h"
 #include "Volleyball/VolleyballRules.h"
 #include "Volleyball/VolleyballTrajectory.h"
+#include "Volleyball/SetPlay.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
 
@@ -468,6 +469,31 @@ bool FSELastTouchOffHands::RunTest(const FString& Parameters)
 	SEVolleyballRules::EvaluateTouch(S, EVolleyballTeam::TeamB, 0, EBallTouchType::Block);
 	const EVolleyballTeam Scorer = SEVolleyballRules::DetermineScoringTeamOnLand(false, S.LastTouchTeam, true);
 	TestEqual(TEXT("off-hands out gives point to the attacker"), Scorer, EVolleyballTeam::TeamA);
+	return true;
+}
+
+// ---------------- M11b-5b: set-play data table ----------------
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSESetPlayDataTable, "SpikeElite.Tests.SetPlayDataTable",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FSESetPlayDataTable::RunTest(const FString& Parameters)
+{
+	// All 13 named plays + free trajectory resolve; ids are unique/sequential;
+	// mirroring is consistent between the two halves.
+	const TArray<FSetPlayDefinition>& Plays = SESetPlays::GetPlays();
+	TestEqual(TEXT("14 entries (13 named + free)"), Plays.Num(), 14);
+	TSet<int32> Ids;
+	for (int32 i = 0; i < Plays.Num(); i++)
+	{
+		TestTrue(TEXT("sequential ids"), Plays[i].PlayId == i + 1);
+		Ids.Add(Plays[i].PlayId);
+		TestFalse(TEXT("display name non-empty"), Plays[i].DisplayName.IsEmpty());
+		TestTrue(TEXT("flight time sane"), Plays[i].DesiredFlightTime > 0.2f && Plays[i].DesiredFlightTime < 3.f);
+	}
+	TestEqual(TEXT("all ids unique"), Ids.Num(), 14);
+	TestTrue(TEXT("A-side mirror keeps positive X"), SESetPlays::MirrorLocal(FVector2D(140.f, 0.f), 1).X > 0.f);
+	TestTrue(TEXT("B-side mirror keeps negative X"), SESetPlays::MirrorLocal(FVector2D(140.f, 0.f), -1).X < 0.f);
+	TestEqual(TEXT("mirror preserves Y"), (float)SESetPlays::MirrorLocal(FVector2D(140.f, 300.f), 1).Y, 300.f);
 	return true;
 }
 

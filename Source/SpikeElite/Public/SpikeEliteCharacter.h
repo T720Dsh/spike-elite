@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+﻿// SPDX-License-Identifier: MIT
 #pragma once
 
 #include "CoreMinimal.h"
@@ -143,6 +143,10 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Character")
 	bool bDiving = false;
 
+	/** True during the post-dive recovery: GameMode gates re-dive and touch. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Character")
+	bool bDiveRecovering = false;
+
 	/** Pose shown for this frame (drives the procedural joints). */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Character")
 	EAnimPose CurrentPose = EAnimPose::Idle;
@@ -185,8 +189,6 @@ protected:
 	UPROPERTY()
 	FProceduralLimb LegR;
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Character")
-	bool bDiveRecovering = false;
 
 	/** Seconds since the last successful touch (drives short contact poses). */
 	float ContactPoseTimer = 0.f;

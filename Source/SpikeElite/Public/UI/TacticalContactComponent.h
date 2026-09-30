@@ -91,6 +91,9 @@ protected:
 
 	EBallTouchType PendingTouchType = EBallTouchType::Unknown;
 
+	/** Selected set-play index into SESetPlays::GetPlays() (-1 = mouse aim). */
+	int32 SelectedPlay = -1;
+
 	/** Advance to TacticalPlanning (freeze world, show UI, release mouse). */
 	void EnterPlanning(EBallTouchType Type);
 

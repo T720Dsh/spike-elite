@@ -233,6 +233,7 @@ void ASpikeEliteCharacter::TickBot(float DeltaSeconds)
 	case EAIBehavior::Set:
 	case EAIBehavior::Attack:
 	case EAIBehavior::MoveToBlock:
+	case EAIBehavior::Dive:
 		Dest = AITargetLocation;
 		break;
 	case EAIBehavior::Wait:
@@ -245,7 +246,9 @@ void ASpikeEliteCharacter::TickBot(float DeltaSeconds)
 	FVector ToDest = Dest - GetActorLocation();
 	ToDest.Z = 0;
 	const float Dist = ToDest.Size();
-	const float BotSpeed = 450.0f;
+	// A dive is a fast lunge: the bot closes the last stretch quickly, then the
+	// GameMode grants an extended reach while bDiving is set.
+	const float BotSpeed = (AIBehavior == EAIBehavior::Dive) ? 640.0f : 450.0f;
 	if (Dist > 30.0f)
 	{
 		// Direct, deterministic movement (no reliance on character-movement input
@@ -267,6 +270,11 @@ void ASpikeEliteCharacter::TickBot(float DeltaSeconds)
 	// ---- Touch: only the primary handler, and only via the GameMode ----
 	if (bIsPrimaryHandler)
 	{
+		// M11b-5c: begin the dive lunge when close to the save point.
+		if (AIBehavior == EAIBehavior::Dive && !bDiving && !bDiveRecovering && Dist < 150.f)
+		{
+			bDiving = true;
+		}
 		// M11b-5: a blocker asks for a block (front-row gate inside), everyone
 		// else uses the normal touch path. TryTouchBall / TryBlockBall do the
 		// reach/phase/rules checks; cheap per frame.

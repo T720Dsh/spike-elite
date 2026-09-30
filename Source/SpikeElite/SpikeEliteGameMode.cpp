@@ -1,5 +1,10 @@
 ﻿// SPDX-License-Identifier: MIT
 #include "SpikeEliteGameMode.h"
+
+// M11b-5c dive-window state (GameMode-owned; reset in StartMatch).
+static float GM_NetCrossWindow = 0.f;
+static float GM_NetCrossSpeed = 0.f;
+static float GM_PrevBallX = 0.f;
 #include "SpikeEliteCharacter.h"
 #include "SpikeElitePlayerController.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -384,6 +389,39 @@ void ASpikeEliteGameMode::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 	if (!bMatchActive || !Ball || !Court) return;
+
+	// M11b-5c: detect a fast ball crossing the net into the opposing side and
+	// keep a short dive window for the defending team (resets on any touch by
+	// TryTouchBall/DoTouch via EndRally... touch itself is handled elsewhere).
+	if (MatchState == EMatchState::Rally)
+	{
+		const float BallX = Ball->GetActorLocation().X;
+		if (GM_PrevBallX * BallX < 0.f && FMath::Abs(BallX) > 60.f)
+		{
+			GM_NetCrossWindow = 0.6f;
+			GM_NetCrossSpeed = Ball->GetVelocity().Size2D();
+			// M11b-5c: a fast ball that just entered our half triggers one dive
+			// by the closest receiver (the same coordinator as regular receive).
+			if (GM_NetCrossSpeed > 600.f)
+			{
+				const EVolleyballTeam DefTeam = (BallX < 0.f) ? EVolleyballTeam::TeamB : EVolleyballTeam::TeamA;
+				const int32 Recv = SelectReceivePlayer(DefTeam, PredictBallLanding());
+				ASpikeEliteCharacter* R = nullptr;
+				if (DefTeam == EVolleyballTeam::TeamA) { R = TeamAPlayers.IsValidIndex(Recv) ? TeamAPlayers[Recv].Get() : nullptr; }
+				else { R = TeamBPlayers.IsValidIndex(Recv) ? TeamBPlayers[Recv].Get() : nullptr; }
+				if (R && R->bIsBot && !R->bDiveRecovering)
+				{
+					SetAIDirective(R, EAIBehavior::Dive, PredictBallLanding(), true);
+					UE_LOG(LogVolleyballRules, Log, TEXT("[Dive] %s dives (net cross %.0f cm/s)"), *R->GetName(), GM_NetCrossSpeed);
+				}
+			}
+		}
+		GM_PrevBallX = BallX;
+		if (GM_NetCrossWindow > 0.f)
+		{
+			GM_NetCrossWindow -= DeltaSeconds;
+		}
+	}
 
 	switch (MatchState)
 	{
@@ -935,6 +973,8 @@ bool ASpikeEliteGameMode::TryTouchBall(ASpikeEliteCharacter* Toucher, EBallTouch
 	// M11: shared phase gate (Rally && !settled) — same as CanTouchBall and tests.
 	if (!SEVolleyballRules::IsTouchLegalInPhase(MatchState, RallyState.bRallySettled)) return false;
 	if (!Toucher->bTouchArmed) return false;
+	// M11b-5c: a player in the dive recovery can neither re-dive nor touch.
+	if (Toucher->bDiveRecovering) return false;
 
 	const EVolleyballTeam Team = TeamOf(Toucher);
 	const int32 Index = GetPlayerIndex(Team, Toucher);
@@ -943,12 +983,15 @@ bool ASpikeEliteGameMode::TryTouchBall(ASpikeEliteCharacter* Toucher, EBallTouch
 	// Physical reach check: horizontal distance (players "jump" for a ball that is
 	// up to MaxTouchZ overhead) plus a vertical contact window. Using 3D distance
 	// made high sets/attacks unreachable even when the player stood right under
-	// the ball (3D dist ballooned with Z).
+	// the ball (3D dist ballooned with Z). A dive lunges further and can touch a
+	// lower ball, but only within the lunge window.
 	const EBallTouchType EffectiveType = (Type != EBallTouchType::Unknown) ? Type : ResolveTouchType(RallyState.TouchCount);
 	const FVector MyLoc = Toucher->GetActorLocation();
 	const FVector BallLoc = Ball->GetActorLocation();
 	const float Dist2D = FVector::Dist2D(MyLoc, BallLoc);
-	if (Dist2D > TouchReach || BallLoc.Z < MinTouchZ || BallLoc.Z > MaxTouchZ)
+	const float Reach = Toucher->bDiving ? (TouchReach + 90.f) : TouchReach;
+	const float MinZ = Toucher->bDiving ? 60.f : MinTouchZ;
+	if (Dist2D > Reach || BallLoc.Z < MinZ || BallLoc.Z > MaxTouchZ)
 	{
 		return false;
 	}
@@ -966,7 +1009,10 @@ bool ASpikeEliteGameMode::TryTouchBall(ASpikeEliteCharacter* Toucher, EBallTouch
 	if (Toucher->bIsBot)
 	{
 		Dir = ComputeAITouchDirection(Toucher, EffectiveType);
-		Power = (EffectiveType == EBallTouchType::Receive) ? 780.f
+		// A dive save pops the ball high and slow back toward our own depth so
+		// teammates can set up the counter.
+		Power = Toucher->bDiving ? 620.f
+			: (EffectiveType == EBallTouchType::Receive) ? 780.f
 			: (EffectiveType == EBallTouchType::Set) ? 550.f
 			: 850.f;
 	}
@@ -1452,12 +1498,27 @@ void ASpikeEliteGameMode::UpdateAIDirectives(float DeltaSeconds)
 				const bool bBallOnOwnSide = Ball && ((Team == EVolleyballTeam::TeamA)
 					? (Ball->GetActorLocation().X > 0.f) : (Ball->GetActorLocation().X < 0.f));
 				const float BallZ = Ball ? Ball->GetActorLocation().Z : 0.f;
-				// Low ball on our side -> the closest receiver digs it (primary).
-				const int32 RecvIdx = (bBallOnOwnSide && BallZ < 130.f)
-					? SelectReceivePlayer(Team, Landing) : -1;
+				// Low or fast ball on our side -> the closest receiver digs it.
+				// M11b-5c: a fast low ball beyond normal reach is a dive lunge
+				// (fast sprint + extended touch window); recovery blocks re-dives.
+				const FVector BallVel = Ball ? Ball->GetVelocity() : FVector::ZeroVector;
+				const bool bDefensiveBall = bBallOnOwnSide && (BallZ < 130.f || BallVel.Size2D() > 500.f);
+				const int32 RecvIdx = bDefensiveBall ? SelectReceivePlayer(Team, Landing) : -1;
+				// M11b-5c: a ball that just crossed the net into our side at speed is
+				// a dive situation - the receiver lunges (extended touch window).
+				const bool bDiveSituation = (bBallOnOwnSide && GM_NetCrossWindow > 0.f
+					&& GM_NetCrossSpeed > 450.f && !C->bDiveRecovering) ? true : false;
 				if (i == RecvIdx)
 				{
-					SetAIDirective(C, EAIBehavior::MoveToReceive, Landing, true);
+					if (bDiveSituation)
+					{
+						UE_LOG(LogVolleyballRules, Log, TEXT("[Dive] %s dives (net cross %.0f cm/s)"), *C->GetName(), GM_NetCrossSpeed);
+						SetAIDirective(C, EAIBehavior::Dive, Landing, true);
+					}
+					else
+					{
+						SetAIDirective(C, EAIBehavior::MoveToReceive, Landing, true);
+					}
 				}
 				// M11b-5 block: when the opponent is about to attack (2 touches done)
 				// — or a high ball is on our side — the front row slides to the
