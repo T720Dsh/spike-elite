@@ -7,6 +7,7 @@
 #include "VolleyballBall.generated.h"
 
 class UStaticMeshComponent;
+class USceneComponent;
 class UProjectileMovementComponent;
 
 /**
@@ -29,6 +30,7 @@ public:
 
 	virtual void BeginPlay() override;
 
+
 	/**
 	 * Strike the ball.
 	 * @param Direction unit direction in world space (will be normalized).
@@ -47,6 +49,11 @@ public:
 	EVolleyballTeam GetLastHitTeam() const { return LastHitTeam; }
 
 protected:
+	/** M11c-6: unscaled root — the sphere and the band are SIBLINGS under it so
+	 *  the band never inherits the sphere's 0.21 scale and disappears into it. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ball")
+	TObjectPtr<USceneComponent> Root;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ball")
 	TObjectPtr<UStaticMeshComponent> Mesh;
 

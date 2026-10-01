@@ -38,10 +38,12 @@ void UScoreboardWidget::BuildWidgetTree()
 	Backdrop->SetBrush(SEUiStyle::SolidBrush(FLinearColor(0.02f, 0.02f, 0.04f, 0.55f)));
 	if (UCanvasPanelSlot* BSlot = Root->AddChildToCanvas(Backdrop))
 	{
+		// M11c-6: compact — at most ~15% of the 720p viewport height so the
+		// scoreboard never covers the play.
 		BSlot->SetAnchors(FAnchors(0.5f, 0.0f, 0.5f, 0.0f));
 		BSlot->SetAlignment(FVector2D(0.5f, 0.0f));
 		BSlot->SetPosition(FVector2D(0.0f, 6.0f));
-		BSlot->SetSize(FVector2D(920.0f, 330.0f));
+		BSlot->SetSize(FVector2D(640.0f, 108.0f));
 	}
 
 	UVerticalBox* Box = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass());
@@ -62,16 +64,16 @@ void UScoreboardWidget::BuildWidgetTree()
 		return T;
 	};
 
-	// M11a: aligned, evenly spaced rows (SET / score / sets / phase / possession
-	// / ball / rally result / help) — compact enough to never overlap at 720p.
-	Text_Set        = MakeRow(FLinearColor(1.0f, 0.9f, 0.2f), 24, 0.f);
-	Text_Score      = MakeRow(FLinearColor(1.0f, 1.0f, 1.0f), 36, 2.f);
-	Text_Sets       = MakeRow(FLinearColor(0.4f, 0.8f, 1.0f), 18, 4.f);
-	Text_Phase      = MakeRow(FLinearColor(0.6f, 0.95f, 0.6f), 16, 4.f);
-	Text_Possession = MakeRow(FLinearColor(1.0f, 0.75f, 0.35f), 16, 2.f);
-	Text_Ball       = MakeRow(FLinearColor(1.0f, 0.6f, 0.2f), 18, 2.f);
-	Text_RallyResult = MakeRow(FLinearColor(1.0f, 1.0f, 0.4f), 20, 2.f);
-	Text_Help       = MakeRow(FLinearColor(0.75f, 0.78f, 0.82f), 14, 4.f);
+	// M11c-6: compact layered rows — SET+score prominent, the rest small and
+	// separated so the whole board fits inside ~108px at 720p.
+	Text_Set        = MakeRow(FLinearColor(1.0f, 0.9f, 0.2f), 18, 0.f);
+	Text_Score      = MakeRow(FLinearColor(1.0f, 1.0f, 1.0f), 30, 1.f);
+	Text_Sets       = MakeRow(FLinearColor(0.4f, 0.8f, 1.0f), 13, 1.f);
+	Text_Phase      = MakeRow(FLinearColor(0.6f, 0.95f, 0.6f), 13, 1.f);
+	Text_Possession = MakeRow(FLinearColor(1.0f, 0.75f, 0.35f), 13, 1.f);
+	Text_Ball       = MakeRow(FLinearColor(1.0f, 0.6f, 0.2f), 15, 1.f);
+	Text_RallyResult = MakeRow(FLinearColor(1.0f, 1.0f, 0.4f), 16, 1.f);
+	Text_Help       = MakeRow(FLinearColor(0.75f, 0.78f, 0.82f), 12, 1.f);
 
 	// M11a: full controls help appears at match start and collapses after a few
 	// seconds; the pause menu offers the same list on demand.

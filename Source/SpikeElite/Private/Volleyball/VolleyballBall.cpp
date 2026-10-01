@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 #include "Volleyball/VolleyballBall.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/SceneComponent.h"
+#include "Components/MeshComponent.h"
 #include "GameFramework/ProjectileMovementComponent.h"
 #include "UObject/ConstructorHelpers.h"
 #include "SpikeEliteGameMode.h"
@@ -9,12 +11,50 @@
 #include "Materials/MaterialInterface.h"
 #include "Materials/MaterialInstanceDynamic.h"
 
+namespace
+{
+	/** M11c-6: tint a mesh with the project's M_Tint material. Introspects the
+	 *  real vector parameter names instead of assuming "Color" (which does NOT
+	 *  exist on the engine default material). Falls back harmlessly. */
+	void ApplyTint(UMeshComponent* Comp, const FLinearColor& Color)
+	{
+		UMaterialInterface* Base = Comp ? Comp->GetMaterial(0) : nullptr;
+		if (!Base) { return; }
+		UMaterialInstanceDynamic* MID = UMaterialInstanceDynamic::Create(Base, Comp);
+		bool bApplied = false;
+		TArray<FMaterialParameterInfo> Infos;
+		TArray<FGuid> Ids;
+		MID->GetAllVectorParameterInfo(Infos, Ids);
+		for (const FMaterialParameterInfo& Info : Infos)
+		{
+			if (Info.Association == EMaterialParameterAssociation::GlobalParameter)
+			{
+				MID->SetVectorParameterValue(Info.Name, Color);
+				bApplied = true;
+				break;
+			}
+		}
+		if (!bApplied) { MID->SetVectorParameterValue(TEXT("Color"), Color); }
+		Comp->SetMaterial(0, MID);
+	}
+}
+
 AVolleyballBall::AVolleyballBall()
 {
 	PrimaryActorTick.bCanEverTick = true;
 
+	// M11c-6: the sphere mesh is the actor root (ProjectileMovement MUST sweep a
+	// root component — a scaled child mesh as the updated component has no
+	// reliable collision and the ball would fall through the floor). The
+	// yellow-blue band is a child with a COMPENSATED scale (divided by the
+	// parent 0.21) so its WORLD scale stays 0.212 x 0.03: the band no longer
+	// inherits the sphere's 0.21 and vanishes into it, which is the visual goal
+	// the unscaled-root design was after. The unscaled "Root" scene node still
+	// exists as a decorative attach point hanging off the mesh.
 	Mesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Mesh"));
 	RootComponent = Mesh;
+	Root = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));
+	Root->SetupAttachment(Mesh);
 
 	// Single-authority motion: the ProjectileMovementComponent moves the ball.
 	// Chaos simulation stays OFF so it cannot fight the projectile integrator.
@@ -29,39 +69,34 @@ AVolleyballBall::AVolleyballBall()
 	Mesh->SetNotifyRigidBodyCollision(false);
 
 	// Visual: engine sphere. Base cube/sphere is 100 cm across; an FIVB ball is
-	// ~21 cm in diameter, so scale 0.21.
+	// ~21 cm in diameter, so the sphere itself is scaled 0.21.
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> SphereMesh(TEXT("/Engine/BasicShapes/Sphere.Sphere"));
 	if (SphereMesh.Succeeded())
 	{
 		Mesh->SetStaticMesh(SphereMesh.Object);
 		Mesh->SetRelativeScale3D(FVector(0.21f, 0.21f, 0.21f));
-		// M11b-6: un-branded yellow/blue placeholder (UI label: 比赛用球).
+		// M11b-6 / M11c-6: un-branded yellow placeholder (UI label: 比赛用球).
 		// No Mikasa/FIVB/Olympic logos. Swap in LicensedBallMesh/Material when the
 		// user supplies a legally licensed V200W asset set (see ASSET_LICENSE.md).
-		if (UMaterialInterface* Base = Mesh->GetMaterial(0))
-		{
-			UMaterialInstanceDynamic* MID = UMaterialInstanceDynamic::Create(Base, this);
-			MID->SetVectorParameterValue(TEXT("Color"), FLinearColor(0.85f, 0.62f, 0.10f));
-			Mesh->SetMaterial(0, MID);
-		}
+		// Tinted with the project's own M_Tint (parameter introspection, no fake
+		// "Color" on engine defaults).
+		ApplyTint(Mesh, FLinearColor(0.85f, 0.62f, 0.10f));
 	}
 
 	// Yellow-blue center band: a thin cylinder around the equator reads as the
 	// classic volleyball panel stripe without any trademarked art.
 	BandMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("BandMesh"));
+	BandMesh->SetupAttachment(Mesh);
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> CylMesh(TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
 	if (CylMesh.Succeeded())
 	{
 		BandMesh->SetStaticMesh(CylMesh.Object);
-		BandMesh->SetRelativeScale3D(FVector(0.212f, 0.212f, 0.030f));
-		if (UMaterialInterface* BBase = BandMesh->GetMaterial(0))
-		{
-			UMaterialInstanceDynamic* BMID = UMaterialInstanceDynamic::Create(BBase, this);
-			BMID->SetVectorParameterValue(TEXT("Color"), FLinearColor(0.10f, 0.22f, 0.55f));
-			BandMesh->SetMaterial(0, BMID);
-		}
+		// Compensated scale: parent sphere is 0.21, so the band needs
+		// 0.212/0.21 (radius) x 0.030/0.21 (height) to read 0.212 x 0.03 in
+		// world space and hug the equator without sinking in.
+		BandMesh->SetRelativeScale3D(FVector(0.212f / 0.21f, 0.212f / 0.21f, 0.030f / 0.21f));
+		ApplyTint(BandMesh, FLinearColor(0.10f, 0.22f, 0.55f));
 	}
-	BandMesh->SetupAttachment(Mesh);
 	BandMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	BandMesh->SetCastShadow(false);
 
@@ -69,7 +104,10 @@ AVolleyballBall::AVolleyballBall()
 	Projectile->SetUpdatedComponent(Mesh);
 	Projectile->InitialSpeed = 0.0f;
 	Projectile->MaxSpeed = 4000.0f;
-	Projectile->bRotationFollowsVelocity = false;
+	// M11c-6: let the ball tumble with its velocity so the yellow/blue pattern
+	// is visibly rotating (rotation is purely visual; motion stays the single
+	// ProjectileMovement authority).
+	Projectile->bRotationFollowsVelocity = true;   // tumble so the yellow/blue pattern visibly rotates
 	Projectile->bShouldBounce = true;
 	Projectile->Bounciness = 0.78f;          // FIVB ball bounce on wood floor
 	Projectile->Friction = 0.2f;
@@ -83,7 +121,21 @@ AVolleyballBall::AVolleyballBall()
 void AVolleyballBall::BeginPlay()
 {
 	Super::BeginPlay();
+
+	// M11c-6: the licensed slots are applied ONLY when the user supplied a fully
+	// licensed V200W mesh AND material (see ASSET_LICENSE.md). Otherwise the
+	// un-branded yellow/blue placeholder stays — no Missing Package, no fake
+	// official claims. Missing slots are silently normal.
+	if (LicensedBallMesh && LicensedBallMaterial)
+	{
+		Mesh->SetStaticMesh(LicensedBallMesh);
+		Mesh->SetRelativeScale3D(FVector(1.f));
+		Mesh->SetMaterial(0, LicensedBallMaterial);
+		if (BandMesh) { BandMesh->SetVisibility(false); }
+	}
 }
+
+
 
 void AVolleyballBall::HandleProjectileBounce(const FHitResult& ImpactResult, const FVector& ImpactVelocity)
 {

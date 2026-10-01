@@ -44,7 +44,10 @@ void URotationWidget::BuildWidgetTree()
 		T->SetJustification(ETextJustify::Center);
 		T->SetText(FText::FromString(TEXT("-")));
 		UCanvasPanelSlot* CanvasSlot = Panel->AddChildToCanvas(T);
-		CanvasSlot->SetPosition(FVector2D(X, Y));
+		// M11c-6: the slot is anchored at the RIGHT edge with right alignment —
+		// its offset must be NEGATIVE (distance from the right edge), otherwise
+		// the whole grid slides off-screen at 1280x720.
+		CanvasSlot->SetPosition(FVector2D(X - 200.f, Y));
 		CanvasSlot->SetSize(FVector2D(54.f, 30.f));
 		CanvasSlot->SetAnchors(FAnchors(1.f, 0.f, 1.f, 0.f));
 		CanvasSlot->SetAlignment(FVector2D(1.f, 0.f));
@@ -63,7 +66,7 @@ void URotationWidget::BuildWidgetTree()
 
 	MakeCell(TitleText, 8.f, 8.f, FLinearColor(1.f, 1.f, 0.6f), 18);
 	UCanvasPanelSlot* TitleSlot = Panel->AddChildToCanvas(TitleText);
-	TitleSlot->SetPosition(FVector2D(8.f, 8.f));
+	TitleSlot->SetPosition(FVector2D(-192.f, 8.f));
 	TitleSlot->SetSize(FVector2D(184.f, 24.f));
 	TitleSlot->SetAnchors(FAnchors(1.f, 0.f, 1.f, 0.f));
 	TitleSlot->SetAlignment(FVector2D(1.f, 0.f));
@@ -95,7 +98,7 @@ void URotationWidget::BuildWidgetTree()
 	NetLabel->SetFont(FSlateFontInfo(FCoreStyle::GetDefaultFont(), 18));
 	NetLabel->SetJustification(ETextJustify::Center);
 	UCanvasPanelSlot* NetSlot = Panel->AddChildToCanvas(NetLabel);
-	NetSlot->SetPosition(FVector2D(200.f - 8.f - 160.f, 126.f));
+	NetSlot->SetPosition(FVector2D(-168.f, 126.f));
 	NetSlot->SetSize(FVector2D(160.f, 22.f));
 	NetSlot->SetAnchors(FAnchors(1.f, 0.f, 1.f, 0.f));
 	NetSlot->SetAlignment(FVector2D(1.f, 0.f));
