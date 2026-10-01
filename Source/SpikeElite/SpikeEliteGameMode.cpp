@@ -50,6 +50,7 @@ static bool IsDiveSituation(const FVolleyballRallyState& RS, bool bBallOnOwnSide
 #include "Engine/World.h"
 #include "Kismet/GameplayStatics.h"
 #include "Engine/Engine.h"
+#include "EngineUtils.h"
 #include "Components/StaticMeshComponent.h"
 #include "UObject/ConstructorHelpers.h"
 #include "Materials/MaterialInstanceDynamic.h"
@@ -1341,6 +1342,39 @@ EVolleyballTeam ASpikeEliteGameMode::TeamOf(const ASpikeEliteCharacter* Player) 
 	if (!Player) return EVolleyballTeam::None;
 	return (Player->TeamSide > 0) ? EVolleyballTeam::TeamA : EVolleyballTeam::TeamB;
 }
+
+#if !UE_BUILD_SHIPPING
+void ASpikeEliteGameMode::DevAuditActors(int32 RunIndex)
+{
+	UWorld* W = GetWorld();
+	if (!W) { return; }
+	const auto IsAlive = [](AActor* A) { return A && IsValid(A) && !A->IsActorBeingDestroyed(); };
+	const auto IsAliveU = [](UObject* O) { return O && IsValid(O); };
+
+	int32 Chars = 0;
+	for (TActorIterator<AActor> It(W); It; ++It)
+	{
+		if (IsAlive(*It) && (*It)->IsA<ASpikeEliteCharacter>()) { Chars++; }
+	}
+	int32 ValidActors = 0;
+	for (TActorIterator<AActor> It(W); It; ++It)
+	{
+		if (IsAlive(*It)) { ValidActors++; }
+	}
+
+	const int32 RosterChars = TeamAPlayers.Num() + TeamBPlayers.Num();
+	UE_LOG(LogVolleyballRules, Log,
+		TEXT("[DevAudit] run=%d court=%d arena=%d ball=%d officials=%d rotwidget=%d scoreboard=%d chars(world)=%d chars(roster)=%d validActors=%d totalActors=%d"),
+		RunIndex,
+		IsAlive(Court) ? 1 : 0,
+		IsAlive(Arena) ? 1 : 0,
+		IsAlive(Ball) ? 1 : 0,
+		IsAlive(Officials) ? 1 : 0,
+		IsAliveU(RotationWidget) ? 1 : 0,
+		IsAliveU(Scoreboard) ? 1 : 0,
+		Chars, RosterChars, ValidActors, W->GetActorCount());
+}
+#endif
 
 int32 ASpikeEliteGameMode::GetPlayerIndex(EVolleyballTeam Team, const ASpikeEliteCharacter* Player) const
 {

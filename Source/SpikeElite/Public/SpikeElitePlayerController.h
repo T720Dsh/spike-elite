@@ -171,6 +171,12 @@ protected:
 	void DevAutoStart();
 	/** Unattended -QuickMatch: drive a full quick match to the result screen. */
 	void DevQuickMatch();
+	/** -TacticalTest: drive the real tactical UMG (cancel -> plan -> perfect shot). */
+	void DevTacticalTest();
+	/** -RematchStress: 5x unattended rematch pressure + authoritative actor audit. */
+	void DevRematchStress();
+	/** -ShotSuite: capture the M11c acceptance screenshot set from a real match. */
+	void DevShotSuite();
 	/** Request a named high-resolution screenshot (runs even while paused). */
 	void DevShot(const FString& Name);
 	/** Point the dev camera at a world transform, or back at the player pawn. */

@@ -197,6 +197,24 @@ namespace SEVolleyballRules
 		return TeamASetsWon >= MatchWinsNeeded || TeamBSetsWon >= MatchWinsNeeded;
 	}
 
+	/** Licensed V200W ball slots (M11c-6): the licensed mesh+material are used
+	 *  ONLY when the user supplied BOTH with clear rights (ASSET_LICENSE.md).
+	 *  Any missing slot keeps the un-branded yellow/blue placeholder — never a
+	 *  half-applied hybrid and never a Missing Package. */
+	inline bool ShouldUseLicensedBall(bool bMeshValid, bool bMaterialValid)
+	{
+		return bMeshValid && bMaterialValid;
+	}
+
+	/** Right-edge safe X offset (negative, px from the right viewport edge) for
+	 *  the rotation/formation widget. Panel width 200 + 32 px margin; every
+	 *  desktop resolution wider than 232 px keeps the widget fully on screen.
+	 *  Viewport size is passed in so the rule can scale with DPI in the future. */
+	inline int32 RotationWidgetSafeOffset(int32 ViewportWidth, int32 ViewportHeight)
+	{
+		return -(200 + 32);
+	}
+
 	/** FIVB court: |X| <= HalfLength (end lines) and |Y| <= HalfWidth (side lines); lines count IN. */
 	inline bool IsInBounds(const FVector& Location, float HalfLength, float HalfWidth)
 	{

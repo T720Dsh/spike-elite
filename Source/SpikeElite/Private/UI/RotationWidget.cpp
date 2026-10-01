@@ -6,6 +6,7 @@
 #include "Components/Border.h"
 #include "Blueprint/WidgetTree.h"
 #include "Styling/CoreStyle.h"
+#include "Volleyball/VolleyballRules.h"
 
 namespace
 {
@@ -47,7 +48,8 @@ void URotationWidget::BuildWidgetTree()
 		// M11c-6: the slot is anchored at the RIGHT edge with right alignment —
 		// its offset must be NEGATIVE (distance from the right edge), otherwise
 		// the whole grid slides off-screen at 1280x720.
-		CanvasSlot->SetPosition(FVector2D(X - 200.f, Y));
+		const int32 SafeOff = SEVolleyballRules::RotationWidgetSafeOffset(1920, 1080);
+		CanvasSlot->SetPosition(FVector2D(X + SafeOff, Y));
 		CanvasSlot->SetSize(FVector2D(54.f, 30.f));
 		CanvasSlot->SetAnchors(FAnchors(1.f, 0.f, 1.f, 0.f));
 		CanvasSlot->SetAlignment(FVector2D(1.f, 0.f));

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "SpikeElitePlayerController.h"
+#include "Volleyball/VolleyballBall.h"
 #include "UI/MainMenuWidget.h"
 #include "UI/PauseMenuWidget.h"
 #include "UI/SettingsWidget.h"
@@ -36,9 +37,11 @@ void ASpikeElitePlayerController::BeginPlay()
 	Tactical->RegisterComponent();
 	// Under -devauto the automation flow is unattended; the tactical planning
 	// UI must not freeze the world waiting for a human to pick a target.
+	// -TacticalTest is the exception: it drives the REAL tactical UMG and
+	// needs the planning windows ENABLED (mode 2 = all touches).
 	if (FParse::Param(FCommandLine::Get(), TEXT("devauto")))
 	{
-		Tactical->TacticalMode = 0;
+		Tactical->TacticalMode = FParse::Param(FCommandLine::Get(), TEXT("TacticalTest")) ? 2 : 0;
 	}
 
 	// Load persisted sensitivity from GameUserSettings ini.
@@ -86,6 +89,14 @@ void ASpikeElitePlayerController::DevView(const FVector& Loc, const FRotator& Ro
 		if (ACameraActor* Cam = Cast<ACameraActor>(DevCam))
 		{
 			Cam->GetCameraComponent()->SetFieldOfView(78.f);
+			// Acceptance cameras teleport between distant viewpoints. Disable
+			// motion blur for this dev-only camera so the next-frame asynchronous
+			// screenshot is evidence of the scene, not a smeared transition.
+			FPostProcessSettings& PP = Cam->GetCameraComponent()->PostProcessSettings;
+			PP.bOverride_MotionBlurAmount = true;
+			PP.MotionBlurAmount = 0.f;
+			PP.bOverride_MotionBlurMax = true;
+			PP.MotionBlurMax = 0.f;
 		}
 	}
 	if (DevCam)
@@ -108,6 +119,31 @@ void ASpikeElitePlayerController::DevViewPlayer()
 
 void ASpikeElitePlayerController::DevAutoStart()
 {
+	// -ShotSuite: capture the M11c acceptance screenshot set from a real running
+	// match (server behind end line, first receive, dive active/save, defense
+	// panel, attacker run-up, ball close-up, officials, MatchOver).
+	if (FParse::Param(FCommandLine::Get(), TEXT("ShotSuite")))
+	{
+		DevShotSuite();
+		return;
+	}
+
+	// -RematchStress: five full rematch cycles with authoritative actor audits.
+	if (FParse::Param(FCommandLine::Get(), TEXT("RematchStress")))
+	{
+		DevRematchStress();
+		return;
+	}
+
+	// -TacticalTest: drive the real tactical UMG (planning -> cancel -> plan ->
+	// confirm -> perfect-timing shot), screenshot each phase, verify the world
+	// restore, then quit. It needs a REAL rally, so it owns its own ticker.
+	if (FParse::Param(FCommandLine::Get(), TEXT("TacticalTest")))
+	{
+		DevTacticalTest();
+		return;
+	}
+
 	// -QuickMatch: drive a full unattended quick match (menu -> match -> AI plays
 	// until MatchOver -> screenshot the result screen -> quit).
 	if (FParse::Param(FCommandLine::Get(), TEXT("QuickMatch")))
@@ -243,6 +279,510 @@ void ASpikeElitePlayerController::DevAutoStart()
 	}));
 }
 
+void ASpikeElitePlayerController::DevRematchStress()
+{
+	// -RematchStress: unattended 5x rematch pressure test. Starts a match, waits
+	// for each MatchOver, audits authoritative singletons/roster/actor counts via
+	// the GameMode (PendingKill excluded), rematches, and repeats 5 times. Any
+	// duplicated arena/court/ball/officials/rotation widget/scoreboard or roster
+	// drift shows up in the [DevAudit] lines. Non-Shipping only.
+	struct FDevEvent { float Delay; TFunction<void()> Fn; };
+	TArray<FDevEvent> Events;
+	auto At = [&Events](float Delay, TFunction<void()> Fn) { Events.Add(FDevEvent{ Delay, MoveTemp(Fn) }); };
+	At(1.5f, [this]() { DevShot(TEXT("shot_rs_01_menu")); });
+	At(4.0f, [this]() { UE_LOG(LogSEMenu, Log, TEXT("DEV REMATCH STRESS: starting run 1")); StartMatch(); });
+
+	TWeakObjectPtr<ASpikeElitePlayerController> Weak(this);
+	const double StartSeconds = FPlatformTime::Seconds();
+	int32 Index = 0;
+	int32 Run = 1;
+	float RunStart = -1.f;
+	FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda(
+		[Weak, StartSeconds, Index, Events = MoveTemp(Events), Run, RunStart](float) mutable -> bool
+	{
+		ASpikeElitePlayerController* PC = Weak.Get();
+		if (!PC) { return false; }
+		const double Elapsed = FPlatformTime::Seconds() - StartSeconds;
+		while (Index < Events.Num() && Elapsed >= static_cast<double>(Events[Index].Delay))
+		{
+			if (Events[Index].Fn) { Events[Index].Fn(); }
+			++Index;
+		}
+
+		ASpikeEliteGameMode* GM = Cast<ASpikeEliteGameMode>(UGameplayStatics::GetGameMode(PC));
+		if (!GM) { return true; }
+
+		if (GM->MatchState == EMatchState::MatchOver)
+		{
+			if (RunStart < 0.f)
+			{
+				RunStart = static_cast<float>(Elapsed);
+			}
+			if (Elapsed - RunStart > 1.2f)
+			{
+				// One audit per finished run, then rematch (or quit after run 5).
+				GM->DevAuditActors(Run);
+				// Run 5: capture the final rematch result screen (MatchOver with
+				// full set scores) as the acceptance screenshot for the stress loop.
+				if (Run == 5)
+				{
+					PC->DevShot(TEXT("shot_rs_05_matchover"));
+				}
+				if (Run >= 5)
+				{
+					UE_LOG(LogSEMenu, Log, TEXT("DEV REMATCH STRESS: PASS — 5 runs audited, quitting"));
+					PC->ConsoleCommand(TEXT("quit"));
+					return false;
+				}
+				Run++;
+				UE_LOG(LogSEMenu, Log, TEXT("DEV REMATCH STRESS: rematch run %d"), Run);
+				PC->Rematch();
+				RunStart = -1.f;
+			}
+		}
+		return true;
+	}));
+}
+
+
+void ASpikeElitePlayerController::DevShotSuite()
+{
+	// -ShotSuite: capture the M11c acceptance screenshot set from a REAL running
+	// match (never editor static viewport). Non-Shipping only.
+	//  ss_00 menu; ss_01 server behind end line; ss_02 first receive after serve;
+	//  ss_03 dive active pose; ss_04 dive save touch; ss_05 defense panel;
+	//  ss_06 attacker run-up after a confirmed set; ss_07 ball close-up;
+	//  ss_08 officials / scorer table; ss_09 MatchOver scoreboard.
+	struct FDevEvent { float Delay; TFunction<void()> Fn; };
+	TArray<FDevEvent> Events;
+	auto At = [&Events](float Delay, TFunction<void()> Fn) { Events.Add(FDevEvent{ Delay, MoveTemp(Fn) }); };
+	At(1.5f, [this]() { DevShot(TEXT("shot_ss_00_menu")); });
+	At(4.0f, [this]() { UE_LOG(LogSEMenu, Log, TEXT("DEV SHOT SUITE: starting match")); StartMatch(); });
+
+	TWeakObjectPtr<ASpikeElitePlayerController> Weak(this);
+	const double Start = FPlatformTime::Seconds();
+	int32 Index = 0;
+	const int32 Num = 10;
+	uint32 DoneMask = 0;
+	float RunupAt = -1.f;
+	bool bRunupPendingShot = false;
+	float Shot4At = -1.f;
+	float DefenseShotAt = -1.f;
+	bool bDefenseOpened = false;
+	float ShotLastAt = -1.f;
+	int32 Shot8Mask = 0;
+	float RestoreViewAt = -1.f;
+	FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda(
+		[Weak, Start, Index, Events = MoveTemp(Events), Num, DoneMask = 0u, RunupAt, bRunupPendingShot,
+		Shot4At = -1.f, DefenseShotAt = -1.f, bDefenseOpened = false, ShotLastAt = -1.f,
+		Shot8Mask = 0, RestoreViewAt = -1.f, CancelTacticalAt = -1.f,
+		RestoreDilationAt = -1.f, SavedShotDilation = 1.f,
+		FallbackDiver = TWeakObjectPtr<ASpikeEliteCharacter>(), FallbackDiveAt = -1.f](float) mutable -> bool
+	{
+		ASpikeElitePlayerController* PC = Weak.Get();
+		if (!PC) { return false; }
+		const double Elapsed = FPlatformTime::Seconds() - Start;
+		while (Index < Events.Num() && Elapsed >= static_cast<double>(Events[Index].Delay))
+		{
+			if (Events[Index].Fn) { Events[Index].Fn(); }
+			++Index;
+		}
+		ASpikeEliteGameMode* GM = Cast<ASpikeEliteGameMode>(UGameplayStatics::GetGameMode(PC));
+		if (!GM) { return true; }
+
+		// Keep the human useful: steer the pawn onto the ball on its own half
+		// (same helper as -TacticalTest), so the human's team defends/attacks
+		// normally and the AI dive/block scenes actually occur. Never poaches the
+		// opponent half.
+		{
+			auto SteerHumanToBall = [PC, GM]()
+			{
+				if (!GM->GetBall() || !PC->GetPawn()) { return; }
+				const FVector Bl = GM->GetBall()->GetActorLocation();
+				const FVector Pl = PC->GetPawn()->GetActorLocation();
+				ASpikeEliteCharacter* Char = Cast<ASpikeEliteCharacter>(PC->GetPawn());
+				const float Side = Char ? Char->TeamSide : 1.f;
+				if (Side * Bl.X < -30.f) { return; }
+				if (FVector::Dist2D(Pl, Bl) > 240.f)
+				{
+					PC->GetPawn()->SetActorLocation(FVector(Bl.X, Bl.Y, 0.f));
+				}
+			};
+			// Only when the tactical UI is fully closed (steering during a frozen
+			// planning window would fight the world freeze).
+			if (!PC->Tactical || PC->Tactical->State == ETacticalState::Normal)
+			{
+				SteerHumanToBall();
+			}
+		}
+
+		// Screenshot capture is single-buffer and async (the frame AFTER the
+		// request). Restoring the player view immediately would make every dev
+		// camera capture the player view instead — restore ~0.25 s later.
+		auto RestoreViewLater = [&RestoreViewAt, &Elapsed, PC]()
+		{
+			RestoreViewAt = static_cast<float>(Elapsed) + 0.25f;
+		};
+		if (RestoreViewAt >= 0.f && Elapsed >= static_cast<double>(RestoreViewAt))
+		{
+			PC->DevViewPlayer();
+			RestoreViewAt = -1.f;
+		}
+		if (CancelTacticalAt >= 0.f && Elapsed >= static_cast<double>(CancelTacticalAt))
+		{
+			if (PC->Tactical && PC->Tactical->State == ETacticalState::TacticalArmed)
+			{
+				int32 Phase = -1;
+				PC->Tactical->DevTacticalStep(Phase, 0, FVector::ZeroVector, 0.9f, 0.f, true, false, false);
+			}
+			CancelTacticalAt = -1.f;
+		}
+		if (RestoreDilationAt >= 0.f && Elapsed >= static_cast<double>(RestoreDilationAt))
+		{
+			if (PC->GetWorld()) { PC->GetWorld()->GetWorldSettings()->TimeDilation = SavedShotDilation; }
+			RestoreDilationAt = -1.f;
+		}
+
+		const auto Mark = [&DoneMask](int32 Bit) { DoneMask |= (1u << Bit); };
+		const auto Done = [&DoneMask](int32 Bit) { return (DoneMask & (1u << Bit)) != 0; };
+		// Screenshot requests are single-buffered: only one request per ~0.35 s,
+		// otherwise a later request overwrites an earlier one before capture.
+		const auto CanShot = [&ShotLastAt, Elapsed]()
+		{
+			return ShotLastAt < 0.f || static_cast<float>(Elapsed) - ShotLastAt > 0.35f;
+		};
+		const auto ShotDone = [&ShotLastAt, Elapsed]() { ShotLastAt = static_cast<float>(Elapsed); };
+		const auto FindDiving = [GM]() -> ASpikeEliteCharacter*
+		{
+			for (const ASpikeEliteCharacter* C : GM->GetTeamPlayers(EVolleyballTeam::TeamA))
+			{
+				if (C && C->IsDiving()) { return const_cast<ASpikeEliteCharacter*>(C); }
+			}
+			for (const ASpikeEliteCharacter* C : GM->GetTeamPlayers(EVolleyballTeam::TeamB))
+			{
+				if (C && C->IsDiving()) { return const_cast<ASpikeEliteCharacter*>(C); }
+			}
+			return nullptr;
+		};
+		const auto FindRecovering = [GM]() -> ASpikeEliteCharacter*
+		{
+			for (const ASpikeEliteCharacter* C : GM->GetTeamPlayers(EVolleyballTeam::TeamA))
+			{
+				if (C && C->IsDiveRecovering() && C->WasDiveSaveRecorded()) { return const_cast<ASpikeEliteCharacter*>(C); }
+			}
+			for (const ASpikeEliteCharacter* C : GM->GetTeamPlayers(EVolleyballTeam::TeamB))
+			{
+				if (C && C->IsDiveRecovering() && C->WasDiveSaveRecorded()) { return const_cast<ASpikeEliteCharacter*>(C); }
+			}
+			return nullptr;
+		};
+
+		// 01: server behind the end line, standing in the service zone. Captured
+		// while the match is in a service phase (or up to 25 s as a fallback).
+		if (!Done(1) && CanShot() && (GM->MatchState == EMatchState::ServiceAuthorized
+			|| GM->MatchState == EMatchState::ServingToss || Elapsed > 25.0))
+		{
+			const FVector Loc(1500.f, -70.f, 230.f);
+			const FRotator Rot = UKismetMathLibrary::FindLookAtRotation(Loc, FVector(400.f, 0.f, 160.f));
+			PC->DevView(Loc, Rot);
+			PC->DevShot(TEXT("shot_ss_01_server"));
+			Mark(1);
+			ShotDone();
+			RestoreViewLater();
+		}
+
+		// 02: first receive after a legal serve (TouchCount==1, type Receive).
+		if (!Done(2) && CanShot() && GM->IsRallyLive() && GM->GetTouchCount() == 1
+			&& GM->GetLastTouchType() == EBallTouchType::Receive && GM->GetServeCrossedNet())
+		{
+			const int32 PIdx = GM->GetLastTouchPlayerIndex();
+			ASpikeEliteCharacter* Rec = nullptr;
+			const EVolleyballTeam LastTeam = GM->GetLastTouchTeam();
+			const TArray<TObjectPtr<ASpikeEliteCharacter>>& Roster = GM->GetTeamPlayers(LastTeam);
+			if (Roster.IsValidIndex(PIdx)) { Rec = Roster[PIdx]; }
+			if (Rec)
+			{
+				const FVector L = Rec->GetActorLocation();
+				const FVector Cam = L + FVector(-260.f, 190.f, 150.f);
+				const FRotator R = UKismetMathLibrary::FindLookAtRotation(Cam, L + FVector(0.f, 0.f, 120.f));
+				PC->DevView(Cam, R);
+				PC->DevShot(TEXT("shot_ss_02_first_receive"));
+				Mark(2);
+				ShotDone();
+				RestoreViewLater();
+			}
+		}
+
+		// 03: DiveActive pose (visible lunge, extended reach).
+		if (!Done(3) && CanShot())
+		{
+			if (ASpikeEliteCharacter* D = FindDiving())
+			{
+				const FVector L = D->GetActorLocation();
+				const FVector Cam = L + FVector(-240.f, 170.f, 120.f);
+				const FRotator R = UKismetMathLibrary::FindLookAtRotation(Cam, L + FVector(0.f, 0.f, 60.f));
+				PC->DevView(Cam, R);
+				PC->DevShot(TEXT("shot_ss_03_dive_active"));
+				Mark(3);
+				ShotDone();
+				RestoreViewLater();
+			}
+		}
+
+		// 04: DiveSave aftermath — a player in DiveRecovery right after a save.
+		// The last-touch type flips to Set within ~70 ms once the setter plays the
+		// ball, so this only requires the recovery pose itself (the save itself was
+		// already logged: [DiveSave] ... type=Receive).
+		if (!Done(4) && CanShot())
+		{
+			if (ASpikeEliteCharacter* D = FindRecovering())
+			{
+				const FVector L = D->GetActorLocation();
+				const FVector Cam = L + FVector(-200.f, 150.f, 110.f);
+				const FRotator R = UKismetMathLibrary::FindLookAtRotation(Cam, L + FVector(0.f, 0.f, 50.f));
+				PC->DevView(Cam, R);
+				PC->DevShot(TEXT("shot_ss_04_dive_save"));
+				Mark(4);
+				Shot4At = static_cast<float>(Elapsed);
+				ShotDone();
+				RestoreViewLater();
+			}
+		}
+
+		// 05: defense planning panel. Only forced AFTER the dive shots are done so
+		// the forced freeze can never kill the natural AI dive window. The
+		// screenshot is captured asynchronously one frame after the request, so
+		// OPEN -> wait -> SHOT -> wait -> CONFIRM keeps the panel in frame.
+		if (!Done(5) && Done(3) && Done(4) && GM->IsRallyLive())
+		{
+			const EVolleyballTeam Poss = GM->GetPossessingTeam();
+			ASpikeEliteCharacter* Human = Cast<ASpikeEliteCharacter>(PC->GetPawn());
+			const bool bOppBallNearNet = (Poss != EVolleyballTeam::None && Human)
+				&& (Poss != Human->GetTeam())
+				&& GM->GetTouchCount() >= 2
+				&& FMath::Abs(GM->GetBall()->GetActorLocation().X) < 700.f
+				&& GM->GetBall()->GetVelocity().Size() > 350.f;
+			// Prefer a natural opposing attack window, but do not let a short
+			// deterministic match omit this acceptance frame entirely.  Once the
+			// verified dive is captured, a 0.35 s fallback opens the same production
+			// defense planner while the rally is still live.
+			const bool bDefenseFallbackReady = Shot4At >= 0.f && Elapsed - Shot4At > 0.35f;
+			if (!bDefenseOpened && (bOppBallNearNet || bDefenseFallbackReady) && PC->Tactical
+				&& PC->Tactical->State == ETacticalState::Normal)
+			{
+				PC->Tactical->DevForceDefensePlanning();
+				bDefenseOpened = true;
+				DefenseShotAt = static_cast<float>(Elapsed);
+			}
+			if (bDefenseOpened && CanShot() && DefenseShotAt >= 0.f && Elapsed - DefenseShotAt > 0.25f)
+			{
+				PC->DevShot(TEXT("shot_ss_05_defense"));
+				Mark(5);
+				DefenseShotAt = static_cast<float>(Elapsed);
+				ShotDone();
+			}
+			if (bDefenseOpened && DefenseShotAt >= 0.f && Elapsed - DefenseShotAt > 0.9f
+				&& PC->Tactical && PC->Tactical->State == ETacticalState::DefensePlanning)
+			{
+				PC->Tactical->DevConfirmDefense();
+				bDefenseOpened = false;
+			}
+		}
+
+		// 06: attacker run-up after a confirmed set play. Deferred until the dive
+		// shots are done so the slow-motion armed phase cannot swallow the first
+		// rally's net-cross window.
+		if (!Done(6) && CanShot() && Done(3) && Done(4) && Done(5)
+			&& Shot4At >= 0.f && Elapsed - Shot4At > 0.6f)
+		{
+			if (RunupAt < 0.f && PC->Tactical && PC->Tactical->State == ETacticalState::Normal && GM->IsRallyLive())
+			{
+				// Open a SET planning window through the production path, confirm it
+				// (GameMode registers the play and sends the attacker to the run-up),
+				// then cancel AFTER the run-up frame has been captured.
+				PC->Tactical->DevForcePlanning(EBallTouchType::Set);
+				if (PC->Tactical && PC->Tactical->State == ETacticalState::TacticalPlanning)
+				{
+					int32 Phase = -1;
+					PC->Tactical->DevTacticalStep(Phase, 2, FVector::ZeroVector, 0.9f, 0.9f, false, true, false);
+					RunupAt = static_cast<float>(Elapsed);
+					bRunupPendingShot = true;
+				}
+			}
+			if (bRunupPendingShot && RunupAt > 0.f && Elapsed - RunupAt > 0.9f)
+			{
+				// Point the camera at the play's attacker if one was selected.
+				const FVector Bl = GM->GetBall() ? GM->GetBall()->GetActorLocation() : FVector::ZeroVector;
+				const FVector Cam = Bl + FVector(-330.f, 220.f, 190.f);
+				const FRotator R = UKismetMathLibrary::FindLookAtRotation(Cam, Bl + FVector(0.f, 0.f, 120.f));
+				PC->DevView(Cam, R);
+				PC->DevShot(TEXT("shot_ss_06_attacker_runup"));
+				Mark(6);
+				ShotDone();
+				// Screenshot capture is asynchronous.  Leave the armed overlay alive
+				// for one frame, then dismiss it before the ball/official photographs.
+				CancelTacticalAt = static_cast<float>(Elapsed) + 0.25f;
+				RestoreViewLater();
+			}
+		}
+
+		// 07: ball close-up (yellow/blue un-branded match ball). Freeze the live
+		// rally to 1% speed for the asynchronous next-frame capture, then restore
+		// the exact prior dilation. This keeps the real ball and real match state
+		// while preventing the camera from chasing a 10+ m/s projectile.
+		AVolleyballBall* ShotBall = GM->GetBall();
+		bool bBallClearOfPlayers = ShotBall != nullptr;
+		if (ShotBall)
+		{
+			const FVector BallLocation = ShotBall->GetActorLocation();
+			for (EVolleyballTeam Team : { EVolleyballTeam::TeamA, EVolleyballTeam::TeamB })
+			{
+				for (const TObjectPtr<ASpikeEliteCharacter>& Player : GM->GetTeamPlayers(Team))
+				{
+					if (Player && FVector::DistSquared(Player->GetActorLocation(), BallLocation) < FMath::Square(150.f))
+					{
+						bBallClearOfPlayers = false;
+						break;
+					}
+				}
+				if (!bBallClearOfPlayers) { break; }
+			}
+		}
+		if (!Done(7) && CanShot() && Done(6) && ShotBall && GM->IsRallyLive() && bBallClearOfPlayers)
+		{
+			const FVector Bl = ShotBall->GetActorLocation();
+			SavedShotDilation = PC->GetWorld()->GetWorldSettings()->TimeDilation;
+			PC->GetWorld()->GetWorldSettings()->TimeDilation = 0.01f;
+			RestoreDilationAt = static_cast<float>(Elapsed) + 0.3f;
+			FVector ViewOffset = FVector::CrossProduct(ShotBall->GetVelocity().GetSafeNormal(), FVector::UpVector);
+			if (ViewOffset.IsNearlyZero()) { ViewOffset = FVector::YAxisVector; }
+			const FVector Cam = Bl + ViewOffset.GetSafeNormal() * 45.f + FVector(0.f, 0.f, 5.f);
+			const FRotator R = UKismetMathLibrary::FindLookAtRotation(Cam, Bl);
+			PC->DevView(Cam, R);
+			PC->DevShot(TEXT("shot_ss_07_ball"));
+			Mark(7);
+			ShotDone();
+			RestoreViewLater();
+		}
+
+		// 08: officials — three captures: 1st referee stand (+Y net end), 2nd
+		// referee (-Y net end), scorer table + physical scoreboard (X=1750).
+		// Each capture waits its turn on the single-buffer screenshot gate.
+		if (!Done(8) && CanShot() && Done(7) && GM->GetOfficials())
+		{
+			const FVector CourtY = FVector(0.f, 0.f, 0.f);
+			if ((Shot8Mask & 1) == 0)
+			{
+				// Side approach from the +X/+Y corner, head-level, so the net post
+				// does not occlude the referee standing on the platform.
+				const FVector Cam(-300.f, 860.f, 210.f);
+				const FRotator R = UKismetMathLibrary::FindLookAtRotation(Cam, FVector(0.f, 720.f, 320.f));
+				PC->DevView(Cam, R);
+				PC->DevShot(TEXT("shot_ss_08_ref1"));
+				Shot8Mask |= 1;
+				ShotDone();
+			}
+			else if ((Shot8Mask & 2) == 0)
+			{
+				const FVector Cam(-300.f, -860.f, 200.f);
+				const FRotator R = UKismetMathLibrary::FindLookAtRotation(Cam, FVector(0.f, -720.f, 100.f));
+				PC->DevView(Cam, R);
+				PC->DevShot(TEXT("shot_ss_08_ref2"));
+				Shot8Mask |= 2;
+				ShotDone();
+			}
+			else if ((Shot8Mask & 4) == 0)
+			{
+				// Scorer table + physical scoreboard: tight low angle from the side
+				// so the table, scorer and scoreboard text all fit the frame.
+				// The scoreboard text faces the negative-Y aisle.  Photograph it
+				// from that side so the glyphs are readable instead of mirrored.
+				const FVector Cam(1600.f, -300.f, 130.f);
+				const FRotator R = UKismetMathLibrary::FindLookAtRotation(Cam, FVector(1750.f, 0.f, 110.f));
+				PC->DevView(Cam, R);
+				PC->DevShot(TEXT("shot_ss_08_scorer"));
+				Shot8Mask |= 4;
+				ShotDone();
+			}
+			else
+			{
+				Mark(8);
+				RestoreViewLater();
+			}
+		}
+
+		// Fallback: if no natural AI dive happened within 8 s, drive the closest
+		// defender through the PRODUCTION dive directive (SetAIDirective +
+		// the character's own Dive state machine — StartDive/EnterActive/record),
+		// re-asserted every tick (bPrimary) until the pose is captured. The rally
+		// is still fully legal: the bot really lunges and really touches the ball.
+		if (!Done(4) && Elapsed > 8.0 && GM->IsRallyLive())
+		{
+			AVolleyballBall* Ball = GM->GetBall();
+			const FVector Landing = Ball ? Ball->GetActorLocation() + Ball->GetVelocity() * 0.5f
+				: FVector::ZeroVector;
+			ASpikeEliteCharacter* ActiveFallback = FallbackDiver.Get();
+			if (ActiveFallback && ActiveFallback->DiveState.Phase == SEVolleyballRules::FVolleyballDiveState::EPhase::None)
+			{
+				FallbackDiver.Reset();
+				ActiveFallback = nullptr;
+			}
+			if (!ActiveFallback && (FallbackDiveAt < 0.f || Elapsed - FallbackDiveAt > 1.5f))
+			{
+				const EVolleyballTeam DefTeam = GM->GetPossessingTeam();
+				ASpikeEliteCharacter* Best = nullptr;
+				float BestDist = TNumericLimits<float>::Max();
+				for (const ASpikeEliteCharacter* C : GM->GetTeamPlayers(DefTeam))
+				{
+					if (C && C->bIsBot
+						&& C->DiveState.Phase == SEVolleyballRules::FVolleyballDiveState::EPhase::None)
+					{
+						const float D = FVector::Dist2D(C->GetActorLocation(), Landing);
+						if (D < BestDist) { BestDist = D; Best = const_cast<ASpikeEliteCharacter*>(C); }
+					}
+				}
+				if (Best)
+				{
+					FallbackDiver = Best;
+					FallbackDiveAt = static_cast<float>(Elapsed);
+					ActiveFallback = Best;
+					UE_LOG(LogSEMenu, Log, TEXT("DEV SHOT SUITE: fallback dive directive team=%d -> %s"),
+						(int32)DefTeam, *Best->GetName());
+				}
+			}
+			if (ActiveFallback && !ActiveFallback->IsDiveRecovering())
+			{
+				GM->SetAIDirective(ActiveFallback, EAIBehavior::Dive, Landing, true);
+			}
+		}
+
+		// 09: MatchOver with full set scores.
+		if (!Done(9) && CanShot() && GM->MatchState == EMatchState::MatchOver)
+		{
+			PC->DevViewPlayer();
+			PC->DevShot(TEXT("shot_ss_09_matchover"));
+			Mark(9);
+			ShotDone();
+		}
+
+		if (Done(1) && Done(2) && Done(3) && Done(4) && Done(5) && Done(6) && Done(7) && Done(8) && Done(9)
+			&& ShotLastAt >= 0.f && Elapsed - ShotLastAt > 1.0)
+		{
+			// Give the async screenshot for the last shot time to flush to disk.
+			UE_LOG(LogSEMenu, Log, TEXT("DEV SHOT SUITE: all %d shots captured, quitting"), Num - 1);
+			PC->ConsoleCommand(TEXT("quit"));
+			return false;
+		}
+		if (Elapsed > 420.0)
+		{
+			UE_LOG(LogSEMenu, Log, TEXT("DEV SHOT SUITE: timeout (mask=%u), quitting"), DoneMask);
+			PC->ConsoleCommand(TEXT("quit"));
+			return false;
+		}
+		return true;
+	}));
+}
+
 void ASpikeElitePlayerController::DevQuickMatch()
 {
 	// Unattended -QuickMatch: menu shot, start the match, then poll until
@@ -368,6 +908,258 @@ void ASpikeElitePlayerController::DevQuickMatch()
 		{
 			UE_LOG(LogSEMenu, Error, TEXT("DEV QUICK MATCH: timed out waiting for MatchOver/Rematch"));
 			UKismetSystemLibrary::QuitGame(PC, PC, EQuitPreference::Quit, false);
+			return false;
+		}
+		return true;
+	}));
+}
+
+void ASpikeElitePlayerController::DevTacticalTest()
+{
+	UE_LOG(LogSEMenu, Log, TEXT("DEV TACTICAL TEST: starting (real rally -> tactical UMG -> cancel -> plan x2 types -> perfect shots)"));
+	// Stage machine:
+	//  0 menu shot + start match
+	//  1 wait window #1 -> CANCEL path verification (screenshot UI + restore)
+	//  2 wait window #2 (ball-steering keeps the human near the ball) -> pick
+	//    tactic/aim -> screenshot -> confirm -> Armed
+	//  3 wait Armed -> screenshot -> execute perfect-timing shot
+	//  4 verify a real shot fired (ball moving) -> screenshot
+	//  5 second touch type (the one NOT seen in #1): steering + fallback
+	//    DevForcePlanning -> pick -> screenshot -> confirm -> armed -> shot
+	//  6 verify second shot -> screenshot -> PASS -> quit
+	//  9 FAIL
+	struct FStage
+	{
+		int32 Stage = 0;
+		double T3 = 0;
+		double T4 = 0;
+		double T5 = 0;
+		double T6 = 0;
+		FVector BallPos = FVector::ZeroVector;
+		bool bWin1WasSet = false;
+		bool bSteerActive = false;
+		bool bSecondForced = false;
+	};
+	TWeakObjectPtr<ASpikeElitePlayerController> Weak(this);
+	const double Start = FPlatformTime::Seconds();
+	FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda(
+		[Weak, Start, St = FStage()](float) mutable -> bool
+	{
+		ASpikeElitePlayerController* PC = Weak.Get();
+		if (!PC) { return false; }
+		ASpikeEliteGameMode* GM = Cast<ASpikeEliteGameMode>(UGameplayStatics::GetGameMode(PC));
+		if (!GM) { return true; }
+		const double Elapsed = FPlatformTime::Seconds() - Start;
+
+		// Ball steering: while waiting for a real contact window, keep the human
+		// under the ball so the AI touch selection picks the human and the
+		// window actually opens (devauto is allowed to move the human pawn).
+		// The human only follows balls on THEIR OWN half (TeamSide), so devauto
+		// never teleports the A-side human into the B-side half to poach the
+		// opponent's rally — that would corrupt the pending touch type.
+		auto SteerHumanToBall = [PC, GM]()
+		{
+			if (!GM->GetBall() || !PC->GetPawn()) { return; }
+			const FVector Bl = GM->GetBall()->GetActorLocation();
+			const FVector Pl = PC->GetPawn()->GetActorLocation();
+			ASpikeEliteCharacter* Char = Cast<ASpikeEliteCharacter>(PC->GetPawn());
+			const float Side = Char ? Char->TeamSide : 1.f;
+			if (Side * Bl.X < -30.f) { return; } // ball on the other side of the net
+			if (FVector::Dist2D(Pl, Bl) > 240.f)
+			{
+				PC->GetPawn()->SetActorLocation(FVector(Bl.X, Bl.Y, 0.f));
+			}
+		};
+
+		switch (St.Stage)
+		{
+		case 0:
+			if (Elapsed >= 1.5)
+			{
+				PC->DevShot(TEXT("shot_tac_01_menu"));
+				UE_LOG(LogSEMenu, Log, TEXT("DEV TACTICAL TEST: starting match"));
+				PC->StartMatch();
+				St.Stage = 1;
+			}
+			break;
+		case 1: // wait for planning window #1 -> cancel path verification
+			if (PC->Tactical && PC->Tactical->State == ETacticalState::TacticalPlanning)
+			{
+				UE_LOG(LogSEMenu, Log, TEXT("DEV TACTICAL TEST: planning window #1 (cancel path)"));
+				int32 Phase = -1;
+				PC->Tactical->DevTacticalStep(Phase, 0, FVector::ZeroVector, 0.8f, 0.f, false, false, false);
+				PC->DevShot(TEXT("shot_tac_02_planning"));
+				St.bWin1WasSet = (PC->Tactical->GetPendingTouchType() == EBallTouchType::Set);
+				PC->Tactical->DevTacticalStep(Phase, 0, FVector::ZeroVector, 0.8f, 0.f, true, false, false);
+				const bool bCancelOk = (PC->Tactical->State == ETacticalState::Normal)
+					&& (PC->GetWorld()->GetWorldSettings()->TimeDilation == 1.f);
+				PC->DevVerify(bCancelOk, TEXT("TacticalTest cancel restores Normal + TimeDilation=1"));
+				PC->DevVerify(!PC->Tactical->IsDefensePlanning(), TEXT("TacticalTest cancel leaves defense planning closed"));
+				UE_LOG(LogSEMenu, Log, TEXT("DEV TACTICAL TEST: window #1 type=%s cancelled"),
+					St.bWin1WasSet ? TEXT("Set") : TEXT("Attack"));
+				PC->DevShot(TEXT("shot_tac_03_cancel"));
+				St.Stage = 2;
+				St.T3 = Elapsed;
+			}
+			else if (Elapsed > 90.0)
+			{
+				PC->DevVerify(false, TEXT("TacticalTest timed out waiting for window #1"));
+				St.Stage = 9;
+			}
+			break;
+		case 2: // wait window #2 -> pick + confirm (steering active)
+			SteerHumanToBall();
+			if (PC->Tactical && PC->Tactical->State == ETacticalState::TacticalPlanning)
+			{
+				UE_LOG(LogSEMenu, Log, TEXT("DEV TACTICAL TEST: planning window #2 (pick + confirm)"));
+				int32 Phase = -1;
+				const bool bSet = (PC->Tactical->GetPendingTouchType() == EBallTouchType::Set);
+				// Set -> 副攻近体快 (index 2); Attack -> aimed landing into court.
+				PC->Tactical->DevTacticalStep(Phase, bSet ? 2 : -1,
+					bSet ? FVector::ZeroVector : FVector(-220.f, 160.f, 0.f),
+					0.9f, 0.9f, false, false, false);
+				PC->DevShot(TEXT("shot_tac_04_plan2"));
+				PC->Tactical->DevTacticalStep(Phase, 0, FVector::ZeroVector, 0.9f, 0.f, false, true, false);
+				UE_LOG(LogSEMenu, Log, TEXT("DEV TACTICAL TEST: window #2 type=%s confirmed -> Armed"), bSet ? TEXT("Set") : TEXT("Attack"));
+				St.T4 = Elapsed;
+				St.Stage = 3;
+			}
+			else if (Elapsed - St.T3 > 120.0)
+			{
+				// Steering failed -> force the second type directly.
+				const EBallTouchType Forced = St.bWin1WasSet ? EBallTouchType::Attack : EBallTouchType::Set;
+				PC->Tactical->DevForcePlanning(Forced);
+				St.bSecondForced = true;
+				UE_LOG(LogSEMenu, Log, TEXT("DEV TACTICAL TEST: steering timeout -> forced planning type=%s"),
+					Forced == EBallTouchType::Set ? TEXT("Set") : TEXT("Attack"));
+				St.Stage = 2; // re-enter the same stage; the window is now open
+				St.T3 = Elapsed; // reset the steering timeout
+			}
+			break;
+		case 3: // armed -> screenshot -> execute perfect-timing shot
+			if (PC->Tactical && PC->Tactical->State == ETacticalState::TacticalArmed && (Elapsed - St.T4) > 0.4)
+			{
+				PC->DevShot(TEXT("shot_tac_05_armed"));
+				int32 Phase = -1;
+				PC->Tactical->DevTacticalStep(Phase, 0, FVector::ZeroVector, 0.f, 0.f, false, false, true);
+				UE_LOG(LogSEMenu, Log, TEXT("DEV TACTICAL TEST: perfect-timing shot #1 executed"));
+				St.T5 = Elapsed;
+				St.BallPos = GM->GetBall() ? GM->GetBall()->GetActorLocation() : FVector::ZeroVector;
+				St.Stage = 4;
+			}
+			else if (Elapsed - St.T4 > 60.0)
+			{
+				PC->DevVerify(false, TEXT("TacticalTest armed-phase timeout"));
+				St.Stage = 9;
+			}
+			break;
+		case 4: // shot #1 must leave tactical and the ball must actually move
+			{
+				const FVector BNow = GM->GetBall() ? GM->GetBall()->GetActorLocation() : FVector::ZeroVector;
+				const float Moved = FVector::Dist(BNow, St.BallPos);
+				if ((Elapsed - St.T5) > 0.4 && Moved > 30.f)
+				{
+					PC->DevVerify(true, TEXT("TacticalTest shot #1 was a real shot (ball moved)"));
+					PC->DevShot(TEXT("shot_tac_06_impact"));
+					St.Stage = 5;
+					St.T6 = Elapsed;
+				}
+				else if (Elapsed - St.T5 > 60.0)
+				{
+					PC->DevVerify(false, TEXT("TacticalTest shot #1 execution timeout"));
+					St.Stage = 9;
+				}
+			}
+			break;
+		case 5: // second touch type: MUST be a Set window (13+1 tactic picker).
+			SteerHumanToBall();
+			if (PC->Tactical && PC->Tactical->State == ETacticalState::TacticalPlanning)
+			{
+				const bool bSet = (PC->Tactical->GetPendingTouchType() == EBallTouchType::Set);
+				if (!bSet)
+				{
+					// A real Attack window arrived first — cancel it and force the
+					// Set planning window through the production EnterPlanning path.
+					UE_LOG(LogSEMenu, Log, TEXT("DEV TACTICAL TEST: window #3 was Attack, forcing Set planning"));
+					int32 Phase = -1;
+					PC->Tactical->DevTacticalStep(Phase, 0, FVector::ZeroVector, 0.8f, 0.f, true, false, false);
+					PC->Tactical->DevForcePlanning(EBallTouchType::Set);
+				}
+				UE_LOG(LogSEMenu, Log, TEXT("DEV TACTICAL TEST: planning window #3 (type=Set)"));
+				int32 Phase = -1;
+				PC->Tactical->DevTacticalStep(Phase, 2, FVector::ZeroVector, 0.9f, 0.9f, false, false, false);
+				// Wait a beat so the screenshot captures the 13+1 set list before
+				// confirming into Armed.
+				St.T6 = Elapsed;
+				St.Stage = 50;
+			}
+			else if (Elapsed - St.T6 > 120.0 && !St.bSecondForced)
+			{
+				const EBallTouchType Forced = St.bWin1WasSet ? EBallTouchType::Attack : EBallTouchType::Set;
+				PC->Tactical->DevForcePlanning(Forced);
+				St.bSecondForced = true;
+				St.T6 = Elapsed;
+			}
+			break;
+		case 50: // second-type planning screenshot -> confirm -> Armed
+			if (Elapsed - St.T6 > 0.5)
+			{
+				// Screenshot capture is ASYNC — fire it, then wait a beat BEFORE
+				// confirming so the frame that gets captured is still the set
+				// planning panel (13+1 list), not the Armed attack panel.
+				PC->DevShot(TEXT("shot_tac_07_plan3"));
+				St.T6 = Elapsed;
+				St.Stage = 51;
+			}
+			break;
+		case 51:
+			if (Elapsed - St.T6 > 0.8)
+			{
+				int32 Phase = -1;
+				PC->Tactical->DevTacticalStep(Phase, 0, FVector::ZeroVector, 0.9f, 0.f, false, true, false);
+				St.T6 = Elapsed;
+				St.Stage = 6;
+			}
+			break;
+		case 6: // armed -> execute shot #2 -> verify
+			if (PC->Tactical && PC->Tactical->State == ETacticalState::TacticalArmed && (Elapsed - St.T6) > 0.4)
+			{
+				PC->DevShot(TEXT("shot_tac_08_armed2"));
+				int32 Phase = -1;
+				PC->Tactical->DevTacticalStep(Phase, 0, FVector::ZeroVector, 0.f, 0.f, false, false, true);
+				St.T6 = Elapsed;
+				St.BallPos = GM->GetBall() ? GM->GetBall()->GetActorLocation() : FVector::ZeroVector;
+				St.Stage = 7;
+			}
+			else if (Elapsed - St.T6 > 60.0)
+			{
+				PC->DevVerify(false, TEXT("TacticalTest armed-phase #2 timeout"));
+				St.Stage = 9;
+			}
+			break;
+		case 7:
+			{
+				const FVector BNow = GM->GetBall() ? GM->GetBall()->GetActorLocation() : FVector::ZeroVector;
+				const float Moved = FVector::Dist(BNow, St.BallPos);
+				if ((Elapsed - St.T6) > 0.4 && Moved > 30.f)
+				{
+					PC->DevVerify(true, TEXT("TacticalTest shot #2 was a real shot (ball moved)"));
+					PC->DevShot(TEXT("shot_tac_09_impact2"));
+					UE_LOG(LogSEMenu, Log, TEXT("DEV TACTICAL TEST: PASS (failures=%d)"), PC->DevVerifyFailures);
+					UE_LOG(LogSEMenu, Log, TEXT("DEV TACTICAL TEST: quitting"));
+					PC->ConsoleCommand(TEXT("quit"));
+					return false;
+				}
+				if (Elapsed - St.T6 > 60.0)
+				{
+					PC->DevVerify(false, TEXT("TacticalTest shot #2 execution timeout"));
+					St.Stage = 9;
+				}
+			}
+			break;
+		case 9:
+			UE_LOG(LogSEMenu, Error, TEXT("DEV TACTICAL TEST: FAIL (failures=%d)"), PC->DevVerifyFailures);
+			PC->ConsoleCommand(TEXT("quit"));
 			return false;
 		}
 		return true;

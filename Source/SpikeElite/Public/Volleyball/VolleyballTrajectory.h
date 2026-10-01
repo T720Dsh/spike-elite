@@ -121,6 +121,16 @@ namespace SEVolleyballTrajectory
 	/** Solve the initial velocity needed to reach Target in FlightTime. */
 	SPIKEELITE_API FVector SolveVelocity(const FVector& Start, const FVector& Target, float FlightTime, float Gravity = BallGravity);
 
+	/** M11c-4/7: map a timing offset from the perfect moment to a ±1 error used
+	 *  by BuildShotSolution — perfect = 0, early = negative, late = positive,
+	 *  symmetric around 0. The armed-phase quality bar and -TacticalTest both
+	 *  derive their timing from this single rule. */
+	inline float TimingErrorFromDelta(float OffsetSeconds, float WindowSeconds)
+	{
+		const float HalfWindow = FMath::Max(WindowSeconds * 0.5f, 0.001f);
+		return FMath::Clamp(OffsetSeconds / HalfWindow, -1.f, 1.f);
+	}
+
 	/**
 	 * M11c-4: the SINGLE shot solver shared by the dotted preview, the landing
 	 * marker colour and the GameMode's final strike. The preview calls it with

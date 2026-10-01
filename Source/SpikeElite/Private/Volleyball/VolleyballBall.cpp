@@ -10,32 +10,17 @@
 #include "Engine/World.h"
 #include "Materials/MaterialInterface.h"
 #include "Materials/MaterialInstanceDynamic.h"
+#include "Volleyball/VolleyballRules.h"
+#include "SEMaterials.h"
 
 namespace
 {
-	/** M11c-6: tint a mesh with the project's M_Tint material. Introspects the
-	 *  real vector parameter names instead of assuming "Color" (which does NOT
-	 *  exist on the engine default material). Falls back harmlessly. */
+	/** M11c-6: tint basic geometry with the project-authored M_Tint material.
+	 *  Engine BasicShapes use a default material without a writable Color
+	 *  parameter, so creating a MID from that material leaves the ball grey. */
 	void ApplyTint(UMeshComponent* Comp, const FLinearColor& Color)
 	{
-		UMaterialInterface* Base = Comp ? Comp->GetMaterial(0) : nullptr;
-		if (!Base) { return; }
-		UMaterialInstanceDynamic* MID = UMaterialInstanceDynamic::Create(Base, Comp);
-		bool bApplied = false;
-		TArray<FMaterialParameterInfo> Infos;
-		TArray<FGuid> Ids;
-		MID->GetAllVectorParameterInfo(Infos, Ids);
-		for (const FMaterialParameterInfo& Info : Infos)
-		{
-			if (Info.Association == EMaterialParameterAssociation::GlobalParameter)
-			{
-				MID->SetVectorParameterValue(Info.Name, Color);
-				bApplied = true;
-				break;
-			}
-		}
-		if (!bApplied) { MID->SetVectorParameterValue(TEXT("Color"), Color); }
-		Comp->SetMaterial(0, MID);
+		SEMaterials::TintMesh(Comp, Comp, Color);
 	}
 }
 
@@ -126,7 +111,7 @@ void AVolleyballBall::BeginPlay()
 	// licensed V200W mesh AND material (see ASSET_LICENSE.md). Otherwise the
 	// un-branded yellow/blue placeholder stays — no Missing Package, no fake
 	// official claims. Missing slots are silently normal.
-	if (LicensedBallMesh && LicensedBallMaterial)
+	if (SEVolleyballRules::ShouldUseLicensedBall(LicensedBallMesh != nullptr, LicensedBallMaterial != nullptr))
 	{
 		Mesh->SetStaticMesh(LicensedBallMesh);
 		Mesh->SetRelativeScale3D(FVector(1.f));

@@ -77,6 +77,35 @@ public:
 	/** True while the defense-planning panel is open. */
 	bool IsDefensePlanning() const { return State == ETacticalState::DefensePlanning; }
 
+	/** Touch type pending in the planning/armed phases (read by -TacticalTest). */
+	EBallTouchType GetPendingTouchType() const { return PendingTouchType; }
+
+#if !UE_BUILD_SHIPPING
+	/**
+	 * Automation driver used by -TacticalTest. Drives the tactical state
+	 * machine without a real human: reports the current phase (0=idle,
+	 * 1=planning, 2=armed), retargets the intent (SetPlayIndex for a set,
+	 * TargetOverride for free aim), then optionally cancels (verifying the
+	 * world restore), confirms (planning->armed) or executes a PERFECT-timing
+	 * shot from armed. Returns false if the component is not in the expected
+	 * phase.
+	 */
+	bool DevTacticalStep(int32& PhaseOut, int32 SetPlayIndex, const FVector& TargetOverride,
+		float Power, float FlightTime, bool bCancel, bool bConfirm, bool bExecute);
+
+	/**
+	 * -TacticalTest fallback: force a planning window for the given touch type
+	 * when the ball never reaches the human (steering failed). Uses the exact
+	 * same EnterPlanning entry point as a real contact window — the world-freeze,
+	 * mouse release, UMG and preview all run through the production path.
+	 */
+	void DevForcePlanning(EBallTouchType Type);
+	/** -ShotSuite: force-open the defense planning panel through the production path. */
+	void DevForceDefensePlanning();
+	/** -ShotSuite: confirm the currently open defense plan (AI default if none picked). */
+	void DevConfirmDefense();
+#endif
+
 protected:
 	UPROPERTY()
 	TObjectPtr<UTrajectoryPreviewComponent> Preview;

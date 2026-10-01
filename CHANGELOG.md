@@ -8,6 +8,85 @@ for milestone tags once a first playable is tagged.
 
 ## [Unreleased]
 
+### Milestone M11c — 发球球权纠错 · 权威轮转 · 真实救球生命周期 · 战术同源求解 · 屏幕 UMG 战术 · 打包收口
+
+Verified: **55/55 automation tests pass**; three `-QuickMatch -devauto -FastFlow -SEED=1/42/4242`
+smoke runs each reach MatchOver, Rematch to a second MatchOver and quit with no Fatal /
+project Error / duplicate actors; `-TacticalTest` drives real tactical UMG (cancel path,
+Attack + Set plans, perfect-timing shots, ball actually moved) and reports PASS; 5x
+Rematch stress keeps court/arena/ball/officials/rotation-widget/scoreboard at 1 and 12
+chars with a constant valid-actor count; Win64 Development package rebuilt and
+smoke-tested (Seed 42); accelerated best-of-five state-machine test covers 25/15 targets,
+win-by-2, 3-set match end, per-set reset and rematch reset.
+
+#### M11c-1 Serve possession fix
+- Serve no longer consumes the serving team's three touches; `[Serve] -> [NetCross]
+  possession -> receiving team, touches=0 -> [Touch] 1/3 Receive` is the only legal order.
+- During ServeFlight (serve struck, net not yet crossed) NOBODY may touch the ball;
+  an illegal touch is blocked with a clear log, never silently treated as a legal set.
+- Server starts behind the end line (X=±1150~1300, inside the service zone / free zone)
+  and may move freely inside the service zone; serve faults (into net / out / delay)
+  award the opponent via the single EndRally path.
+
+#### M11c-2 Authoritative rotation
+- New `ERotSlot` P1~P6: P1 back-right server, P2/P3/P4 front row, P5/P6 back row;
+  world coordinates match the slot semantics (Team B mirrored, no reversed left/right).
+- Front-row/block eligibility and back-row attack gating use the slot, not
+  `abs(HomePosition.X) < 400` heuristics; per-team rotation state (no global counter),
+  index wraps 1..6; side-out rotates only the receiving team; scoring keeps serving team.
+- HUD / AI / HomePosition / server / block eligibility all read the same rotation state.
+
+#### M11c-3 Real dive lifecycle
+- Net-cross detection threshold 60 → 5 cm; every teleport/reset path (ResetBall,
+  BeginServiceAuthorized, ExecuteServe, EndRally, Rematch) syncs the cross-state so a
+  reset never fakes a net cross or a dive.
+- Dive state machine: None → DiveApproach → DiveActive (0.35~0.55 s window with extended
+  reach + low touch height + visible pose) → DiveRecovery (blocks a second dive) →
+  normal. Logs distinguish `[DiveAttempt] / [DiveSave] / [DiveMiss] / [DiveRecoveryEnd]` —
+  reports never count attempts as saves.
+
+#### M11c-4 Tactical solver unification
+- `SEVolleyballTrajectory::BuildShotSolution(Start, Intent, TimingError)` is the ONE
+  solver for preview AND execution: dotted line, landing colour and the GameMode strike
+  share the same InitialVelocity. No more "preview by target+flight, strike by direction+power".
+- Power changes rebuild the preview and predicted landing immediately; perfect timing has
+  exactly zero TimingError; early <0 / late >0 symmetric around 0; the same solver computes
+  the resulting trajectory. Preview vs executed landing within 10~20 cm at zero error.
+- Planning uses real-time DeltaTime (small slow-motion / UI tick), never TimeDilation=0 +
+  frame DeltaTime; safe exit restores dilation, mouse, input mode, trajectory and UI.
+
+#### M11c-5 Screen UMG tactical UI
+- `UTacticalHUDWidget`: attack panel (target/power/apex/flight/net/bounds verdict/timing bar),
+  full 13+1 set-tactic picker (四号位高球 … 背飞, 自由轨迹) with category / attacker / apex /
+  flight / risk, and an 8-choice defense panel (单人/双人拦网、封直线/斜线、后排直线/斜线、
+  常规救球、倒地救球). Keyboard (WASD/arrows) and mouse both work; Esc/RMB cancel.
+- Set confirmation registers the play with the GameMode (`SetActiveSetPlay`) so the
+  selected attacker runs up per tactic; Team A/B mirrors use one data table.
+
+#### M11c-6 Ball structure & HUD polish
+- Ball root is the sphere mesh (0.21 scale) with the band as a child with compensating
+  scale — fixes the M11c-6 physics regression (ProjectileMovement sweep requires an Actor
+  root; non-root mesh fell through the floor / never moved). Rotation follows velocity,
+  pattern rotates with the ball.
+- Licensed V200W slots only apply when BOTH mesh and material are valid (user-supplied,
+  ASSET_LICENSE.md); missing assets fall back to the un-branded yellow/blue ball, never a
+  Missing Package. UI label stays "比赛用球".
+- RotationWidget safe offset (200+32 px from the right edge) and a compact layered
+  scoreboard keep 1280×720/1600×900/1920×1080 fully readable.
+
+#### M11c-7 Tests, stress, package & docs
+- Automation tests grown to 55 (ServeDoesNotConsumeTeamTouch … HUDSafeZoneAt1280x720 +
+  MatchFlowFiveSets): 55 passed / 0 failed.
+- `-TacticalTest` (non-Shipping): real rally → planning window #1 cancel (restores
+  Normal + TimeDilation=1) → window #2 Attack plan + perfect shot (ball moved) →
+  window #3 Set plan (13+1 picker screenshot) + perfect shot — PASS, then quit.
+- `-RematchStress`: 5 full rematch cycles with `[DevAudit]` proving court/arena/ball/
+  officials/rotation widget/scoreboard = 1 each, 12 chars, and a constant valid-actor
+  count (PendingKill excluded).
+- Win64 Development package rebuilt to `Dist\Windows\SpikeElite.exe` and smoke-tested
+  (menu/Chinese font/arena/ball/officials/HUD/trajectory + QuickMatch + Rematch).
+
+
 ### Milestone M11b — International arena, officials, rotation HUD, visible procedural limbs, tactical shot & dive systems
 
 Verified: 27 automation tests pass; `-QuickMatch -devauto -FastFlow -SEED=1/42/4242`

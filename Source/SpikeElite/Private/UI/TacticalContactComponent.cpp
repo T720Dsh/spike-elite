@@ -517,5 +517,92 @@ void UTacticalContactComponent::HandleDefensePicked(int32 Index)
 	ConfirmDefensePlan();
 }
 
+#if !UE_BUILD_SHIPPING
+bool UTacticalContactComponent::DevTacticalStep(int32& PhaseOut, int32 SetPlayIndex,
+	const FVector& TargetOverride, float Power, float FlightTime,
+	bool bCancel, bool bConfirm, bool bExecute)
+{
+	PhaseOut = 0;
+	if (State == ETacticalState::TacticalPlanning) { PhaseOut = 1; }
+	else if (State == ETacticalState::TacticalArmed) { PhaseOut = 2; }
+	else { return false; }
 
+	if (PhaseOut == 1)
+	{
+		if (SetPlayIndex >= 0 && PendingTouchType == EBallTouchType::Set
+			&& SESetPlays::GetPlays().IsValidIndex(SetPlayIndex))
+		{
+			SelectedPlay = SetPlayIndex;
+			const FSetPlayDefinition& Play = SESetPlays::GetPlays()[SetPlayIndex];
+			Intent.TargetLocation = SESetPlays::MirrorLocal(Play.TargetLocal, Pawn->TeamSide);
+			Intent.DesiredFlightTime = Play.DesiredFlightTime;
+			if (TacticalUI) { TacticalUI->UpdateSetList(SelectedPlay); }
+		}
+		else if (!TargetOverride.IsZero())
+		{
+			Intent.TargetLocation = TargetOverride;
+		}
+		if (Power > 0.f) { Intent.Power = FMath::Clamp(Power, 0.15f, 1.f); }
+		if (FlightTime > 0.f) { Intent.DesiredFlightTime = FMath::Clamp(FlightTime, 0.3f, 2.5f); }
+		RebuildPreview();
 
+		if (bCancel)
+		{
+			CancelShot();
+		}
+		if (bConfirm)
+		{
+			// Mirror the TickPlanning LMB path: a confirmed SET must register the
+			// selected tactic with the GameMode so the attacker run-up follows the
+			// play (M11c-5), otherwise the armed phase fires a "generic" set.
+			if (PendingTouchType == EBallTouchType::Set && SelectedPlay >= 0 && GM.IsValid())
+			{
+				GM->SetActiveSetPlay(SelectedPlay);
+			}
+			EnterArmed();
+		}
+	}
+	else if (PhaseOut == 2 && bCancel)
+	{
+		// Dev harnesses must be able to dismiss an armed shot after capturing
+		// its UI.  Previously bCancel only worked during planning, which left
+		// the tactical overlay visible in every later ShotSuite frame.
+		CancelShot();
+	}
+	else if (PhaseOut == 2 && bExecute)
+	{
+		// Perfect timing: TimingError strictly zero (M11c-4 solver guarantees
+		// the preview and the executed shot share the same InitialVelocity).
+		ExecuteTimedShot(0.f);
+	}
+	return true;
+}
+
+void UTacticalContactComponent::DevForcePlanning(EBallTouchType Type)
+{
+	if (State == ETacticalState::Normal)
+	{
+		EnterPlanning(Type);
+	}
+}
+
+void UTacticalContactComponent::DevForceDefensePlanning()
+{
+	if (State == ETacticalState::Normal)
+	{
+		EnterDefensePlanning();
+	}
+}
+
+void UTacticalContactComponent::DevConfirmDefense()
+{
+	if (State == ETacticalState::DefensePlanning)
+	{
+		ConfirmDefensePlan();
+		// The -ShotSuite only wants the panel captured; it must not leave a
+		// player-chosen defense plan in place (that would override the AI's
+		// natural dive/block decision for the rest of the match).
+		if (GM.IsValid()) { GM->SetPlayerDefensePlan(EVolleyballDefensePlan::NoPlan); }
+	}
+}
+#endif

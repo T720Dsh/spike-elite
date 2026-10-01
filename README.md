@@ -67,6 +67,13 @@
 - [x] M11b-4 战术慢动作 + 虚线球路预览（真实弹道积分、界内/触网/出界判定）
 - [x] M11b-5 数据驱动二传战术（13 种 + 自由轨迹）、真实拦网（不计触球、可连续触球、打手出界）、倒地救球（扑救/恢复门）
 - [x] M11b-6 比赛用球（无品牌黄蓝占位 + 授权资产插槽）、观众密度三档、性能心跳、27 项自动化测试、Win64 打包冒烟
+- [x] M11c-1 发球球权纠错：ServeFlight 期间禁止本方触球、发球不占三次触球、发球站位端线外（X=±1150~1300）
+- [x] M11c-2 权威轮转：ERotSlot P1~P6 槽位坐标、前后排判定、side-out 仅换发队顺时针轮转、轮转索引 1~6 循环
+- [x] M11c-3 真实倒地救球生命周期：NetCross 阈值 5cm、Dive State None→Approach→Active(0.45s)→Recovery、[DiveAttempt]/[DiveSave]/[DiveMiss] 日志
+- [x] M11c-4 战术同源求解器：BuildShotSolution(Start,Intent,TimingError) 单一实现、Power 即时改虚线、Perfect 零误差、真实时间 DeltaTime
+- [x] M11c-5 屏幕 UMG 战术界面：攻击/13+1 二传/8 项防守决策面板、EVolleyballDefensePlan、FSetPlayDefinition 数据驱动
+- [x] M11c-6 球物理回归修复（Mesh 为根组件 + BandMesh 子级补偿缩放）、授权球插槽 fallback、RotationWidget/Scoreboard 分辨率适配
+- [x] M11c-7 测试收口：55 项自动化测试 0 failed、-TacticalTest 战术功能验收、5 次 Rematch 压力、五局三胜状态机测试、全新 Win64 打包与冒烟
 - [ ] 战术 AI 完整化（后排进攻细化、自由人）、外部角色动画模型、网络同步
 
 下一步具体行动见 [docs/05-roadmap.md](docs/05-roadmap.md)。
@@ -77,6 +84,10 @@
 
 - 发布页：**<https://github.com/T720Dsh/spike-elite/releases>**
 - 直链：<https://github.com/T720Dsh/spike-elite/releases/download/v1.0.0/SpikeElite-v1.0.0-win64.zip>（约 283MB）
+
+> 当前 GitHub Release v1.0.0 为 M11b 里程碑构建（约 283MB）。M11c 规则/战术/场馆收口后的新构建位于仓库
+> `Dist\Windows\SpikeElite.exe`（本地打包产物，不入 Git）。如需面向玩家的新版"解压即玩"包，请在
+> [Releases](https://github.com/T720Dsh/spike-elite/releases) 发布新版本——M11c 未自动推送远程。
 
 **运行步骤：**
 1. 解压 `SpikeElite-v1.0.0-win64.zip` 到任意目录（绿色版，免安装）。

@@ -148,6 +148,7 @@ public:
 	/** Convenience getters for the GameMode (reach/phase gates). */
 	bool IsDiving() const { return DiveState.IsActive(); }
 	bool IsDiveRecovering() const { return DiveState.IsRecovering(); }
+	bool WasDiveSaveRecorded() const { return DiveState.bSaveRecorded; }
 
 	/** M11c-1: set by the GameMode while this player is the authorized server.
 	 *  While true, movement bounds widen to the service zone (X up to ±1550,

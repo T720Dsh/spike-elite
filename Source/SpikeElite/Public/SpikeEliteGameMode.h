@@ -64,6 +64,11 @@ public:
 	float GetServeDeadlineRemaining() const { return ServeDeadlineTimer; }
 	AVolleyballBall* GetBall() const { return Ball; }
 
+	/** M11c-7: -RematchStress audit. Logs authoritative singleton/roster counts
+	 *  (court/arena/ball/officials/rotation widget/scoreboard/chars) plus the
+	 *  world's valid-actor count (PendingKill excluded), once per run index. */
+	void DevAuditActors(int32 RunIndex);
+
 	/** Build the authoritative rotation snapshot from the current rosters. */
 	void BuildRotationView(FRotationViewState& Out) const;
 
@@ -126,6 +131,13 @@ public:
 	EVolleyballTeam GetPossessingTeam() const { return RallyState.PossessingTeam; }
 	int32 GetTouchCount() const { return RallyState.TouchCount; }
 	int32 GetLastTouchPlayerIndex() const { return RallyState.LastTouchPlayerIndex; }
+	EVolleyballTeam GetLastTouchTeam() const { return RallyState.LastTouchTeam; }
+	EBallTouchType GetLastTouchType() const { return RallyState.LastTouchType; }
+	bool GetServeCrossedNet() const { return RallyState.bServeCrossedNet; }
+	const TArray<TObjectPtr<ASpikeEliteCharacter>>& GetTeamPlayers(EVolleyballTeam Team) const
+	{
+		return (Team == EVolleyballTeam::TeamA) ? TeamAPlayers : TeamBPlayers;
+	}
 	const FString& GetRallyResultText() const { return RallyResultText; }
 	float GetRallyResultDisplaySeconds() const { return RallyResultDisplayTimer; }
 

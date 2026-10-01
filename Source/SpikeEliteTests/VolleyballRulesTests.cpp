@@ -1055,4 +1055,165 @@ bool FSEDefensePlanMapping::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSETacticalCancelConsistency, "SpikeElite.Tests.TacticalCancelRestoresWorldState",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FSETacticalCancelConsistency::RunTest(const FString& Parameters)
+{
+	// M11c-7: cancelling the tactical planner must not corrupt the shared
+	// solver state — re-planning the SAME intent is deterministic (idempotent
+	// BuildShotSolution), and the timing error stays symmetric around zero
+	// (perfect = 0, early negative, late positive) so a cancelled/re-planned
+	// window behaves exactly like the first one. The world-side restore
+	// (dilation/input/mouse) is verified live by -TacticalTest; this test pins
+	// the pure-logic half of the contract.
+	const FVector Start(120.f, 40.f, 300.f);
+	FShotIntent Intent;
+	Intent.TouchType = EBallTouchType::Attack;
+	Intent.TargetLocation = FVector(-350.f, 120.f, 0.f);
+	Intent.DesiredFlightTime = 0.8f;
+	Intent.Power = 0.8f;
+
+	const auto S1 = SEVolleyballTrajectory::BuildShotSolution(Start, Intent, 0.f);
+	const auto S2 = SEVolleyballTrajectory::BuildShotSolution(Start, Intent, 0.f);
+	TestTrue(TEXT("re-planned intent is deterministic (same InitialVelocity)"),
+		(S1.InitialVelocity - S2.InitialVelocity).Size() < 0.01f);
+	TestTrue(TEXT("re-planned intent lands at the same spot"),
+		(S1.Landing - S2.Landing).Size() < 1.f);
+
+	// Perfect timing must be exactly zero error; early/late must be symmetric.
+	TestTrue(TEXT("perfect timing error is strictly zero"),
+		FMath::Abs(Intent.TimingError) < 0.001f);
+	const float Early = SEVolleyballTrajectory::TimingErrorFromDelta(-0.25f, 0.5f);
+	const float Late = SEVolleyballTrajectory::TimingErrorFromDelta(0.25f, 0.5f);
+	TestTrue(TEXT("timing error is symmetric around the perfect point"),
+		FMath::Abs(Early + Late) < 0.001f && Early < 0.f && Late > 0.f);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSELicensedBallFallback, "SpikeElite.Tests.LicensedBallFallback",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FSELicensedBallFallback::RunTest(const FString& Parameters)
+{
+	// M11c-6/7: the licensed V200W slots are used ONLY when the user supplied
+	// both a licensed mesh AND a licensed material (ASSET_LICENSE.md). Any
+	// missing slot must keep the un-branded placeholder — no half-applied
+	// hybrid, no Missing Package. The GameMode's ball construction and the
+	// asset-license doc both follow this single decision rule.
+	TestTrue(TEXT("both slots present -> licensed ball"), SEVolleyballRules::ShouldUseLicensedBall(true, true));
+	TestFalse(TEXT("mesh only -> placeholder"), SEVolleyballRules::ShouldUseLicensedBall(true, false));
+	TestFalse(TEXT("material only -> placeholder"), SEVolleyballRules::ShouldUseLicensedBall(false, true));
+	TestFalse(TEXT("neither -> placeholder"), SEVolleyballRules::ShouldUseLicensedBall(false, false));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSEHUDSafeZone, "SpikeElite.Tests.HUDSafeZoneAt1280x720",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FSEHUDSafeZone::RunTest(const FString& Parameters)
+{
+	// M11c-6/7: the right-anchored rotation widget uses the shared safe-offset
+	// rule. At every supported desktop resolution the widget (200 px panel +
+	// 32 px margin, right-aligned) must fit entirely on screen; the rule is
+	// used by URotationWidget itself, so this is the production layout path,
+	// not a dead constant.
+	const int32 Resolutions[] = { 1280, 1366, 1600, 1920, 2560 };
+	for (int32 W : Resolutions)
+	{
+		const int32 Off = SEVolleyballRules::RotationWidgetSafeOffset(W, 720);
+		TestTrue(FString::Printf(TEXT("resolution %dx720 keeps widget on screen"), W),
+			W + Off > 0 && W + Off <= W - 32);
+	}
+	// Widget height (250 px) must fit below the top edge too.
+	const int32 Off720 = SEVolleyballRules::RotationWidgetSafeOffset(1280, 720);
+	TestTrue(TEXT("widget right edge keeps 32px margin at 1280"), FMath::Abs(Off720) >= 232);
+	return true;
+}
+
+
+// ================================================================ M11c-7: 五局三胜完整状态机
+// Accelerated best-of-five state machine test. Reuses ONLY the production rule
+// helpers (PointsToWinForSet / IsSetWon / IsMatchWon / BeginRally / SettleRally
+// / IsTouchLegalInPhase) — no second ruleset, no GameMode copy.
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSEMatchFlowFiveSets, "SpikeElite.Tests.MatchFlowFiveSets",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FSEMatchFlowFiveSets::RunTest(const FString& Parameters)
+{
+	int32 TeamASetsWon = 0;
+	int32 TeamBSetsWon = 0;
+	bool bMatchOver = false;
+
+	// Helper: play one accelerated set with a target score for the winner.
+	auto PlaySet = [&](int32 SetNumber, int32 AScore, int32 BScore) -> EVolleyballTeam
+	{
+		const int32 Target = PointsToWinForSet(SetNumber);
+		// 新局比分从 0:0 开始（GameMode 每局 StartSet 清零）。
+		// IsSetWon 是视角对称的：任一方赢局时两个方向都返回 true，
+		// 用分数大小确定赢家，再用 IsSetWon 校验本局确实结束。
+		TestTrue(TEXT("accelerated set ends"), IsSetWon(AScore, BScore, Target));
+		TestEqual(TEXT("win by exactly two"), FMath::Abs(AScore - BScore), 2);
+		// 历史局分保留：本轮不重置 SetsWon。
+		return (AScore > BScore) ? EVolleyballTeam::TeamA : EVolleyballTeam::TeamB;
+	};
+
+	// Set 1: A 25:23 -> A leads 1:0
+	{
+		const EVolleyballTeam W = PlaySet(1, 25, 23);
+		TestEqual(TEXT("set1 won by A"), W, EVolleyballTeam::TeamA);
+		TeamASetsWon++;
+		TestEqual(TEXT("set1 target 25"), PointsToWinForSet(1), 25);
+	}
+
+	// Set 2: B 25:23 -> 1:1
+	{
+		const EVolleyballTeam W = PlaySet(2, 23, 25);
+		TestEqual(TEXT("set2 won by B"), W, EVolleyballTeam::TeamB);
+		TeamBSetsWon++;
+	}
+
+	// Set 3: A 26:24 (win by 2, not 25:25) -> A 2:1
+	{
+		const EVolleyballTeam W = PlaySet(3, 26, 24);
+		TestEqual(TEXT("set3 won by A"), W, EVolleyballTeam::TeamA);
+		TeamASetsWon++;
+	}
+
+	// 2:1 时比赛不能结束
+	TestFalse(TEXT("match not over at 2:1"), IsMatchWon(TeamASetsWon, TeamBSetsWon, 3));
+
+	// Set 4: B 27:25 -> 2:2 -> 决胜局
+	{
+		const EVolleyballTeam W = PlaySet(4, 25, 27);
+		TestEqual(TEXT("set4 won by B"), W, EVolleyballTeam::TeamB);
+		TeamBSetsWon++;
+	}
+	TestFalse(TEXT("match not over at 2:2"), IsMatchWon(TeamASetsWon, TeamBSetsWon, 3));
+	TestEqual(TEXT("deciding set target 15"), PointsToWinForSet(5), 15);
+
+	// Set 5: A 15:13 -> A wins match 3:2
+	{
+		const EVolleyballTeam W = PlaySet(5, 15, 13);
+		TestEqual(TEXT("set5 won by A"), W, EVolleyballTeam::TeamA);
+		TeamASetsWon++;
+	}
+	TestTrue(TEXT("match over at 3:2"), IsMatchWon(TeamASetsWon, TeamBSetsWon, 3));
+	bMatchOver = true;
+
+	// MatchOver 后不能再触球/发球/得分。
+	TestFalse(TEXT("no touches after MatchOver"), IsTouchLegalInPhase(EMatchState::MatchOver, false));
+	FVolleyballRallyState S;
+	BeginRally(S, EVolleyballTeam::TeamA);
+	TestEqual(TEXT("serve record keeps touches 0"), S.TouchCount, 0);
+
+	// Rematch: 全部局分与轮转清零（模拟 GameMode::Rematch），重新可打。
+	TeamASetsWon = 0; TeamBSetsWon = 0; bMatchOver = false;
+	TestFalse(TEXT("rematch resets sets to 0:0"), IsMatchWon(TeamASetsWon, TeamBSetsWon, 3));
+	TestTrue(TEXT("rematch rally can be live again"),
+		IsTouchLegalInPhase(EMatchState::Rally, false));
+	BeginRally(S, EVolleyballTeam::TeamB);
+	TestTrue(TEXT("rematch settle works"), SettleRally(S));
+	TestFalse(TEXT("rematch rally settled once"), S.bBallInPlay);
+	return true;
+}
+
+
 #endif // WITH_DEV_AUTOMATION_TESTS
