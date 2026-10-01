@@ -6,7 +6,9 @@
 #include "Components/SpotLightComponent.h"
 #include "Components/PointLightComponent.h"
 #include "Components/SkyLightComponent.h"
+#include "Components/TextRenderComponent.h"
 #include "Engine/StaticMesh.h"
+#include "Engine/Font.h"
 #include "Materials/MaterialInterface.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "UObject/ConstructorHelpers.h"
@@ -95,6 +97,49 @@ void AVolleyballArena::BuildHall(UStaticMesh* Cube)
 	// A few luminous strips with a cooler tint near the floor line.
 	LedBoards->AddInstance(FTransform(FRotator::ZeroRotator, FVector( HallHalfLength - 60.f, 0, 140.f), FVector(1.4f, 28.f, 1.1f)));
 	LedBoards->AddInstance(FTransform(FRotator::ZeroRotator, FVector(-HallHalfLength + 60.f, 0, 140.f), FVector(1.4f, 28.f, 1.1f)));
+
+	// M11d-5: two-tone acoustic panels on the side walls (arena look, not a flat
+	// grey box). No collision, static colour — cheap, visible, packaged-safe.
+	const FLinearColor AcousticCol(0.13f, 0.20f, 0.30f);
+	for (int32 Side = 0; Side < 2; ++Side)
+	{
+		const float Y = (Side == 0) ? (HallHalfWidth - 40.f) : -(HallHalfWidth - 40.f);
+		for (int32 Band = 0; Band < 3; ++Band)
+		{
+			const float X = -1200.f + Band * 850.f;
+			UStaticMeshComponent* P = CreateDefaultSubobject<UStaticMeshComponent>(*FString::Printf(TEXT("Acoustic_%d_%d"), Side, Band));
+			P->SetupAttachment(Root);
+			P->SetStaticMesh(Cube);
+			P->SetRelativeScale3D(FVector(800.f/100.f, 6.f/100.f, 420.f/100.f));
+			P->SetRelativeLocation(FVector(X, Y, 700.f));
+			P->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+			if (auto* M = ArenaMakeMID(P, AcousticCol)) P->SetMaterial(0, M);
+		}
+	}
+
+	// M11d-5: un-branded arena signage on the end walls (SPIKE ELITE / PLAY FAIR,
+	// original text only — no commercial trademarks).
+	static ConstructorHelpers::FObjectFinder<UFont> RobotoFont(TEXT("/Engine/EngineFonts/Roboto"));
+	auto MakeSign = [this](const TCHAR* N, const FString& Text, const FVector& Loc, const FRotator& Rot)
+	{
+		UTextRenderComponent* T = CreateDefaultSubobject<UTextRenderComponent>(N);
+		T->SetupAttachment(Root);
+		T->SetRelativeLocation(Loc);
+		T->SetRelativeRotation(Rot);
+		T->SetWorldSize(70.f);
+		T->SetTextRenderColor(FLinearColor(0.75f, 0.82f, 0.95f).ToFColor(true));
+		T->SetHorizontalAlignment(EHTA_Center);
+		T->SetVerticalAlignment(EVRTA_TextCenter);
+		if (RobotoFont.Succeeded()) { T->SetFont(RobotoFont.Object); }
+		T->SetText(FText::FromString(Text));
+		T->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		T->SetCastShadow(false);
+		return T;
+	};
+	MakeSign(TEXT("SignA"), TEXT("SPIKE ELITE"), FVector(HallHalfLength - 150.f, 0.f, 1100.f), FRotator(0.f, 90.f, 0.f));
+	MakeSign(TEXT("SignB"), TEXT("SPIKE ELITE"), FVector(-(HallHalfLength - 150.f), 0.f, 1100.f), FRotator(0.f, -90.f, 0.f));
+	MakeSign(TEXT("SignC"), TEXT("PLAY FAIR"), FVector(0.f, HallHalfWidth - 150.f, 900.f), FRotator(0.f, 0.f, 0.f));
+	MakeSign(TEXT("SignD"), TEXT("PLAY FAIR"), FVector(0.f, -(HallHalfWidth - 150.f), 900.f), FRotator(0.f, 180.f, 0.f));
 }
 
 void AVolleyballArena::BuildLighting()
