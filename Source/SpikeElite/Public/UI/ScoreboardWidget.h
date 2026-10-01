@@ -9,15 +9,18 @@ class UTextBlock;
 class UImage;
 
 /**
- * In-match scoreboard. Pure C++ UMG — no editor assets.
+ * In-match scoreboard — M11d-3 broadcast layout.
  *
- * M10: shows the match phase, the current possessing team + touch count
- * ("A 2/3"), a legal serve hint ("按 E 发球") and a rally-result banner
- * (IN/OUT/four touches/double touch/score) that persists ~1.5 s.
+ * Top-centre mirrored scoreboard: TEAM A (blue) | SET + sets won | TEAM B
+ * (orange), with the serving team flagged by a gold dot. Below it an
+ * independent stage badge (准备发球 / 裁判检查 / 允许发球 / 回合进行 /
+ * 局结束 / 比赛结束), three touch-count dots, and a legal-serve hint when
+ * applicable. Rally results appear as a short centre banner (1.0–1.5 s fade).
+ * The controls-help strip is separated from the scoreboard and collapses
+ * after a few seconds.
  *
- * M11a: semi-transparent backdrop for readability over the bright arena;
- * full controls help line that auto-collapses after a few seconds; every
- * SetText is guarded so identical frames never rewrite widget text.
+ * All data still comes from GameMode via UpdateScore; the widget never keeps
+ * its own copy of the score. SetText is dirty-gated as before.
  */
 UCLASS()
 class SPIKEELITE_API UScoreboardWidget : public UUserWidget
@@ -37,39 +40,45 @@ public:
 		const FString& RallyResult);
 
 protected:
-	UPROPERTY()
-	TObjectPtr<UTextBlock> Text_Set;
+	// Mirrored scoreboard
+	UPROPERTY() TObjectPtr<UImage> Backdrop;
+	UPROPERTY() TObjectPtr<UImage> BlockA;
+	UPROPERTY() TObjectPtr<UImage> BlockB;
+	UPROPERTY() TObjectPtr<UTextBlock> Text_TeamA;
+	UPROPERTY() TObjectPtr<UTextBlock> Text_TeamB;
+	UPROPERTY() TObjectPtr<UTextBlock> Text_ScoreA;
+	UPROPERTY() TObjectPtr<UTextBlock> Text_ScoreB;
+	UPROPERTY() TObjectPtr<UTextBlock> Text_Set;
+	UPROPERTY() TObjectPtr<UTextBlock> Text_Sets;
+	UPROPERTY() TObjectPtr<UImage> ServeDotA;
+	UPROPERTY() TObjectPtr<UImage> ServeDotB;
 
-	UPROPERTY()
-	TObjectPtr<UTextBlock> Text_Score;
+	// Stage badge + touch dots + serve hint
+	UPROPERTY() TObjectPtr<UImage> StageBadge;
+	UPROPERTY() TObjectPtr<UTextBlock> Text_Stage;
+	UPROPERTY() TObjectPtr<UImage> Dot0;
+	UPROPERTY() TObjectPtr<UImage> Dot1;
+	UPROPERTY() TObjectPtr<UImage> Dot2;
+	UPROPERTY() TObjectPtr<UTextBlock> Text_ServeHint;
 
-	UPROPERTY()
-	TObjectPtr<UTextBlock> Text_Sets;
+	// Rally-result centre banner
+	UPROPERTY() TObjectPtr<UImage> Banner;
+	UPROPERTY() TObjectPtr<UTextBlock> Text_Banner;
 
-	UPROPERTY()
-	TObjectPtr<UTextBlock> Text_Ball;
+	// Controls help (separated from the scoreboard)
+	UPROPERTY() TObjectPtr<UTextBlock> Text_Help;
 
-	UPROPERTY()
-	TObjectPtr<UTextBlock> Text_Help;
-
-	UPROPERTY()
-	TObjectPtr<UTextBlock> Text_Phase;
-
-	UPROPERTY()
-	TObjectPtr<UTextBlock> Text_Possession;
-
-	UPROPERTY()
-	TObjectPtr<UTextBlock> Text_RallyResult;
-
-	UPROPERTY()
-	TObjectPtr<UImage> Backdrop;
-
-	/** M11a: seconds until the full controls help collapses to the short line. */
 	float HelpTimer = 5.0f;
 	bool bHelpCollapsed = false;
+	float BannerTimer = -1.f;
+	float BannerFade = 0.f;
 
-	// M11a: last pushed strings — skip SetText when nothing actually changed.
-	FString LastSet, LastScore, LastSets, LastPhase, LastPossession, LastBall, LastRallyResult, LastHelp;
+	FString LastSet, LastScoreA, LastScoreB, LastSets, LastStage, LastTouch, LastHint, LastRally, LastHelp;
+	FString LastPhase = TEXT("NONE");
+	FString LastServeSide = TEXT("NONE");
+	int32 LastTouchCount = -1;
 
 	void BuildWidgetTree();
+	void RefreshTouchDots(int32 Count);
+	void UpdateBanner(float InDeltaTime);
 };

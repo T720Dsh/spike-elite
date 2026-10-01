@@ -1374,6 +1374,14 @@ void ASpikeElitePlayerController::OnMatchOver(const TArray<int32>& ScoresA, cons
 	// (buttons/mouse/keyboard are driven by this controller, not the world tick).
 	SetPause(true);
 	MenuState = EMenuState::MatchOver;
+	// The result card is a final broadcast state, not another modal stacked on
+	// top of live match instrumentation.  Hiding these also prevents a stale
+	// score/rotation readout from competing with the final per-set result.
+	if (Scoreboard) { Scoreboard->SetVisibility(ESlateVisibility::Collapsed); }
+	if (ASpikeEliteGameMode* GM = Cast<ASpikeEliteGameMode>(UGameplayStatics::GetGameMode(this)))
+	{
+		if (GM->GetRotationWidget()) { GM->GetRotationWidget()->SetVisibility(ESlateVisibility::Collapsed); }
+	}
 	BuildMatchEnd();
 	if (MatchEnd) { MatchEnd->SetResult(Winner, ScoresA, ScoresB); }
 	SetUIInputMode(MatchEnd);

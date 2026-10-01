@@ -219,6 +219,7 @@ void ASpikeEliteGameMode::StartMatch()
 			HC->HomePosition = PosA[0];
 			HC->PlayerId = 0;
 			HC->JerseyNumber = 1;
+			HC->RefreshJerseyNumberVisual();
 			HC->bServiceZoneActive = false;
 			HC->SetActorEnableCollision(true);
 			HC->SetActorLocation(PosA[0] + FVector(0,0,100.0f));
@@ -229,7 +230,8 @@ void ASpikeEliteGameMode::StartMatch()
 	// Bots are spawned deferred so TeamSide/bIsBot/HomePosition are set BEFORE
 	// BeginPlay runs ApplyJerseyColor(); otherwise every bot would keep the
 	// default Team A jersey colour.
-	auto SpawnBot = [&](const FVector& Loc, const FRotator& Rot, int32 Side, const FVector& Home) -> ASpikeEliteCharacter*
+	auto SpawnBot = [&](const FVector& Loc, const FRotator& Rot, int32 Side, const FVector& Home,
+		int32 InPlayerId, int32 InJerseyNumber) -> ASpikeEliteCharacter*
 	{
 		ASpikeEliteCharacter* Bot = World->SpawnActorDeferred<ASpikeEliteCharacter>(
 			ASpikeEliteCharacter::StaticClass(),
@@ -241,6 +243,8 @@ void ASpikeEliteGameMode::StartMatch()
 			Bot->bIsBot = true;
 			Bot->TeamSide = Side;
 			Bot->HomePosition = Home;
+			Bot->PlayerId = InPlayerId;
+			Bot->JerseyNumber = InJerseyNumber;
 			Bot->bTouchArmed = true;
 			UGameplayStatics::FinishSpawningActor(Bot, FTransform(Rot.Quaternion(), Loc, FVector(1.f)));
 			// Deferred-spawned Characters can come up with MovementMode=None
@@ -255,16 +259,14 @@ void ASpikeEliteGameMode::StartMatch()
 
 	for (int32 i = 1; i < 6; i++)
 	{
-		TeamAPlayers[i] = SpawnBot(PosA[i] + FVector(0,0,100.0f), FRotator(0,-90,0), 1, PosA[i]);
-		if (TeamAPlayers[i]) { TeamAPlayers[i]->PlayerId = i; TeamAPlayers[i]->JerseyNumber = i + 1; }
+		TeamAPlayers[i] = SpawnBot(PosA[i] + FVector(0,0,100.0f), FRotator(0,-90,0), 1, PosA[i], i, i + 1);
 	}
 	for (int32 i = 0; i < 6; i++)
 	{
 		// M11c-2: B mirrors BOTH axes so the left/right semantics stay correct
 		// (B faces the net from -X, its "right" is +Y).
 		const FVector BPos(-PosA[i].X, -PosA[i].Y, 0.0f);
-		TeamBPlayers[i] = SpawnBot(BPos + FVector(0,0,100.0f), FRotator(0,90,0), -1, BPos);
-		if (TeamBPlayers[i]) { TeamBPlayers[i]->PlayerId = 6 + i; TeamBPlayers[i]->JerseyNumber = 7 + i; }
+		TeamBPlayers[i] = SpawnBot(BPos + FVector(0,0,100.0f), FRotator(0,90,0), -1, BPos, 6 + i, 7 + i);
 	}
 
 	// Scoreboard.
@@ -290,6 +292,7 @@ void ASpikeEliteGameMode::StartMatch()
 			RotationWidget = CreateWidget<URotationWidget>(PC, URotationWidget::StaticClass());
 			if (RotationWidget) { RotationWidget->AddToViewport(20); }
 		}
+		if (RotationWidget) { RotationWidget->SetVisibility(ESlateVisibility::Visible); }
 	}
 
 	TeamARotation = 1;
@@ -329,6 +332,7 @@ void ASpikeEliteGameMode::CleanupMatch()
 	TeamAPlayers.Reset();
 	TeamBPlayers.Reset();
 	if (Scoreboard) { Scoreboard->RemoveFromParent(); Scoreboard = nullptr; }
+	if (RotationWidget) { RotationWidget->SetVisibility(ESlateVisibility::Collapsed); }
 
 	// M11: any un-settled rally at cleanup is explicitly cancelled (no point).
 	// This keeps ERallyEndReason::Cancelled a real, exercised state instead of a
@@ -1875,6 +1879,9 @@ void ASpikeEliteGameMode::BuildRotationView(FRotationViewState& Out) const
 {
 	Out.RotationIndex = GetServingRotation();   // per-team, wraps 1..6
 	Out.ServingTeam = ServingTeam;
+	Out.bJustRotated = (LastRotationServeTeam != EVolleyballTeam::None)
+		&& (LastRotationServeTeam != ServingTeam);
+	if (ServingTeam != EVolleyballTeam::None) { LastRotationServeTeam = ServingTeam; }
 
 	// Roster order IS the authoritative rotation: index 0 = P1 (back-right,
 	// the server), then P2/P3/P4 (front row), P5/P6.

@@ -124,6 +124,10 @@ struct FRotationViewState
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
 	EVolleyballTeam ServingTeam = EVolleyballTeam::TeamA;
 
+	/** True when this snapshot follows a side-out rotation (HUD shows 轮转). */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+	bool bJustRotated = false;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
 	TArray<FRotationSlotView> TeamA;
 
@@ -354,8 +358,10 @@ namespace SEVolleyballRules
 		EPhase Phase = EPhase::None;
 		float ActiveTimer = 0.f;
 		float RecoveryTimer = 0.f;
+		float ApproachTimer = 0.f;
 		bool bSaveRecorded = false;
 
+		static constexpr float ApproachTimeout = 1.5f;
 		static constexpr float ActiveWindow = 0.45f;
 		static constexpr float RecoveryDuration = 0.8f;
 
@@ -368,7 +374,11 @@ namespace SEVolleyballRules
 		/** Start of the lunge approach (already sprinting to the save point). */
 		void StartDive()
 		{
-			if (Phase == EPhase::None) { Phase = EPhase::Approach; }
+			if (Phase == EPhase::None)
+			{
+				Phase = EPhase::Approach;
+				ApproachTimer = ApproachTimeout;
+			}
 		}
 
 		/** Enter the extended-reach contact window when close to the save point. */
@@ -394,11 +404,24 @@ namespace SEVolleyballRules
 		}
 
 		/** Advance timers. Returns true when a phase transition happened this tick
-		 *  (Active timeout -> Recovery; Recovery end -> None). */
+		 *  (Approach timeout -> Recovery; Active timeout -> Recovery; Recovery end
+		 *  -> None). */
 		bool Tick(float DeltaSeconds)
 		{
 			bool bTransitioned = false;
-			if (Phase == EPhase::Active)
+			if (Phase == EPhase::Approach)
+			{
+				ApproachTimer -= DeltaSeconds;
+				if (ApproachTimer <= 0.f)
+				{
+					// The diver never reached the contact window — treat as a miss
+					// so the state machine can never dead-lock in Approach.
+					Phase = EPhase::Recovery;
+					RecoveryTimer = RecoveryDuration;
+					bTransitioned = true;
+				}
+			}
+			else if (Phase == EPhase::Active)
 			{
 				ActiveTimer -= DeltaSeconds;
 				if (ActiveTimer <= 0.f && !bSaveRecorded)
