@@ -1,6 +1,8 @@
 ﻿// SPDX-License-Identifier: MIT
 #include "Volleyball/VolleyballRules.h"
 
+DEFINE_LOG_CATEGORY(LogVolleyballRules);
+
 namespace SEVolleyballRules
 {
 	EVolleyballTeam DetermineScoringTeamOnLand(bool bInBounds, EVolleyballTeam LastTouchTeam, bool bLandedOnPositiveX)
@@ -137,6 +139,19 @@ namespace SEVolleyballRules
 		case ERallyEndReason::ServeFault:    return TEXT("发球失误");
 		case ERallyEndReason::Cancelled:     return TEXT("回合取消");
 		default:                             return TEXT("回合结束");
+		}
+	}
+
+	FString TouchTypeLabel(EBallTouchType Type)
+	{
+		switch (Type)
+		{
+		case EBallTouchType::Receive: return TEXT("Receive");
+		case EBallTouchType::Set:     return TEXT("Set");
+		case EBallTouchType::Attack:  return TEXT("Attack");
+		case EBallTouchType::Serve:   return TEXT("Serve");
+		case EBallTouchType::Block:   return TEXT("Block");
+		default:                      return TEXT("Unknown");
 		}
 	}
 

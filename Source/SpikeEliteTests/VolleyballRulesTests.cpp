@@ -781,4 +781,113 @@ bool FSEHUDRosterMatchesWorld::RunTest(const FString& Parameters)
 	return true;
 }
 
+// ---------------- M11c-3: real dive lifecycle (shared pure-logic state) ----------------
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSEDiveBallResetNoCross, "SpikeElite.Tests.BallResetDoesNotTriggerNetCross",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FSEDiveBallResetNoCross::RunTest(const FString& Parameters)
+{
+	// Reset/teleport re-seeds PrevX with the new ball X, so the next samples
+	// can never look like a crossing until the ball REALLY flies across X=0.
+	TestFalse(TEXT("reset on own side: same sample, no cross"),
+		SEVolleyballRules::DetectNetCross(1200.f, 1200.f));
+	TestFalse(TEXT("same side, still flying: no cross"),
+		SEVolleyballRules::DetectNetCross(1200.f, 300.f));
+	TestTrue(TEXT("real flight across the net: cross detected"),
+		SEVolleyballRules::DetectNetCross(1200.f, -70.f));
+	TestTrue(TEXT("real flight the other way: cross detected"),
+		SEVolleyballRules::DetectNetCross(-300.f, 400.f));
+	TestFalse(TEXT("tiny jitter around the plane is ignored"),
+		SEVolleyballRules::DetectNetCross(-3.f, 2.f));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSEDiveServeStart, "SpikeElite.Tests.ServeStartDoesNotTriggerDive",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FSEDiveServeStart::RunTest(const FString& Parameters)
+{
+	// During the serve flight (TouchCount 0, last touch = Serve, no crossing yet)
+	// the dive gate refuses; once the serve has crossed the net the gate opens.
+	FVolleyballRallyState RS;
+	SEVolleyballRules::RecordServeTouch(RS, EVolleyballTeam::TeamA, 0);
+	TestFalse(TEXT("serve flight blocks dives"),
+		SEVolleyballRules::IsDiveAllowedDuringFlight(RS));
+	RS.bServeCrossedNet = true;
+	TestTrue(TEXT("after legal serve crossing the dive gate opens"),
+		SEVolleyballRules::IsDiveAllowedDuringFlight(RS));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSEDiveActiveWindow, "SpikeElite.Tests.DivePosePersistsForActiveWindow",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FSEDiveActiveWindow::RunTest(const FString& Parameters)
+{
+	// The Active window lasts 0.45 s — the dive pose and extended reach must
+	// persist across many frames, not flash for a single frame.
+	SEVolleyballRules::FVolleyballDiveState D;
+	D.StartDive();
+	TestFalse(TEXT("approach has no touch yet"), D.CanTouch());
+	D.EnterActive();
+	for (int32 i = 0; i < 4; i++)
+	{
+		D.Tick(0.1f);
+		TestTrue(TEXT("still inside the active window after 0.4s"), D.IsActive());
+		TestTrue(TEXT("reach/touch still available inside the window"), D.CanTouch());
+	}
+	TestFalse(TEXT("pose must not be recovery yet"), D.IsRecovering());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSEDiveTouchInWindow, "SpikeElite.Tests.DiveCanTouchDuringActiveWindow",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FSEDiveTouchInWindow::RunTest(const FString& Parameters)
+{
+	SEVolleyballRules::FVolleyballDiveState D;
+	D.StartDive();
+	D.EnterActive();
+	TestTrue(TEXT("can touch during the active window"), D.CanTouch());
+	D.RecordSave();
+	TestFalse(TEXT("one save per dive window"), D.CanTouch());
+	TestTrue(TEXT("a save moves straight to recovery"), D.IsRecovering());
+	// Recovery still blocks after ticking part-way.
+	D.Tick(0.2f);
+	TestTrue(TEXT("recovery lasts until its timer expires"), D.IsRecovering());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSEDiveRecoveryGate, "SpikeElite.Tests.DiveRecoveryBlocksSecondDive",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FSEDiveRecoveryGate::RunTest(const FString& Parameters)
+{
+	SEVolleyballRules::FVolleyballDiveState D;
+	D.StartDive();
+	D.EnterActive();
+	D.Tick(0.5f);   // window expires with no save -> Miss -> Recovery
+	TestTrue(TEXT("expired window becomes recovery"), D.IsRecovering());
+	const auto PhaseBefore = D.Phase;
+	D.StartDive();   // must be a no-op while recovering
+	D.EnterActive(); // must be a no-op while recovering
+	TestEqual(TEXT("recovery blocks a second dive"), D.Phase, PhaseBefore);
+	D.Tick(0.9f);    // recovery (0.8s) finished
+	TestFalse(TEXT("recovery ends and re-arms normal movement"), D.IsRecovering());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSEDiveSaveLegal, "SpikeElite.Tests.DiveSaveProducesLegalReceive",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FSEDiveSaveLegal::RunTest(const FString& Parameters)
+{
+	// A dive save is recorded as a normal team touch (Receive) — the rules core
+	// must accept it as touch 1/3, proving saves are real touches, not stats.
+	FVolleyballRallyState RS;
+	SEVolleyballRules::BeginRally(RS, EVolleyballTeam::TeamB);
+	RS.bServeCrossedNet = true;
+	const ETouchResult R = SEVolleyballRules::EvaluateTouch(RS, EVolleyballTeam::TeamB, 4, EBallTouchType::Receive);
+	TestEqual(TEXT("dive save is an allowed team touch"), R, ETouchResult::Allowed);
+	TestEqual(TEXT("dive save counts as the first touch"), RS.TouchCount, 1);
+	TestEqual(TEXT("possessing team recorded for the save team"), RS.PossessingTeam, EVolleyballTeam::TeamB);
+	TestEqual(TEXT("last touch player is the diving player"), RS.LastTouchPlayerIndex, 4);
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

@@ -283,10 +283,19 @@ void ASpikeEliteCharacter::TickBot(float DeltaSeconds)
 	// ---- Touch: only the primary handler, and only via the GameMode ----
 	if (bIsPrimaryHandler)
 	{
-		// M11b-5c: begin the dive lunge when close to the save point.
-		if (AIBehavior == EAIBehavior::Dive && !bDiving && !bDiveRecovering && Dist < 150.f)
+		// M11c-3: begin the dive lunge when close to the save point, then enter
+		// the extended-reach Active window when really close. The window persists
+		// for 0.45 s (DiveState) instead of one frame, so the dive pose and reach
+		// bonus are actually visible and usable.
+		if (AIBehavior == EAIBehavior::Dive && DiveState.Phase == SEVolleyballRules::FVolleyballDiveState::EPhase::None)
 		{
-			bDiving = true;
+			DiveState.StartDive();
+			UE_LOG(LogVolleyballRules, Log, TEXT("[DiveAttempt] %s starts dive approach"), *GetName());
+		}
+		if (AIBehavior == EAIBehavior::Dive && DiveState.Phase == SEVolleyballRules::FVolleyballDiveState::EPhase::Approach && Dist < 90.f)
+		{
+			DiveState.EnterActive();
+			UE_LOG(LogVolleyballRules, Log, TEXT("[DiveActive] %s enters contact window (reach +90cm)"), *GetName());
 		}
 		// M11b-5: a blocker asks for a block (front-row gate inside), everyone
 		// else uses the normal touch path. TryTouchBall / TryBlockBall do the
@@ -418,19 +427,23 @@ void ASpikeEliteCharacter::NotifyContact(EBallTouchType Type)
 
 void ASpikeEliteCharacter::UpdateProceduralAnimation(float DeltaSeconds)
 {
-	// Dive recovery timing (dive itself is triggered by the GameMode later).
-	if (bDiving)
+	// M11c-3: dive lifecycle is driven by the shared FVolleyballDiveState.
+	// Tick advances the Active window (timeout -> Miss -> Recovery) and the
+	// Recovery timer (end -> None). A save is recorded by the GameMode when a
+	// real touch lands (RecordSave), which ends Active immediately.
+	if (DiveState.Phase != SEVolleyballRules::FVolleyballDiveState::EPhase::None)
 	{
-		DiveRecoveryTimer = 0.8f;   // short lunge window
-		bDiving = false;
-		bDiveRecovering = true;
-	}
-	if (bDiveRecovering)
-	{
-		DiveRecoveryTimer -= DeltaSeconds;
-		if (DiveRecoveryTimer <= 0.f)
+		const bool bTransitioned = DiveState.Tick(DeltaSeconds);
+		if (bTransitioned)
 		{
-			bDiveRecovering = false;
+			if (DiveState.IsRecovering())
+			{
+				UE_LOG(LogVolleyballRules, Log, TEXT("[DiveMiss] %s missed (active window expired) -> recovery"), *GetName());
+			}
+			else
+			{
+				UE_LOG(LogVolleyballRules, Log, TEXT("[DiveRecoveryEnd] %s recovery finished"), *GetName());
+			}
 		}
 	}
 
@@ -475,7 +488,15 @@ EAnimPose ASpikeEliteCharacter::ResolvePose(float DeltaSeconds)
 		}
 	}
 
-	if (bDiveRecovering) return EAnimPose::Recover;
+	// M11c-3: dive states drive the pose — Approach (low lunge run) and Active
+	// (extended-reach contact window) both show the dive lunge, Recovery shows
+	// the crouched recover. Pose is resolved BEFORE the state tick below so a
+	// transition this frame still renders the new pose (no one-frame flash).
+	if (DiveState.IsActive() || DiveState.Phase == SEVolleyballRules::FVolleyballDiveState::EPhase::Approach)
+	{
+		return EAnimPose::Dive;
+	}
+	if (DiveState.IsRecovering()) return EAnimPose::Recover;
 
 	// Raise hands: overhead while airborne (block prep), high otherwise.
 	if (RaiseHandsAmount > 0.05f)

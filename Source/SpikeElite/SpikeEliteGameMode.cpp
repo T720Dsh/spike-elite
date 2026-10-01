@@ -5,6 +5,41 @@
 static float GM_NetCrossWindow = 0.f;
 static float GM_NetCrossSpeed = 0.f;
 static float GM_PrevBallX = 0.f;
+
+/** M11c-3: every reset/teleport path must re-seed the dive net-cross tracker.
+ *  Without this, a re-spawned ball on one side with a stale PrevX from the
+ *  other side instantly looks like a net crossing (fake dive). Call after
+ *  ResetBall / serve placement / serve release / rally end / cleanup. */
+static void ResetNetCrossTracking(float BallX)
+{
+	GM_PrevBallX = BallX;
+	GM_NetCrossWindow = 0.f;
+	GM_NetCrossSpeed = 0.f;
+}
+
+/** M11c-3: a dive is only offered to a fast ball that has ALREADY completed a
+ *  legal net crossing (real flight across X=0), never during the serve flight
+ *  (touches=0, last touch = Serve) or before any crossing happened. */
+static bool IsDiveSituation(const FVolleyballRallyState& RS, bool bBallOnOwnSide, float BallZ, float Speed)
+{
+	if (!bBallOnOwnSide || GM_NetCrossWindow <= 0.f || GM_NetCrossSpeed <= 450.f)
+	{
+		return false;
+	}
+	// Serve flight: the serve is recorded as the last touch with TouchCount 0
+	// and no possession yet — receiving players use a normal receive, not a dive.
+	if (!SEVolleyballRules::IsDiveAllowedDuringFlight(RS))
+	{
+		return false;
+	}
+	// Height gate: a low ball (<=170 cm) that just crossed always needs a dive
+	// lunge; a mid-high fast ball (170..230 cm) needs one only when it is too
+	// fast to reach by moving (>750 cm/s). A ball above net height is reachable
+	// by normal movement - no dive.
+	if (BallZ > 230.f) { return false; }
+	if (BallZ > 170.f && Speed <= 600.f) { return false; }
+	return true;
+}
 #include "SpikeEliteCharacter.h"
 #include "SpikeElitePlayerController.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -25,7 +60,8 @@ static float GM_PrevBallX = 0.f;
 #include "Volleyball/MatchOfficialManager.h"
 #include "Blueprint/UserWidget.h"
 
-DEFINE_LOG_CATEGORY_STATIC(LogVolleyballRules, Log, All);
+// LogVolleyballRules is defined in VolleyballRules.cpp and declared in
+// VolleyballRules.h (shared by GameMode and Character).
 
 namespace
 {
@@ -138,8 +174,10 @@ void ASpikeEliteGameMode::StartMatch()
 	TossTimer = 0.0f;
 	InterRallyTimer = 0.0f;
 	NetTouchCooldown = 0.0f;
+	BlockerMissCooldown = 0.0f;
 	BallPrevX = 0.0f;
 	bNetContactLatched = false;
+	if (Ball) { ResetNetCrossTracking(Ball->GetActorLocation().X); }   // M11c-3: fresh dive tracker at StartMatch
 	RallyResultText.Empty();
 	RallyResultDisplayTimer = 0.0f;
 	SEVolleyballRules::BeginRally(RallyState, ServingTeam);
@@ -283,7 +321,7 @@ void ASpikeEliteGameMode::CleanupMatch()
 	// M11b-1: arena shell, court and ball are persistent across matches and are
 	// deliberately NOT destroyed here (Rematch reuses them; counts must stay
 	// Court=1 Ball=1 Arena=1). Only bots, the scoreboard and transient state go.
-	if (Ball) { Ball->ResetBall(FVector(0, 0, 400)); }
+	if (Ball) { Ball->ResetBall(FVector(0, 0, 400)); ResetNetCrossTracking(Ball->GetActorLocation().X); }
 	for (auto& P : TeamAPlayers) if (P && P->bIsBot) P->Destroy();
 	for (auto& P : TeamBPlayers) if (P) P->Destroy();
 	TeamAPlayers.Reset();
@@ -307,6 +345,7 @@ void ASpikeEliteGameMode::CleanupMatch()
 	TossTimer = 0.0f;
 	InterRallyTimer = 0.0f;
 	NetTouchCooldown = 0.0f;
+	BlockerMissCooldown = 0.0f;
 	BallPrevX = 0.0f;
 	bNetContactLatched = false;
 	bMatchActive = false;
@@ -399,18 +438,17 @@ void ASpikeEliteGameMode::Tick(float DeltaSeconds)
 			GetWorld() ? GetWorld()->GetActorCount() : 0);
 	} }
 
-	// M11b-5c: detect a fast ball crossing the net into the opposing side and
-	// keep a short dive window for the defending team (resets on any touch by
-	// TryTouchBall/DoTouch via EndRally... touch itself is handled elsewhere).
+	// M11c-3: detect a REAL net crossing (continuous flight across X=0, both
+	// samples on opposite sides). ResetNetCrossTracking re-seeds PrevX on every
+	// reset/teleport, so a re-spawned ball never fakes a crossing. The dive is
+	// only offered during a fast rally ball, NOT during the serve flight.
 	if (MatchState == EMatchState::Rally)
 	{
 		const float BallX = Ball->GetActorLocation().X;
-		if (GM_PrevBallX * BallX < 0.f && FMath::Abs(BallX) > 60.f)
+		if (SEVolleyballRules::DetectNetCross(GM_PrevBallX, BallX))
 		{
 			GM_NetCrossWindow = 0.6f;
 			GM_NetCrossSpeed = Ball->GetVelocity().Size2D();
-			// M11b-5c: a fast ball that just entered our half triggers one dive
-			// by the closest receiver (the same coordinator as regular receive).
 			if (GM_NetCrossSpeed > 600.f)
 			{
 				const EVolleyballTeam DefTeam = (BallX < 0.f) ? EVolleyballTeam::TeamB : EVolleyballTeam::TeamA;
@@ -418,10 +456,12 @@ void ASpikeEliteGameMode::Tick(float DeltaSeconds)
 				ASpikeEliteCharacter* R = nullptr;
 				if (DefTeam == EVolleyballTeam::TeamA) { R = TeamAPlayers.IsValidIndex(Recv) ? TeamAPlayers[Recv].Get() : nullptr; }
 				else { R = TeamBPlayers.IsValidIndex(Recv) ? TeamBPlayers[Recv].Get() : nullptr; }
-				if (R && R->bIsBot && !R->bDiveRecovering)
+				// M11c-3: the DiveAttempt log belongs to the character's lunge
+				// state (it fires when the approach starts); the GameMode only
+				// assigns the directive.
+				if (R && R->bIsBot && !R->IsDiveRecovering())
 				{
 					SetAIDirective(R, EAIBehavior::Dive, PredictBallLanding(), true);
-					UE_LOG(LogVolleyballRules, Log, TEXT("[Dive] %s dives (net cross %.0f cm/s)"), *R->GetName(), GM_NetCrossSpeed);
 				}
 			}
 		}
@@ -495,6 +535,7 @@ void ASpikeEliteGameMode::Tick(float DeltaSeconds)
 		// (bottom 143 to top 243) and within net width; deflect it back once with a
 		// cooldown so it cannot be struck every frame.
 		if (NetTouchCooldown > 0.f) { NetTouchCooldown -= DeltaSeconds; }
+	if (BlockerMissCooldown > 0.f) { BlockerMissCooldown -= DeltaSeconds; }
 
 		const FVector BL = Ball->GetActorLocation();
 		const FVector BV = Ball->GetVelocity();
@@ -718,6 +759,10 @@ void ASpikeEliteGameMode::EndRally(ERallyEndReason Reason, EVolleyballTeam Scori
 {
 	if (!SEVolleyballRules::SettleRally(RallyState)) return;  // single settlement
 
+	// M11c-3: rally over — re-seed the dive tracker so the next reset/serve
+	// never inherits a stale crossing state from the ball's last flight.
+	if (Ball) { ResetNetCrossTracking(Ball->GetActorLocation().X); }
+
 	// M11c-1: the service window is over for everyone (server may now re-enter
 	// the court; normal movement bounds apply again).
 	for (auto& C : TeamAPlayers) { if (C) { C->bServiceZoneActive = false; } }
@@ -845,6 +890,7 @@ void ASpikeEliteGameMode::BeginServiceAuthorized()
 	Ball->ResetBall(ServerPos + FVector(0,0,180.f));
 	BallPrevX = Ball->GetActorLocation().X;
 	bNetContactLatched = false;
+	ResetNetCrossTracking(Ball->GetActorLocation().X);   // M11c-3: no fake net-cross at serve placement
 	SEVolleyballRules::BeginRally(RallyState, ServingTeam);
 	ServerPlayerIndex = (Server && !Server->bIsBot) ? 0 : -1;
 
@@ -960,6 +1006,9 @@ void ASpikeEliteGameMode::ExecuteServe()
 	}
 
 	MatchState = EMatchState::Rally;
+	// M11c-3: re-seed the dive tracker at serve release — the ball starts from
+	// the server's position so the first frames can never look like a crossing.
+	ResetNetCrossTracking(Ball->GetActorLocation().X);
 	// M11: the serve is actually out -> the ball is now in play. This is the one
 	// place that sets bBallInPlay true; cleanup/end-of-rally set it back to false.
 	SEVolleyballRules::StartPlay(RallyState);
@@ -1006,8 +1055,8 @@ bool ASpikeEliteGameMode::TryTouchBall(ASpikeEliteCharacter* Toucher, EBallTouch
 	// M11: shared phase gate (Rally && !settled) — same as CanTouchBall and tests.
 	if (!SEVolleyballRules::IsTouchLegalInPhase(MatchState, RallyState.bRallySettled)) return false;
 	if (!Toucher->bTouchArmed) return false;
-	// M11b-5c: a player in the dive recovery can neither re-dive nor touch.
-	if (Toucher->bDiveRecovering) return false;
+	// M11c-3: a player in the dive recovery can neither re-dive nor touch.
+	if (Toucher->IsDiveRecovering()) return false;
 
 	const EVolleyballTeam Team = TeamOf(Toucher);
 	const int32 Index = GetPlayerIndex(Team, Toucher);
@@ -1022,8 +1071,8 @@ bool ASpikeEliteGameMode::TryTouchBall(ASpikeEliteCharacter* Toucher, EBallTouch
 	const FVector MyLoc = Toucher->GetActorLocation();
 	const FVector BallLoc = Ball->GetActorLocation();
 	const float Dist2D = FVector::Dist2D(MyLoc, BallLoc);
-	const float Reach = Toucher->bDiving ? (TouchReach + 90.f) : TouchReach;
-	const float MinZ = Toucher->bDiving ? 60.f : MinTouchZ;
+	const float Reach = Toucher->IsDiving() ? (TouchReach + 90.f) : TouchReach;
+	const float MinZ = Toucher->IsDiving() ? 60.f : MinTouchZ;
 	if (Dist2D > Reach || BallLoc.Z < MinZ || BallLoc.Z > MaxTouchZ)
 	{
 		return false;
@@ -1044,7 +1093,7 @@ bool ASpikeEliteGameMode::TryTouchBall(ASpikeEliteCharacter* Toucher, EBallTouch
 		Dir = ComputeAITouchDirection(Toucher, EffectiveType);
 		// A dive save pops the ball high and slow back toward our own depth so
 		// teammates can set up the counter.
-		Power = Toucher->bDiving ? 620.f
+		Power = Toucher->IsDiving() ? 620.f
 			: (EffectiveType == EBallTouchType::Receive) ? 780.f
 			: (EffectiveType == EBallTouchType::Set) ? 550.f
 			: 850.f;
@@ -1146,6 +1195,17 @@ bool ASpikeEliteGameMode::DoTouch(ASpikeEliteCharacter* Toucher, EBallTouchType 
 		// M11b-3: drive the short contact pose (receive/set/spike/serve).
 		Toucher->NotifyContact(EffectiveType);
 
+		// M11c-3: a real touch inside the dive Active window is a DiveSave. It
+		// ends the window immediately (RecordSave -> Recovery) and is logged
+		// separately from attempts so saves are never conflated with dives.
+		if (Toucher->DiveState.IsActive())
+		{
+			Toucher->DiveState.RecordSave();
+			UE_LOG(LogVolleyballRules, Log, TEXT("[DiveSave] %s %s saved (touch=%s)"),
+				TeamStr(Team), *Toucher->GetName(),
+				*SEVolleyballRules::TouchTypeLabel(EffectiveType));
+		}
+
 		// M11b-5 block: the touch did not consume a team touch, but if the ball
 		// stayed on the blocker's side of the net (soft block into the block
 		// coverage), the blocking team now takes possession with a fresh count
@@ -1192,6 +1252,14 @@ bool ASpikeEliteGameMode::TryBlockBall(ASpikeEliteCharacter* Toucher)
 	if (!SEVolleyballRules::IsTouchLegalInPhase(MatchState, RallyState.bRallySettled)) return false;
 	if (!Toucher->bTouchArmed) return false;
 
+	// M11c-3: after a whiffed block attempt the blocker is briefly unable to
+	// block again, so the spike genuinely gets through to the back row (the
+	// miss must be an event, not a per-frame reroll that always succeeds).
+	if (BlockerMissCooldown > 0.f)
+	{
+		return false;
+	}
+
 	const EVolleyballTeam Team = TeamOf(Toucher);
 	const int32 Index = GetPlayerIndex(Team, Toucher);
 	if (Index < 0) return false;
@@ -1209,6 +1277,16 @@ bool ASpikeEliteGameMode::TryBlockBall(ASpikeEliteCharacter* Toucher)
 	const float Dist2D = FVector::Dist2D(MyLoc, BallLoc);
 	if (Dist2D > TouchReach || BallLoc.Z < 150.f || BallLoc.Z > 480.f)
 	{
+		return false;
+	}
+
+	// M11c-3: a seeded block miss rate — blocking is NOT a guaranteed outcome
+	// (AI only; the human's block is player-controlled). A spike that gets past
+	// the block gives the back-row defence a real dive chance instead of the
+	// block swallowing every attack.
+	if (Toucher->bIsBot && AIStream.FRand() < 0.35f)
+	{
+		BlockerMissCooldown = 0.5f;
 		return false;
 	}
 
@@ -1495,9 +1573,25 @@ void ASpikeEliteGameMode::UpdateAIDirectives(float DeltaSeconds)
 		{
 			switch (RallyState.TouchCount)
 			{
-			case 0: // Receive: closest to the predicted landing.
+			case 0: // Receive: closest to the predicted landing. If the ball JUST
+				// crossed the net fast (opponent spike got past the block), the
+				// receiver lunges (Dive) instead of a normal run-up.
 				Primary = SelectReceivePlayer(Team, Landing);
-				PrimaryBehavior = EAIBehavior::MoveToReceive;
+				{
+					const bool bBallOnOwnSide = (Team == EVolleyballTeam::TeamA)
+						? (Ball && Ball->GetActorLocation().X > 0.f)
+						: (Ball && Ball->GetActorLocation().X < 0.f);
+					const float BallZ = Ball ? Ball->GetActorLocation().Z : 0.f;
+					const FVector BallVel = Ball ? Ball->GetVelocity() : FVector::ZeroVector;
+					if (IsDiveSituation(RallyState, bBallOnOwnSide, BallZ, BallVel.Size2D()))
+					{
+						PrimaryBehavior = EAIBehavior::Dive;
+					}
+					else
+					{
+						PrimaryBehavior = EAIBehavior::MoveToReceive;
+					}
+				}
 				PrimaryTarget = Landing;
 				break;
 			case 1: // Set: designated setter zone.
@@ -1585,15 +1679,15 @@ void ASpikeEliteGameMode::UpdateAIDirectives(float DeltaSeconds)
 				const FVector BallVel = Ball ? Ball->GetVelocity() : FVector::ZeroVector;
 				const bool bDefensiveBall = bBallOnOwnSide && (BallZ < 130.f || BallVel.Size2D() > 500.f);
 				const int32 RecvIdx = bDefensiveBall ? SelectReceivePlayer(Team, Landing) : -1;
-				// M11b-5c: a ball that just crossed the net into our side at speed is
-				// a dive situation - the receiver lunges (extended touch window).
-				const bool bDiveSituation = (bBallOnOwnSide && GM_NetCrossWindow > 0.f
-					&& GM_NetCrossSpeed > 450.f && !C->bDiveRecovering) ? true : false;
+				// M11c-3: dive gating moved to the shared helper — only a fast ball
+				// that already completed a real net crossing (and is NOT a serve
+				// flight) can trigger a dive; recovery blocks re-dives.
+				const bool bDiveSituation = IsDiveSituation(RallyState, bBallOnOwnSide, BallZ,
+					BallVel.Size2D()) && !C->IsDiveRecovering();
 				if (i == RecvIdx)
 				{
 					if (bDiveSituation)
 					{
-						UE_LOG(LogVolleyballRules, Log, TEXT("[Dive] %s dives (net cross %.0f cm/s)"), *C->GetName(), GM_NetCrossSpeed);
 						SetAIDirective(C, EAIBehavior::Dive, Landing, true);
 					}
 					else

@@ -5,6 +5,10 @@
 #include "VolleyballEnums.h"
 #include "VolleyballRules.generated.h"
 
+// Shared log category: defined in VolleyballRules.cpp, usable by the GameMode,
+// characters and tests (replaces a file-static category).
+DECLARE_LOG_CATEGORY_EXTERN(LogVolleyballRules, Log, All);
+
 /**
  * Pure-logic volleyball rules core (SPIKE ELITE M10).
  *
@@ -305,9 +309,104 @@ namespace SEVolleyballRules
 	 *  mirrors BOTH axes so its left/right semantics never flip. */
 	SPIKEELITE_API TArray<FVector> GetSlotFormationA();
 
+	/** True when the ball really crossed the net plane this step (previous sample
+	 *  and new sample on opposite sides). A teleport/reset never looks like a
+	 *  crossing because the caller seeds PrevX with the reset X. */
+	inline bool DetectNetCross(float PrevX, float NewX, float MinAbs = 5.f)
+	{
+		return PrevX * NewX < 0.f && FMath::Abs(NewX) > MinAbs;
+	}
+
+	/** M11c-3: a dive is never offered during the serve flight — the serve is
+	 *  recorded as LastTouch=Serve with TouchCount 0 and no possession, so any
+	 *  dive gate must refuse it until the serve has legally crossed the net. */
+	inline bool IsDiveAllowedDuringFlight(const FVolleyballRallyState& RS)
+	{
+		return !(RS.TouchCount == 0 && RS.LastTouchType == EBallTouchType::Serve && !RS.bServeCrossedNet);
+	}
+
+	/** M11c-3: pure-logic dive lifecycle shared by characters and tests.
+	 *  None -> Approach (fast lunge) -> Active (0.35~0.55 s extended-reach window)
+	 *  -> Recovery (blocks re-dive/touch) -> None. A save inside Active ends it
+	 *  immediately; an empty window times out into a Miss and then Recovery. */
+	struct SPIKEELITE_API FVolleyballDiveState
+	{
+		enum class EPhase : uint8 { None, Approach, Active, Recovery };
+
+		EPhase Phase = EPhase::None;
+		float ActiveTimer = 0.f;
+		float RecoveryTimer = 0.f;
+		bool bSaveRecorded = false;
+
+		static constexpr float ActiveWindow = 0.45f;
+		static constexpr float RecoveryDuration = 0.8f;
+
+		bool IsActive() const      { return Phase == EPhase::Active; }
+		bool IsRecovering() const  { return Phase == EPhase::Recovery; }
+		bool CanTouch() const      { return Phase == EPhase::Active && !bSaveRecorded; }
+
+		void Reset() { *this = FVolleyballDiveState(); }
+
+		/** Start of the lunge approach (already sprinting to the save point). */
+		void StartDive()
+		{
+			if (Phase == EPhase::None) { Phase = EPhase::Approach; }
+		}
+
+		/** Enter the extended-reach contact window when close to the save point. */
+		void EnterActive()
+		{
+			if (Phase == EPhase::Approach)
+			{
+				Phase = EPhase::Active;
+				ActiveTimer = ActiveWindow;
+				bSaveRecorded = false;
+			}
+		}
+
+		/** A real touch happened inside the window -> DiveSave, then Recovery. */
+		void RecordSave()
+		{
+			if (Phase == EPhase::Active && !bSaveRecorded)
+			{
+				bSaveRecorded = true;
+				Phase = EPhase::Recovery;
+				RecoveryTimer = RecoveryDuration;
+			}
+		}
+
+		/** Advance timers. Returns true when a phase transition happened this tick
+		 *  (Active timeout -> Recovery; Recovery end -> None). */
+		bool Tick(float DeltaSeconds)
+		{
+			bool bTransitioned = false;
+			if (Phase == EPhase::Active)
+			{
+				ActiveTimer -= DeltaSeconds;
+				if (ActiveTimer <= 0.f && !bSaveRecorded)
+				{
+					Phase = EPhase::Recovery;   // DiveMiss
+					RecoveryTimer = RecoveryDuration;
+					bTransitioned = true;
+				}
+			}
+			else if (Phase == EPhase::Recovery)
+			{
+				RecoveryTimer -= DeltaSeconds;
+				if (RecoveryTimer <= 0.f)
+				{
+					Phase = EPhase::None;       // DiveRecoveryEnd
+					bTransitioned = true;
+				}
+			}
+			return bTransitioned;
+		}
+	};
+
 	/** Human-readable touch count label, e.g. "A 2/3". */
 	SPIKEELITE_API FString TouchLabel(const FVolleyballRallyState& State);
 
 	/** Describe a reason in Chinese for the rally-result banner. */
 	SPIKEELITE_API FString RallyReasonLabel(ERallyEndReason Reason);
+	SPIKEELITE_API FString TouchTypeLabel(EBallTouchType Type);
 }

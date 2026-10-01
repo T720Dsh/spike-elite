@@ -139,13 +139,15 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Character")
 	EBallTouchType LastContactType = EBallTouchType::Unknown;
 
-	/** True while the character is diving (blocks re-dive + second touches). */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Character")
-	bool bDiving = false;
+	/** M11c-3: authoritative dive lifecycle (None/Approach/Active/Recovery).
+	 *  Shared pure-logic state — the GameMode reads IsActive()/IsRecovering()
+	 *  for reach/touch gating and the procedural animation drives the pose.
+	 *  Plain C++ member (not UPROPERTY: the struct is not UHT-reflectable). */
+	SEVolleyballRules::FVolleyballDiveState DiveState;
 
-	/** True during the post-dive recovery: GameMode gates re-dive and touch. */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Character")
-	bool bDiveRecovering = false;
+	/** Convenience getters for the GameMode (reach/phase gates). */
+	bool IsDiving() const { return DiveState.IsActive(); }
+	bool IsDiveRecovering() const { return DiveState.IsRecovering(); }
 
 	/** M11c-1: set by the GameMode while this player is the authorized server.
 	 *  While true, movement bounds widen to the service zone (X up to ±1550,
@@ -199,8 +201,6 @@ protected:
 
 	/** Seconds since the last successful touch (drives short contact poses). */
 	float ContactPoseTimer = 0.f;
-	/** Seconds until the dive recovery finishes. */
-	float DiveRecoveryTimer = 0.f;
 	/** Local swing phase for the run cycle (radians). */
 	float RunPhase = 0.f;
 

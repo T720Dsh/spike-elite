@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+﻿// SPDX-License-Identifier: MIT
 #pragma once
 
 #include "CoreMinimal.h"
@@ -248,6 +248,9 @@ protected:
 
 	/** Cooldown after a manual net tap so the ball isn't deflected every frame. */
 	float NetTouchCooldown = 0.0f;
+	/** M11c-3: after an AI block whiffs, this cools the block attempt so the
+	 *  spike genuinely gets through to the back row (0 = block ready). */
+	float BlockerMissCooldown = 0.0f;
 
 	/** Previous-frame ball X, used to detect crossing the net plane. */
 	float BallPrevX = 0.0f;
