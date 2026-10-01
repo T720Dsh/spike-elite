@@ -43,8 +43,14 @@ public:
 	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaSeconds) override;
 
-	/** How many side-out rotations happened since StartMatch (1-based display). */
-	int32 RotationCount = 1;
+	/** M11c-2: per-team rotation counters (1..6, wrap via
+	 *  SEVolleyballRules::AdvanceRotationIndex). Each team owns its own rotation
+	 *  so a side-out only advances the receiving team that gained the serve. */
+	int32 TeamARotation = 1;
+	int32 TeamBRotation = 1;
+
+	/** Current serving team's rotation index (what the HUD shows). */
+	int32 GetServingRotation() const { return (ServingTeam == EVolleyballTeam::TeamA) ? TeamARotation : TeamBRotation; }
 
 	/** Public access for widgets / dev verification. */
 	AMatchOfficialManager* GetOfficials() const { return Officials; }

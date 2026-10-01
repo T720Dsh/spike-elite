@@ -51,14 +51,10 @@ namespace
 
 TArray<FVector> ASpikeEliteGameMode::GetPositionsA()
 {
-	return {
-		FVector(820.0f,   0.0f, 0.0f),
-		FVector(550.0f, 300.0f, 0.0f),
-		FVector(550.0f,   0.0f, 0.0f),
-		FVector(550.0f,-300.0f, 0.0f),
-		FVector(200.0f,-300.0f, 0.0f),
-		FVector(200.0f,   0.0f, 0.0f),
-	};
+	// M11c-2: authoritative slot formation lives in the shared pure-logic core
+	// (SEVolleyballRules::GetSlotFormationA) so production, HUD and tests all
+	// read the SAME data. Roster index = slot-1.
+	return SEVolleyballRules::GetSlotFormationA();
 }
 
 ASpikeEliteGameMode::ASpikeEliteGameMode()
@@ -224,7 +220,9 @@ void ASpikeEliteGameMode::StartMatch()
 	}
 	for (int32 i = 0; i < 6; i++)
 	{
-		const FVector BPos(-PosA[i].X, PosA[i].Y, 0.0f);
+		// M11c-2: B mirrors BOTH axes so the left/right semantics stay correct
+		// (B faces the net from -X, its "right" is +Y).
+		const FVector BPos(-PosA[i].X, -PosA[i].Y, 0.0f);
 		TeamBPlayers[i] = SpawnBot(BPos + FVector(0,0,100.0f), FRotator(0,90,0), -1, BPos);
 		if (TeamBPlayers[i]) { TeamBPlayers[i]->PlayerId = 6 + i; TeamBPlayers[i]->JerseyNumber = 7 + i; }
 	}
@@ -254,7 +252,8 @@ void ASpikeEliteGameMode::StartMatch()
 		}
 	}
 
-	RotationCount = 1;
+	TeamARotation = 1;
+	TeamBRotation = 1;
 	RefreshRotationView();
 	MatchState = EMatchState::BetweenRallies;
 	InterRallyTimer = 1.0f;
@@ -357,7 +356,7 @@ void ASpikeEliteGameMode::RotateTeam(EVolleyballTeam TeamToRotate)
 	{
 		if (Roster[i])
 		{
-			FVector Home = (TeamToRotate == EVolleyballTeam::TeamA) ? PosA[i] : FVector(-PosA[i].X, PosA[i].Y, 0.f);
+			FVector Home = (TeamToRotate == EVolleyballTeam::TeamA) ? PosA[i] : FVector(-PosA[i].X, -PosA[i].Y, 0.f);
 			Roster[i]->HomePosition = Home;
 			if (!Roster[i]->bIsBot) Roster[i]->SetActorLocation(Home + FVector(0,0,100.f));
 		}
@@ -370,7 +369,7 @@ void ASpikeEliteGameMode::RespawnPlayersToPositions()
 	for (int32 i = 0; i < 6; i++)
 	{
 		if (TeamAPlayers[i]) { TeamAPlayers[i]->HomePosition = PosA[i]; TeamAPlayers[i]->SetActorLocation(PosA[i]+FVector(0,0,100.f)); }
-		if (TeamBPlayers[i]) { FVector B(-PosA[i].X,PosA[i].Y,0); TeamBPlayers[i]->HomePosition = B; TeamBPlayers[i]->SetActorLocation(B+FVector(0,0,100.f)); }
+		if (TeamBPlayers[i]) { FVector B(-PosA[i].X,-PosA[i].Y,0); TeamBPlayers[i]->HomePosition = B; TeamBPlayers[i]->SetActorLocation(B+FVector(0,0,100.f)); }
 	}
 }
 
@@ -750,7 +749,15 @@ void ASpikeEliteGameMode::AwardPoint(EVolleyballTeam ScoringTeam)
 
 	const bool bWasServeWin = (ServingTeam == ScoringTeam);
 	ServingTeam = ScoringTeam;
-	if (!bWasServeWin) { RotateTeam(ScoringTeam); RotationCount++; }
+	if (!bWasServeWin)
+	{
+		// Side-out: ONLY the team that just gained the serve rotates (clockwise,
+		// its P1 leaves the court after serving... here the P1 slot moves to P6).
+		// The serving winner's rotation stays untouched (no rotation on a point).
+		RotateTeam(ScoringTeam);
+		if (ScoringTeam == EVolleyballTeam::TeamA) { TeamARotation = SEVolleyballRules::AdvanceRotationIndex(TeamARotation); }
+		else { TeamBRotation = SEVolleyballRules::AdvanceRotationIndex(TeamBRotation); }
+	}
 	RefreshRotationView();
 
 	// Record the current set's running score.
@@ -1189,10 +1196,10 @@ bool ASpikeEliteGameMode::TryBlockBall(ASpikeEliteCharacter* Toucher)
 	const int32 Index = GetPlayerIndex(Team, Toucher);
 	if (Index < 0) return false;
 
-	// M11b-5: only front-row players may block. Front row is judged by the
-	// home/defensive position X (|X| < 400 near the net), the same rule the AI
-	// directive uses, so rotation order cannot wrongly demote a front-row player.
-	if (FMath::Abs(Toucher->HomePosition.X) >= 400.f)
+	// M11c-2: only front-row SLOTS (P2/P3/P4) may block — decided by the
+	// authoritative roster index, not by guessing from HomePosition.X (a rotated
+	// front-row player still holds a front-row slot).
+	if (!SEVolleyballRules::IsFrontRowSlot(Index))
 	{
 		return false;
 	}
@@ -1331,26 +1338,35 @@ int32 ASpikeEliteGameMode::SelectSetterPlayer(EVolleyballTeam Team) const
 int32 ASpikeEliteGameMode::SelectAttackerPlayer(EVolleyballTeam Team) const
 {
 	const TArray<TObjectPtr<ASpikeEliteCharacter>>& Roster = (Team == EVolleyballTeam::TeamA) ? TeamAPlayers : TeamBPlayers;
-	FVector AttackPoint;
-	if (Ball)
+	const float SideX = (Team == EVolleyballTeam::TeamA) ? 150.f : -150.f;
+	// M11c-2: front-row slots (P2/P3/P4) attack from the front attack point;
+	// a back-row attacker (P1/P5/P6) must take off from BEHIND the 3 m line
+	// (|X| >= 300), so their attack point sits behind the line.
+	const FVector FrontPt = FVector(SideX,
+		FMath::Clamp(Ball ? Ball->GetActorLocation().Y : 0.f, -300.f, 300.f), 220.f);
+	const FVector BackRowPt = FVector(SideX * (380.f / 150.f),
+		FMath::Clamp(Ball ? Ball->GetActorLocation().Y : 0.f, -300.f, 300.f), 220.f);
+
+	auto Pick = [&](bool bWantFront) -> int32
 	{
-		const float SideX = (Team == EVolleyballTeam::TeamA) ? 150.f : -150.f;
-		AttackPoint = FVector(SideX, FMath::Clamp(Ball->GetActorLocation().Y, -300.f, 300.f), 220.f);
-	}
-	else
-	{
-		AttackPoint = FVector((Team == EVolleyballTeam::TeamA) ? 150.f : -150.f, 0.f, 220.f);
-	}
-	int32 Best = -1;
-	float BestDist = TNumericLimits<float>::Max();
-	for (int32 i = 0; i < Roster.Num(); i++)
-	{
-		if (!Roster[i]) continue;
-		// The player who just set cannot attack (no consecutive touches).
-		if (i == RallyState.LastTouchPlayerIndex && RallyState.LastTouchTeam == Team) continue;
-		const float D = FVector::Dist2D(Roster[i]->GetActorLocation(), AttackPoint);
-		if (D < BestDist) { BestDist = D; Best = i; }
-	}
+		int32 Best = -1;
+		float BestDist = TNumericLimits<float>::Max();
+		for (int32 i = 0; i < Roster.Num(); i++)
+		{
+			if (!Roster[i]) continue;
+			if (SEVolleyballRules::IsFrontRowSlot(i) != bWantFront) continue;
+			// The player who just set cannot attack (no consecutive touches).
+			if (i == RallyState.LastTouchPlayerIndex && RallyState.LastTouchTeam == Team) continue;
+			const float D = FVector::Dist2D(Roster[i]->GetActorLocation(), bWantFront ? FrontPt : BackRowPt);
+			if (D < BestDist) { BestDist = D; Best = i; }
+		}
+		return Best;
+	};
+
+	// Prefer a front-row attacker; only fall back to a back-row one (rear attack
+	// from behind the 3 m line) when no front-row player is available.
+	int32 Best = Pick(true);
+	if (Best < 0) { Best = Pick(false); }
 	return Best;
 }
 
@@ -1512,11 +1528,16 @@ void ASpikeEliteGameMode::UpdateAIDirectives(float DeltaSeconds)
 					}
 				}
 				break;
-			case 2: // Attack: closest to the front attack point.
+			case 2: // Attack: front-row slot takes the front point; a back-row
+				// attacker takes off from behind the 3 m line (rear attack).
 				Primary = SelectAttackerPlayer(Team);
 				PrimaryBehavior = EAIBehavior::Attack;
-				PrimaryTarget = FVector((Team == EVolleyballTeam::TeamA) ? 150.f : -150.f,
-					FMath::Clamp(Ball ? Ball->GetActorLocation().Y : 0.f, -300.f, 300.f), 220.f);
+				{
+					const float SideX = (Team == EVolleyballTeam::TeamA) ? 150.f : -150.f;
+					const float AttackX = SEVolleyballRules::IsFrontRowSlot(Primary) ? SideX : SideX * (380.f / 150.f);
+					PrimaryTarget = FVector(AttackX,
+						FMath::Clamp(Ball ? Ball->GetActorLocation().Y : 0.f, -300.f, 300.f), 220.f);
+				}
 				break;
 			default:
 				break;
@@ -1538,7 +1559,7 @@ void ASpikeEliteGameMode::UpdateAIDirectives(float DeltaSeconds)
 				// point as soon as the team gains possession, so the attacker is
 				// already in position when the set arrives; keep them there through
 				// the third touch so the attacker never chases a falling ball.
-				if (FMath::Abs(C->HomePosition.X) < 400.f && RallyState.TouchCount <= 2)
+				if (SEVolleyballRules::IsFrontRowSlot(i) && RallyState.TouchCount <= 2)
 				{
 					const FVector AttackPt = FVector((Team == EVolleyballTeam::TeamA) ? 150.f : -150.f,
 						FMath::Clamp(Ball ? Ball->GetActorLocation().Y : 0.f, -300.f, 300.f), 220.f);
@@ -1554,7 +1575,7 @@ void ASpikeEliteGameMode::UpdateAIDirectives(float DeltaSeconds)
 			{
 				// Defending (opponent possesses).
 				const FVector Home = C->HomePosition;
-				const bool bFrontRow = FMath::Abs(Home.X) < 400.f;
+				const bool bFrontRow = SEVolleyballRules::IsFrontRowSlot(i);
 				const bool bBallOnOwnSide = Ball && ((Team == EVolleyballTeam::TeamA)
 					? (Ball->GetActorLocation().X > 0.f) : (Ball->GetActorLocation().X < 0.f));
 				const float BallZ = Ball ? Ball->GetActorLocation().Z : 0.f;
@@ -1629,7 +1650,7 @@ void ASpikeEliteGameMode::NotifyMatchOver()
 
 void ASpikeEliteGameMode::BuildRotationView(FRotationViewState& Out) const
 {
-	Out.RotationIndex = RotationCount;
+	Out.RotationIndex = GetServingRotation();   // per-team, wraps 1..6
 	Out.ServingTeam = ServingTeam;
 
 	// Roster order IS the authoritative rotation: index 0 = P1 (back-right,

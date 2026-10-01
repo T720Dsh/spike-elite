@@ -276,6 +276,35 @@ namespace SEVolleyballRules
 		Order[Order.Num() - 1] = First;
 	}
 
+	/** M11c-2: authoritative front-row test by rotation slot. Roster index is the
+	 *  slot-1 (0=P1, 1=P2, 2=P3, 3=P4, 4=P5, 5=P6); the front row is P2/P3/P4.
+	 *  This replaces any positional guess (|HomePosition.X| < N) — a rotated
+	 *  front-row player still holds a front-row SLOT no matter where they stand. */
+	inline bool IsFrontRowSlot(int32 RosterIndex)
+	{
+		return RosterIndex == 1 || RosterIndex == 2 || RosterIndex == 3;
+	}
+
+	/** Back row: P1 (serve slot), P5, P6. */
+	inline bool IsBackRowSlot(int32 RosterIndex)
+	{
+		return RosterIndex == 0 || RosterIndex == 4 || RosterIndex == 5;
+	}
+
+	/** M11c-2: side-out rotation counter wraps 1..6 (never shows 7/6). The team
+	 *  that just gained the serve rotates once; the serving winner does not. */
+	inline int32 AdvanceRotationIndex(int32 Current)
+	{
+		return (Current % 6) + 1;
+	}
+
+	/** M11c-2: authoritative Team A slot formation in world cm (pure data, no
+	 *  actors). Roster index = slot-1: 0=P1 back-right serve, 1=P2 front-right,
+	 *  2=P3 front-middle, 3=P4 front-left, 4=P5 back-left, 5=P6 back-middle.
+	 *  Front row |X| < 300 (inside the 3 m line); back row |X| > 300. Team B
+	 *  mirrors BOTH axes so its left/right semantics never flip. */
+	SPIKEELITE_API TArray<FVector> GetSlotFormationA();
+
 	/** Human-readable touch count label, e.g. "A 2/3". */
 	SPIKEELITE_API FString TouchLabel(const FVolleyballRallyState& State);
 

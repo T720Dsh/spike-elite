@@ -139,4 +139,18 @@ namespace SEVolleyballRules
 		default:                             return TEXT("回合结束");
 		}
 	}
+
+	TArray<FVector> GetSlotFormationA()
+	{
+		// M11c-2: FIVB slot coordinates for Team A (X>0 side, facing -X). "Right"
+		// for a team facing the net from +X is -Y; B mirrors both axes.
+		return {
+			FVector( 820.f, -280.f, 0.f),  // P1 back-right (serve slot)
+			FVector( 150.f, -280.f, 0.f),  // P2 front-right
+			FVector( 150.f,    0.f, 0.f),  // P3 front-middle
+			FVector( 150.f,  280.f, 0.f),  // P4 front-left
+			FVector( 820.f,  280.f, 0.f),  // P5 back-left
+			FVector( 820.f,    0.f, 0.f),  // P6 back-middle
+		};
+	}
 }

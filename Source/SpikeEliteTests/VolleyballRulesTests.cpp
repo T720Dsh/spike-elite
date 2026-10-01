@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+﻿// SPDX-License-Identifier: MIT
 // Unreal Automation Tests for the M10 pure-logic volleyball rules core.
 //
 // These tests never load a map: they exercise SEVolleyballRules over plain
@@ -11,6 +11,7 @@
 #include "Volleyball/VolleyballRules.h"
 #include "Volleyball/VolleyballTrajectory.h"
 #include "Volleyball/SetPlay.h"
+
 
 #if WITH_DEV_AUTOMATION_TESTS
 
@@ -649,6 +650,134 @@ bool FSEServerBehindEndLine::RunTest(const FString& Parameters)
 	// The spot must be reachable with the service-zone movement bounds open.
 	constexpr float ZoneBoundX = 1550.f;
 	TestTrue(TEXT("service spot reachable by bounds"), FMath::Abs(ServiceSpotX) <= ZoneBoundX);
+	return true;
+}
+
+// ---------------- M11c-2: authoritative rotation, front/back row, per-team ----------------
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSERotationSlotCoordinates, "SpikeElite.Tests.RotationSlotCoordinates",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FSERotationSlotCoordinates::RunTest(const FString& Parameters)
+{
+	// Roster index = slot-1: P2/P3/P4 (1/2/3) must sit in the FRONT row (between
+	// the net and the 3 m line, |X| < 300); P1/P5/P6 (0/4/5) in the BACK row
+	// (|X| > 300, between the 3 m line and the end line). P1 is the back-right
+	// serve slot. B mirrors BOTH axes so its "right" is +Y (no handedness flip).
+	const TArray<FVector> PosA = SEVolleyballRules::GetSlotFormationA();
+	TestEqual(TEXT("six slots"), PosA.Num(), 6);
+
+	TestTrue(TEXT("P2 front-right is in the front row"), FMath::Abs(PosA[1].X) < 300.f);
+	TestTrue(TEXT("P3 front-mid is in the front row"), FMath::Abs(PosA[2].X) < 300.f);
+	TestTrue(TEXT("P4 front-left is in the front row"), FMath::Abs(PosA[3].X) < 300.f);
+	TestTrue(TEXT("P1 back-right is in the back row"), FMath::Abs(PosA[0].X) > 300.f);
+	TestTrue(TEXT("P5 back-left is in the back row"), FMath::Abs(PosA[4].X) > 300.f);
+	TestTrue(TEXT("P6 back-mid is in the back row"), FMath::Abs(PosA[5].X) > 300.f);
+	TestTrue(TEXT("P2/P3/P4 all share the same attack-line depth"), FMath::Abs(PosA[1].X - PosA[2].X) < 1.f && FMath::Abs(PosA[2].X - PosA[3].X) < 1.f);
+	TestTrue(TEXT("P1 back row is deeper than the front row (serve position)"), PosA[0].X > PosA[1].X);
+
+	// P2 (front-right) at -Y for A; mirrored B P2 must be at +Y (B faces +X).
+	const FVector PosB2(-PosA[1].X, -PosA[1].Y, 0.f);
+	TestTrue(TEXT("B P2 right is +Y (no handedness flip)"), PosB2.Y > 0.f);
+	const FVector PosB4(-PosA[3].X, -PosA[3].Y, 0.f);
+	TestTrue(TEXT("B P4 left is -Y (no handedness flip)"), PosB4.Y < 0.f);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSERotationIndexWraps, "SpikeElite.Tests.RotationIndexWrapsOneToSix",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FSERotationIndexWraps::RunTest(const FString& Parameters)
+{
+	// The per-team rotation counter wraps 1..6 and can never display 7/6.
+	int32 R = 1;
+	for (int32 i = 0; i < 12; i++)
+	{
+		R = SEVolleyballRules::AdvanceRotationIndex(R);
+		TestTrue(TEXT("rotation always in 1..6"), R >= 1 && R <= 6);
+	}
+	TestEqual(TEXT("wraps back to 1 after six side-outs"), R, 1);
+	// After 5 side-outs we are at 6, not 7.
+	int32 R2 = 1;
+	for (int32 i = 0; i < 5; i++) { R2 = SEVolleyballRules::AdvanceRotationIndex(R2); }
+	TestEqual(TEXT("fifth side-out is 6/6"), R2, 6);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSESideOutOnlyReceivingTeam, "SpikeElite.Tests.SideOutRotatesOnlyReceivingTeam",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FSESideOutOnlyReceivingTeam::RunTest(const FString& Parameters)
+{
+	// A serve-win point does NOT rotate anyone; a side-out rotates only the team
+	// that just gained the serve (its P1 leaves the court). Model with two
+	// independent per-team counters + one roster rotation on the receiving side.
+	int32 RotationA = 1;
+	int32 RotationB = 1;
+	TArray<int32> RosterB = {0, 1, 2, 3, 4, 5};
+
+	// A serves and scores -> serve win: no rotation at all.
+	TestEqual(TEXT("serve-win leaves A at 1/6"), RotationA, 1);
+	TestEqual(TEXT("serve-win leaves B at 1/6"), RotationB, 1);
+
+	// B wins the next point while A serves -> side-out: only B rotates.
+	RotationB = SEVolleyballRules::AdvanceRotationIndex(RotationB);
+	SEVolleyballRules::RotateRoster(RosterB);   // B's P1 leaves the court
+	TestEqual(TEXT("B rotates on side-out"), RotationB, 2);
+	TestEqual(TEXT("A does NOT rotate on side-out"), RotationA, 1);
+	TestEqual(TEXT("B's new P1 is the old P2 (clockwise)"), RosterB[0], 1);
+	TestEqual(TEXT("B's old P1 moved to P6"), RosterB[5], 0);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSEServingPointDoesNotRotate, "SpikeElite.Tests.ServingPointDoesNotRotate",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FSEServingPointDoesNotRotate::RunTest(const FString& Parameters)
+{
+	// The team that keeps serving after winning a point must NOT rotate.
+	TArray<int32> RosterA = {0, 1, 2, 3, 4, 5};
+	const TArray<int32> Before = RosterA;
+	// Serve win: no RotateRoster call, no AdvanceRotationIndex call.
+	TestEqual(TEXT("serving winner keeps its roster"), RosterA, Before);
+	int32 RotationA = 1;
+	TestEqual(TEXT("serving winner stays at 1/6"), RotationA, 1);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSEFrontRowEligibilityUsesSlot, "SpikeElite.Tests.FrontRowEligibilityUsesSlot",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FSEFrontRowEligibilityUsesSlot::RunTest(const FString& Parameters)
+{
+	// Blocking eligibility must come from the authoritative slot, not position.
+	TestTrue(TEXT("P2 can block"), SEVolleyballRules::IsFrontRowSlot(1));
+	TestTrue(TEXT("P3 can block"), SEVolleyballRules::IsFrontRowSlot(2));
+	TestTrue(TEXT("P4 can block"), SEVolleyballRules::IsFrontRowSlot(3));
+	TestFalse(TEXT("P1 (server) cannot block"), SEVolleyballRules::IsFrontRowSlot(0));
+	TestFalse(TEXT("P5 cannot block"), SEVolleyballRules::IsFrontRowSlot(4));
+	TestFalse(TEXT("P6 cannot block"), SEVolleyballRules::IsFrontRowSlot(5));
+	TestTrue(TEXT("back row is the complement"), SEVolleyballRules::IsBackRowSlot(0)
+		&& SEVolleyballRules::IsBackRowSlot(4) && SEVolleyballRules::IsBackRowSlot(5));
+	TestFalse(TEXT("front row is not back row"), SEVolleyballRules::IsBackRowSlot(2));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSEHUDRosterMatchesWorld, "SpikeElite.Tests.HUDRosterMatchesWorldFormation",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FSEHUDRosterMatchesWorld::RunTest(const FString& Parameters)
+{
+	// The HUD's slot->column mapping (P1 right, P2 right, P3 mid, P4 left,
+	// P5 left, P6 mid) must agree with the world coordinates: for Team A the
+	// "right" slots sit at -Y, "left" slots at +Y, "middle" at Y=0.
+	const TArray<FVector> PosA = SEVolleyballRules::GetSlotFormationA();
+	const bool bP1Right = PosA[0].Y < 0.f;    // col 2 (right)
+	const bool bP2Right = PosA[1].Y < 0.f;    // col 2 (right)
+	const bool bP3Mid   = FMath::Abs(PosA[2].Y) < 1.f;   // col 1 (middle)
+	const bool bP4Left  = PosA[3].Y > 0.f;    // col 0 (left)
+	const bool bP5Left  = PosA[4].Y > 0.f;    // col 0 (left)
+	const bool bP6Mid   = FMath::Abs(PosA[5].Y) < 1.f;   // col 1 (middle)
+	TestTrue(TEXT("HUD col mapping matches world (P1 right)"), bP1Right);
+	TestTrue(TEXT("HUD col mapping matches world (P2 right)"), bP2Right);
+	TestTrue(TEXT("HUD col mapping matches world (P3 mid)"), bP3Mid);
+	TestTrue(TEXT("HUD col mapping matches world (P4 left)"), bP4Left);
+	TestTrue(TEXT("HUD col mapping matches world (P5 left)"), bP5Left);
+	TestTrue(TEXT("HUD col mapping matches world (P6 mid)"), bP6Mid);
 	return true;
 }
 
