@@ -19,11 +19,10 @@ UMatchEndWidget::UMatchEndWidget(const FObjectInitializer& ObjectInitializer)
 }
 
 static UButton* MakeMatchEndBtn(UWidgetTree* Tree, UVerticalBox* Parent, const FString& Label,
-	const FLinearColor& Base, const FLinearColor& Hover, int32 FontSize)
+	const FButtonStyle& Style, int32 FontSize)
 {
 	UButton* B = Tree->ConstructWidget<UButton>(UButton::StaticClass());
-	B->SetStyle(SEUiStyle::ButtonStyle(Base, Hover,
-		FLinearColor(Base.R * 0.6f, Base.G * 0.6f, Base.B * 0.6f, 1.f)));
+	B->SetStyle(Style);
 
 	UTextBlock* T = Tree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
 	T->SetText(FText::FromString(Label));
@@ -59,12 +58,40 @@ void UMatchEndWidget::BuildWidgetTree()
 	UCanvasPanel* Root = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass());
 	WidgetTree->RootWidget = Root;
 
-	// Dim overlay.
+	// Controlled dim: arena stays partially visible behind the result card.
 	UImage* Dim = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass());
-	Dim->SetBrush(SEUiStyle::SolidBrush(FLinearColor(0.02f, 0.02f, 0.04f, 0.85f)));
+	Dim->SetBrush(SEUiStyle::SolidBrush(FLinearColor(0.02f, 0.02f, 0.05f, 0.55f)));
 	if (UCanvasPanelSlot* S = Root->AddChildToCanvas(Dim))
 	{
 		S->SetAnchors(FAnchors(0,0,1,1)); S->SetOffsets(FMargin(0));
+	}
+
+	// Give the result hierarchy its own readable broadcast card.  Keeping the
+	// arena visible is useful, but putting type directly over the player's back
+	// made the earlier result screen change contrast from frame to frame.
+	UImage* Card = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass());
+	Card->SetBrush(SEUiStyle::SolidBrush(FLinearColor(0.025f, 0.055f, 0.10f, 0.90f)));
+	if (UCanvasPanelSlot* S = Root->AddChildToCanvas(Card))
+	{
+		S->SetAnchors(FAnchors(0.5f,0.5f,0.5f,0.5f));
+		S->SetAlignment(FVector2D(0.5f,0.5f));
+		S->SetSize(FVector2D(560.f, 590.f));
+	}
+
+	// Team-colour bands framing the result (M11d-2 victory hierarchy).
+	TopBand = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass());
+	TopBand->SetBrush(SEUiStyle::SolidBrush(SEUiStyle::Colors::TeamA));
+	TopBand->SetRenderOpacity(0.85f);
+	if (UCanvasPanelSlot* S = Root->AddChildToCanvas(TopBand))
+	{
+		S->SetAnchors(FAnchors(0,0,1,0)); S->SetOffsets(FMargin(0.f, 0.f, 0.f, 6.f));
+	}
+	BottomBand = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass());
+	BottomBand->SetBrush(SEUiStyle::SolidBrush(SEUiStyle::Colors::TeamB));
+	BottomBand->SetRenderOpacity(0.85f);
+	if (UCanvasPanelSlot* S = Root->AddChildToCanvas(BottomBand))
+	{
+		S->SetAnchors(FAnchors(0,1,1,1)); S->SetOffsets(FMargin(0.f, -6.f, 0.f, 0.f));
 	}
 
 	UVerticalBox* Col = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass());
@@ -77,14 +104,14 @@ void UMatchEndWidget::BuildWidgetTree()
 
 	Title = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
 	Title->SetText(FText::FromString(TEXT("比赛结束")));
-	Title->SetFont(SEUiStyle::Font(56));
-	Title->SetColorAndOpacity(FSlateColor(FLinearColor(0.95f, 0.95f, 0.1f)));
+	Title->SetFont(SEUiStyle::FontBold(56));
+	Title->SetColorAndOpacity(FSlateColor(SEUiStyle::Colors::Gold));
 	Title->SetJustification(ETextJustify::Center);
 	Col->AddChildToVerticalBox(Title);
 
 	WinnerText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
-	WinnerText->SetFont(SEUiStyle::Font(34));
-	WinnerText->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 0.6f, 0.2f)));
+	WinnerText->SetFont(SEUiStyle::FontBold(38));
+	WinnerText->SetColorAndOpacity(FSlateColor(SEUiStyle::Colors::TeamA));
 	WinnerText->SetJustification(ETextJustify::Center);
 	Col->AddChildToVerticalBox(WinnerText);
 
@@ -99,9 +126,9 @@ void UMatchEndWidget::BuildWidgetTree()
 	Sp->SetText(FText::FromString(TEXT(" ")));
 	Col->AddChildToVerticalBox(Sp);
 
-	BtnRematch  = MakeMatchEndBtn(WidgetTree, Col, TEXT("再来一场"), FLinearColor(0.10f,0.50f,0.95f,1), FLinearColor(0.30f,0.68f,1.0f,1), 26);
-	BtnMainMenu = MakeMatchEndBtn(WidgetTree, Col, TEXT("返回主菜单"), FLinearColor(0.16f,0.18f,0.24f,1), FLinearColor(0.28f,0.34f,0.46f,1), 22);
-	BtnQuit     = MakeMatchEndBtn(WidgetTree, Col, TEXT("退出到桌面"), FLinearColor(0.30f,0.10f,0.10f,1), FLinearColor(0.55f,0.20f,0.20f,1), 22);
+	BtnRematch  = MakeMatchEndBtn(WidgetTree, Col, TEXT("再来一场"), SEUiStyle::PrimaryButton(), 26);
+	BtnMainMenu = MakeMatchEndBtn(WidgetTree, Col, TEXT("返回主菜单"), SEUiStyle::SecondaryButton(), 22);
+	BtnQuit     = MakeMatchEndBtn(WidgetTree, Col, TEXT("退出到桌面"), SEUiStyle::DangerButton(), 22);
 }
 
 void UMatchEndWidget::NativeConstruct()
@@ -124,6 +151,7 @@ void UMatchEndWidget::SetResult(EVolleyballTeam Winner, const TArray<int32>& Sco
 	if (WinnerText)
 	{
 		WinnerText->SetText(FText::FromString(FString::Printf(TEXT("%s 队获胜！"), bA ? TEXT("A") : TEXT("B"))));
+		WinnerText->SetColorAndOpacity(FSlateColor(bA ? SEUiStyle::Colors::TeamA : SEUiStyle::Colors::TeamB));
 	}
 	if (SetScoresText)
 	{

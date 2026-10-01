@@ -19,11 +19,10 @@ UConfirmWidget::UConfirmWidget(const FObjectInitializer& ObjectInitializer)
 }
 
 static UButton* MakeConfirmBtn(UWidgetTree* Tree, UVerticalBox* Parent, const FString& Label,
-	const FLinearColor& Base, const FLinearColor& Hover, int32 FontSize)
+	const FButtonStyle& Style, int32 FontSize)
 {
 	UButton* B = Tree->ConstructWidget<UButton>(UButton::StaticClass());
-	B->SetStyle(SEUiStyle::ButtonStyle(Base, Hover,
-		FLinearColor(Base.R * 0.6f, Base.G * 0.6f, Base.B * 0.6f, 1.f)));
+	B->SetStyle(Style);
 
 	UTextBlock* T = Tree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
 	T->SetText(FText::FromString(Label));
@@ -85,8 +84,8 @@ void UConfirmWidget::BuildWidgetTree()
 	Sp->SetText(FText::FromString(TEXT(" ")));
 	Col->AddChildToVerticalBox(Sp);
 
-	BtnConfirm = MakeConfirmBtn(WidgetTree, Col, TEXT("确认"), FLinearColor(0.10f,0.50f,0.95f,1), FLinearColor(0.30f,0.68f,1.0f,1), 22);
-	BtnCancel  = MakeConfirmBtn(WidgetTree, Col, TEXT("取消"), FLinearColor(0.22f,0.24f,0.30f,1), FLinearColor(0.34f,0.38f,0.46f,1), 22);
+	BtnConfirm = MakeConfirmBtn(WidgetTree, Col, TEXT("确认"), SEUiStyle::PrimaryButton(), 22);
+	BtnCancel  = MakeConfirmBtn(WidgetTree, Col, TEXT("取消"), SEUiStyle::SecondaryButton(), 22);
 }
 
 void UConfirmWidget::NativeConstruct()

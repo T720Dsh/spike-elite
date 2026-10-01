@@ -43,14 +43,22 @@ protected:
 	UPROPERTY() TObjectPtr<UComboBoxString> Quality;
 	UPROPERTY() TObjectPtr<USlider> SensSlider;
 	UPROPERTY() TObjectPtr<UTextBlock> SensValue;
+	UPROPERTY() TObjectPtr<USlider> UIScaleSlider;
+	UPROPERTY() TObjectPtr<UTextBlock> UIScaleValue;
+	UPROPERTY() TObjectPtr<UButton> ReducedMotionBtn;
+	UPROPERTY() TObjectPtr<UTextBlock> ReducedMotionLabel;
 	UPROPERTY() TObjectPtr<UTextBlock> ApplyStatus;
 	UPROPERTY() TObjectPtr<UButton> BtnApply;
 	UPROPERTY() TObjectPtr<UButton> BtnBack;
 
 	float PendingSensitivity = 1.0f;
+	float PendingUIScale = 1.0f;
+	bool bReducedMotion = false;
 	float ApplyStatusSeconds = 0.0f;
 
 	UFUNCTION() void OnSensChanged(float V);
+	UFUNCTION() void OnUIScaleChanged(float V);
+	UFUNCTION() void ToggleReducedMotion();
 	UFUNCTION() void ApplySettings();
 	UFUNCTION() void Back();
 

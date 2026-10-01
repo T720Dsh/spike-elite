@@ -8,6 +8,7 @@
 
 class UButton;
 class UTextBlock;
+class UImage;
 
 /**
  * End-of-match result screen (M10).
@@ -38,9 +39,14 @@ protected:
 	UPROPERTY() TObjectPtr<UTextBlock> Title;
 	UPROPERTY() TObjectPtr<UTextBlock> WinnerText;
 	UPROPERTY() TObjectPtr<UTextBlock> SetScoresText;
+	UPROPERTY() TObjectPtr<UTextBlock> ScoreCardA;
+	UPROPERTY() TObjectPtr<UTextBlock> ScoreCardB;
 	UPROPERTY() TObjectPtr<UButton> BtnRematch;
 	UPROPERTY() TObjectPtr<UButton> BtnMainMenu;
 	UPROPERTY() TObjectPtr<UButton> BtnQuit;
+
+	UPROPERTY() TObjectPtr<UImage> TopBand;
+	UPROPERTY() TObjectPtr<UImage> BottomBand;
 
 	void BuildWidgetTree();
 

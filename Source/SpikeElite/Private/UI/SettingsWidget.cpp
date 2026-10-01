@@ -20,8 +20,23 @@
 #include "Engine/Texture2D.h"
 #include "Engine/Engine.h"
 #include "RHI.h"
+#include "Framework/Application/SlateApplication.h"
+#include "UI/SEUiStyle.h"
 
 USettingsWidget::USettingsWidget(const FObjectInitializer& OI) : Super(OI) {}
+
+/** M11d-2: section heading inside the settings panel. */
+static void AddSection(UWidgetTree* T, UVerticalBox* Parent, const FString& Label)
+{
+	UTextBlock* L = T->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
+	L->SetText(FText::FromString(Label));
+	L->SetFont(SEUiStyle::Font(SEUiStyle::Type::Small()));
+	L->SetColorAndOpacity(FSlateColor(SEUiStyle::Colors::Gold));
+	if (UVerticalBoxSlot* Slot = Parent->AddChildToVerticalBox(L))
+	{
+		Slot->SetPadding(FMargin(0.f, 14.f, 0.f, 2.f));
+	}
+}
 
 static void AddRow(UWidgetTree* T, UVerticalBox* Parent, const FString& Label)
 {
@@ -170,6 +185,7 @@ void USettingsWidget::BuildWidgetTree()
 		TitleSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 8.f));
 	}
 
+	AddSection(WidgetTree, Col, TEXT("显示"));
 	AddRow(WidgetTree, Col, TEXT("窗口模式"));
 	WindowMode = WidgetTree->ConstructWidget<UComboBoxString>(UComboBoxString::StaticClass());
 	WindowMode->AddOption(TEXT("窗口化"));
@@ -182,6 +198,7 @@ void USettingsWidget::BuildWidgetTree()
 	Resolution = WidgetTree->ConstructWidget<UComboBoxString>(UComboBoxString::StaticClass());
 	AddSizedControl(WidgetTree, Col, Resolution);
 
+	AddSection(WidgetTree, Col, TEXT("图形"));
 	AddRow(WidgetTree, Col, TEXT("图形质量"));
 	Quality = WidgetTree->ConstructWidget<UComboBoxString>(UComboBoxString::StaticClass());
 	Quality->AddOption(TEXT("低"));
@@ -192,6 +209,7 @@ void USettingsWidget::BuildWidgetTree()
 	Quality->SetSelectedIndex(2);
 	AddSizedControl(WidgetTree, Col, Quality);
 
+	AddSection(WidgetTree, Col, TEXT("控制"));
 	AddRow(WidgetTree, Col, TEXT("鼠标灵敏度"));
 	SensSlider = WidgetTree->ConstructWidget<USlider>(USlider::StaticClass());
 	SensSlider->SetMinValue(0.1f); SensSlider->SetMaxValue(3.0f);  // matches PlayerController
@@ -205,6 +223,31 @@ void USettingsWidget::BuildWidgetTree()
 		ValueSlot->SetHorizontalAlignment(HAlign_Center);
 	}
 
+	AddSection(WidgetTree, Col, TEXT("辅助功能"));
+	AddRow(WidgetTree, Col, TEXT("UI 缩放"));
+	UIScaleSlider = WidgetTree->ConstructWidget<USlider>(USlider::StaticClass());
+	UIScaleSlider->SetMinValue(0.8f); UIScaleSlider->SetMaxValue(1.4f);
+	UIScaleSlider->SetValue(PendingUIScale);
+	AddSizedControl(WidgetTree, Col, UIScaleSlider);
+	UIScaleValue = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
+	UIScaleValue->SetText(FText::FromString(FString::Printf(TEXT("%.2fx"), PendingUIScale)));
+	UIScaleValue->SetColorAndOpacity(FSlateColor(FLinearColor(0.8f,0.85f,1.f)));
+	if (UVerticalBoxSlot* ValueSlot = Col->AddChildToVerticalBox(UIScaleValue))
+	{
+		ValueSlot->SetHorizontalAlignment(HAlign_Center);
+	}
+
+	AddRow(WidgetTree, Col, TEXT("减少动态效果"));
+	ReducedMotionBtn = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass());
+	ReducedMotionBtn->SetStyle(SEUiStyle::ButtonStyle(SEUiStyle::Colors::Slate, FLinearColor(0.28f,0.34f,0.46f,1.f), FLinearColor(0.10f,0.13f,0.18f,1.f)));
+	ReducedMotionLabel = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
+	ReducedMotionLabel->SetText(FText::FromString(TEXT("关")));
+	ReducedMotionLabel->SetFont(SEUiStyle::Font(18));
+	ReducedMotionLabel->SetColorAndOpacity(FSlateColor(SEUiStyle::Colors::White));
+	ReducedMotionLabel->SetJustification(ETextJustify::Center);
+	ReducedMotionBtn->AddChild(ReducedMotionLabel);
+	AddSizedControl(WidgetTree, Col, ReducedMotionBtn, 160.f);
+
 	UHorizontalBox* Btns = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
 	if (UVerticalBoxSlot* ButtonsSlot = Col->AddChildToVerticalBox(Btns))
 	{
@@ -212,7 +255,7 @@ void USettingsWidget::BuildWidgetTree()
 		ButtonsSlot->SetPadding(FMargin(0.f, 10.f, 0.f, 0.f));
 	}
 	BtnApply = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass());
-	BtnApply->SetStyle(SEUiStyle::ButtonStyle(FLinearColor(0.10f,0.50f,0.95f,1), FLinearColor(0.30f,0.68f,1.0f,1), FLinearColor(0.06f,0.30f,0.57f,1)));
+	BtnApply->SetStyle(SEUiStyle::PrimaryButton());
 	{
 		UTextBlock* T = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
 		T->SetText(FText::FromString(TEXT("应用")));
@@ -222,7 +265,7 @@ void USettingsWidget::BuildWidgetTree()
 		if (UHorizontalBoxSlot* ButtonSlot = Btns->AddChildToHorizontalBox(BtnApply)) ButtonSlot->SetPadding(FMargin(6.f));
 	}
 	BtnBack = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass());
-	BtnBack->SetStyle(SEUiStyle::ButtonStyle(FLinearColor(0.16f,0.18f,0.24f,1), FLinearColor(0.28f,0.34f,0.46f,1), FLinearColor(0.10f,0.11f,0.15f,1)));
+	BtnBack->SetStyle(SEUiStyle::SecondaryButton());
 	{
 		UTextBlock* T = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
 		T->SetText(FText::FromString(TEXT("返回")));
@@ -242,6 +285,8 @@ void USettingsWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
 	if (SensSlider) SensSlider->OnValueChanged.AddUniqueDynamic(this, &USettingsWidget::OnSensChanged);
+	if (UIScaleSlider) UIScaleSlider->OnValueChanged.AddUniqueDynamic(this, &USettingsWidget::OnUIScaleChanged);
+	if (ReducedMotionBtn) ReducedMotionBtn->OnClicked.AddUniqueDynamic(this, &USettingsWidget::ToggleReducedMotion);
 	if (BtnApply) BtnApply->OnClicked.AddUniqueDynamic(this, &USettingsWidget::ApplySettings);
 	if (BtnBack) BtnBack->OnClicked.AddUniqueDynamic(this, &USettingsWidget::Back);
 
@@ -255,6 +300,15 @@ void USettingsWidget::NativeConstruct()
 	// Reflect the live settings after the controls exist.
 	InitFromCurrentSettings();
 	SetCurrentSensitivity(PendingSensitivity);
+
+	// M11d-2: accessibility controls initial state.
+	bReducedMotion = SEUiStyle::IsReducedMotion();
+	if (UIScaleSlider) { UIScaleSlider->SetValue(PendingUIScale); }
+	if (UIScaleValue)  { UIScaleValue->SetText(FText::FromString(FString::Printf(TEXT("%.2fx"), PendingUIScale))); }
+	if (ReducedMotionLabel)
+	{
+		ReducedMotionLabel->SetText(FText::FromString(bReducedMotion ? TEXT("开") : TEXT("关")));
+	}
 }
 
 void USettingsWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
@@ -281,6 +335,22 @@ void USettingsWidget::OnSensChanged(float V)
 {
 	PendingSensitivity = FMath::Clamp(V, 0.1f, 3.0f);
 	if (SensValue) SensValue->SetText(FText::FromString(FString::Printf(TEXT("%.2f"), PendingSensitivity)));
+}
+
+void USettingsWidget::OnUIScaleChanged(float V)
+{
+	PendingUIScale = FMath::Clamp(V, 0.8f, 1.4f);
+	if (UIScaleValue) UIScaleValue->SetText(FText::FromString(FString::Printf(TEXT("%.2fx"), PendingUIScale)));
+}
+
+void USettingsWidget::ToggleReducedMotion()
+{
+	bReducedMotion = !bReducedMotion;
+	SEUiStyle::SetReducedMotion(bReducedMotion);
+	if (ReducedMotionLabel)
+	{
+		ReducedMotionLabel->SetText(FText::FromString(bReducedMotion ? TEXT("开") : TEXT("关")));
+	}
 }
 
 void USettingsWidget::ApplySettings()
@@ -310,6 +380,11 @@ void USettingsWidget::ApplySettings()
 
 	S->ApplySettings(true);
 	S->SaveSettings();
+
+	// M11d-2: accessibility — global UI scale (Slate application scale) and
+	// reduced-motion flag are applied immediately and persisted by the owner.
+	FSlateApplication::Get().SetApplicationScale(PendingUIScale);
+	SEUiStyle::SetReducedMotion(bReducedMotion);
 
 	// Sensitivity is committed only on Apply (Back discards the pending value).
 	OnSensitivityChanged.ExecuteIfBound(PendingSensitivity);
