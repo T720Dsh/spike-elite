@@ -62,8 +62,10 @@ protected:
 	UPROPERTY() TObjectPtr<UBorder> DefenseBorder;
 
 	UPROPERTY() TObjectPtr<UTextBlock> AttackHeader;
+	UPROPERTY() TObjectPtr<UTextBlock> AttackStage;
 	UPROPERTY() TObjectPtr<UTextBlock> AttackTarget;
 	UPROPERTY() TObjectPtr<UTextBlock> AttackPower;
+	UPROPERTY() TObjectPtr<UProgressBar> PowerBar;
 	UPROPERTY() TObjectPtr<UTextBlock> AttackArc;
 	UPROPERTY() TObjectPtr<UTextBlock> AttackVerdict;
 	UPROPERTY() TObjectPtr<UTextBlock> AttackHelp;
@@ -71,6 +73,7 @@ protected:
 	UPROPERTY() TObjectPtr<UTextBlock> TimingLabel;
 
 	UPROPERTY() TObjectPtr<UTextBlock> SetTitle;
+	UPROPERTY() TObjectPtr<UTextBlock> SetCategory;
 	UPROPERTY() TObjectPtr<UVerticalBox> SetList;
 	UPROPERTY() TObjectPtr<UTextBlock> SetDetails;
 	UPROPERTY() TObjectPtr<UTextBlock> SetHelp;
@@ -78,7 +81,8 @@ protected:
 	TArray<TObjectPtr<UButton>> SetRowButtons;
 
 	UPROPERTY() TObjectPtr<UTextBlock> DefenseTitle;
-	UPROPERTY() TObjectPtr<UVerticalBox> DefenseList;
+	UPROPERTY() TObjectPtr<UVerticalBox> DefenseListBlock;
+	UPROPERTY() TObjectPtr<UVerticalBox> DefenseListDig;
 	UPROPERTY() TObjectPtr<UTextBlock> DefenseHelp;
 	TArray<TObjectPtr<UTextBlock>> DefenseRows;
 	TArray<TObjectPtr<UButton>> DefenseRowButtons;
