@@ -31,6 +31,11 @@ struct FSetPlayDefinition
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	FVector2D TargetLocal = FVector2D(140.f, 0.f);
 
+	/** M11c-5: local attacker run-up start (where the chosen hitter sprints to
+	 *  before the set arrives). Mirrored the same way as TargetLocal. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	FVector2D AttackRunupLocal = FVector2D(160.f, 0.f);
+
 	/** Apex height above the contact point (cm); 0 = derive from flight time. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	float ApexHeight = 300.f;

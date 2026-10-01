@@ -1,12 +1,14 @@
 ﻿// SPDX-License-Identifier: MIT
 #include "UI/TacticalContactComponent.h"
 #include "UI/TrajectoryPreviewComponent.h"
+#include "UI/TacticalHUDWidget.h"
 #include "SpikeEliteGameMode.h"
 #include "SpikeEliteCharacter.h"
 #include "SpikeElitePlayerController.h"
 #include "Volleyball/VolleyballBall.h"
 #include "Volleyball/SetPlay.h"
 #include "Components/TextRenderComponent.h"
+#include "Blueprint/UserWidget.h"
 #include "Components/InputComponent.h"
 #include "GameFramework/Pawn.h"
 #include "Kismet/GameplayStatics.h"
@@ -58,6 +60,20 @@ void UTacticalContactComponent::BeginPlay()
 	HintText->SetText(FText::FromString(TEXT("")));
 	HintText->RegisterComponent();
 	HintText->SetVisibility(false);
+
+	// M11c-5: the real screen UMG (attack / set-list / defense panels).
+	TacticalUI = CreateWidget<UTacticalHUDWidget>(GetWorld());
+	if (TacticalUI)
+	{
+		TacticalUI->AddToViewport(50);
+		TacticalUI->HideAll();
+		TacticalUI->OnSetPlaySelected.AddUObject(this, &UTacticalContactComponent::HandleSetPlayPicked);
+		TacticalUI->OnDefensePlanSelected.AddUObject(this, &UTacticalContactComponent::HandleDefensePicked);
+	}
+	else
+	{
+		UE_LOG(LogVolleyballRules, Warning, TEXT("[Tactical] CreateWidget failed - tactical UI disabled"));
+	}
 }
 
 void UTacticalContactComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
@@ -95,6 +111,27 @@ void UTacticalContactComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 		const FVector PawnLoc = Pawn->GetActorLocation();
 		const FVector BallLoc = GM->GetBall()->GetActorLocation();
 		const float Dist2D = FVector::Dist2D(PawnLoc, BallLoc);
+
+		// M11c-5: defense planning — the OPPONENT is about to attack (their
+		// 2nd touch done, ball fast and close to the net on their half). The
+		// human picks a defensive plan; AI uses defaults on timeout.
+		const EVolleyballTeam MyTeam = (Pawn->TeamSide >= 0) ? EVolleyballTeam::TeamA : EVolleyballTeam::TeamB;
+		const EVolleyballTeam PossTeam = GM->GetPossessingTeam();
+		if (PossTeam != EVolleyballTeam::None && PossTeam != MyTeam
+			&& GM->GetTouchCount() >= 2)
+		{
+			const FVector BallVel = GM->GetBall()->GetVelocity();
+			const bool bBallOnTheirSide = (PossTeam == EVolleyballTeam::TeamA) ? (BallLoc.X < 0.f) : (BallLoc.X > 0.f);
+			const float SideX = (MyTeam == EVolleyballTeam::TeamA) ? 1.f : -1.f;
+			const bool bApproachingNet = (FMath::Abs(BallLoc.X) < 700.f);
+			if (bBallOnTheirSide && bApproachingNet && BallVel.Size() > 350.f && BallLoc.Z < 420.f
+				&& TacticalMode >= 1)
+			{
+				EnterDefensePlanning();
+				break;
+			}
+		}
+
 		if (Dist2D <= TouchReach2D && BallLoc.Z >= MinTouchZ && BallLoc.Z <= MaxTouchZ && Pawn->bTouchArmed)
 		{
 			if (TacticalMode == 0) { return; }
@@ -106,6 +143,45 @@ void UTacticalContactComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 				WindowTimer = TacticalWindowSeconds;
 				PendingTouchType = Type;
 			}
+		}
+		break;
+	}
+	case ETacticalState::DefensePlanning:
+	{
+		// M11c-5: slow motion while choosing; Esc/RMB cancels (AI default),
+		// LMB/Enter confirms; timeout picks the AI default.
+		DefenseTimer -= RealDt;
+		if (OwnerPC->WasInputKeyJustPressed(EKeys::Up) || OwnerPC->WasInputKeyJustPressed(EKeys::W))
+		{
+			DefenseSelected = (DefenseSelected + 7) % 8;
+			if (TacticalUI) { TacticalUI->UpdateDefenseList(DefenseSelected); }
+		}
+		if (OwnerPC->WasInputKeyJustPressed(EKeys::Down) || OwnerPC->WasInputKeyJustPressed(EKeys::S))
+		{
+			DefenseSelected = (DefenseSelected + 1) % 8;
+			if (TacticalUI) { TacticalUI->UpdateDefenseList(DefenseSelected); }
+		}
+		if (OwnerPC->WasInputKeyJustPressed(EKeys::RightMouseButton) || OwnerPC->WasInputKeyJustPressed(EKeys::Escape))
+		{
+			DefensePlan = EVolleyballDefensePlan::NoPlan;
+			if (GM.IsValid()) { GM->SetPlayerDefensePlan(EVolleyballDefensePlan::NoPlan); }
+			RestoreWorldState();
+			State = ETacticalState::Normal;
+			if (TacticalUI) { TacticalUI->HideAll(); }
+			break;
+		}
+		if (OwnerPC->WasInputKeyJustPressed(EKeys::LeftMouseButton) || OwnerPC->WasInputKeyJustPressed(EKeys::Enter))
+		{
+			ConfirmDefensePlan();
+			break;
+		}
+		if (DefenseTimer <= 0.f)
+		{
+			DefensePlan = EVolleyballDefensePlan::NoPlan;
+			if (GM.IsValid()) { GM->SetPlayerDefensePlan(EVolleyballDefensePlan::NoPlan); }
+			RestoreWorldState();
+			State = ETacticalState::Normal;
+			if (TacticalUI) { TacticalUI->HideAll(); }
 		}
 		break;
 	}
@@ -180,6 +256,22 @@ void UTacticalContactComponent::EnterPlanning(EBallTouchType Type)
 	// M11b-5b: a set opens the data-driven tactic picker (starts at 四号位高球).
 	SelectedPlay = (Type == EBallTouchType::Set) ? 0 : -1;
 	RebuildPreview();
+
+	// M11c-5: real screen UMG — set list for a set, attack panel otherwise.
+	if (TacticalUI)
+	{
+		if (Type == EBallTouchType::Set)
+		{
+			TacticalUI->ShowSetPanel();
+			TacticalUI->UpdateSetList(SelectedPlay);
+		}
+		else
+		{
+			TacticalUI->ShowAttackPanel();
+			TacticalUI->UpdateAttackInfo(Intent, SEVolleyballTrajectory::BuildShotSolution(
+				GM->GetBall() ? GM->GetBall()->GetActorLocation() : FVector::ZeroVector, Intent, 0.f));
+		}
+	}
 }
 
 void UTacticalContactComponent::TickPlanning(float DeltaTime)
@@ -212,19 +304,21 @@ void UTacticalContactComponent::TickPlanning(float DeltaTime)
 
 	// Arc / flight time: Q up (higher), E down.
 	// M11b-5b: while setting, Q/E cycle the data-driven tactic list instead;
-	// free trajectory (id 14) falls back to manual arc control.
+	// free trajectory (id 14) falls back to manual arc control. M11c-5 adds
+	// Up/Down keyboard cycling and updates the screen list.
 	const bool bSetTactics = (PendingTouchType == EBallTouchType::Set && SelectedPlay >= 0);
 	if (bSetTactics)
 	{
 		const TArray<FSetPlayDefinition>& Plays = SESetPlays::GetPlays();
-		if (OwnerPC->WasInputKeyJustPressed(EKeys::Q))
+		if (OwnerPC->WasInputKeyJustPressed(EKeys::Q) || OwnerPC->WasInputKeyJustPressed(EKeys::Up))
 		{
 			SelectedPlay = (SelectedPlay + 1) % Plays.Num();
 		}
-		if (OwnerPC->WasInputKeyJustPressed(EKeys::E))
+		if (OwnerPC->WasInputKeyJustPressed(EKeys::E) || OwnerPC->WasInputKeyJustPressed(EKeys::Down))
 		{
 			SelectedPlay = (SelectedPlay - 1 + Plays.Num()) % Plays.Num();
 		}
+		if (TacticalUI) { TacticalUI->UpdateSetList(SelectedPlay); }
 		// Mouse still picks the landing when free trajectory is selected.
 		if (Plays.IsValidIndex(SelectedPlay) && Plays[SelectedPlay].PlayId != 14)
 		{
@@ -247,9 +341,20 @@ void UTacticalContactComponent::TickPlanning(float DeltaTime)
 
 	RebuildPreview();
 
+	// M11c-5: push the live attack info into the screen panel each frame.
+	if (TacticalUI && !bSetTactics)
+	{
+		TacticalUI->UpdateAttackInfo(Intent, SEVolleyballTrajectory::BuildShotSolution(
+			GM->GetBall() ? GM->GetBall()->GetActorLocation() : FVector::ZeroVector, Intent, 0.f));
+	}
+
 	// Confirm / cancel.
 	if (OwnerPC->WasInputKeyJustPressed(EKeys::LeftMouseButton))
 	{
+		if (PendingTouchType == EBallTouchType::Set && GM.IsValid())
+		{
+			GM->SetActiveSetPlay(SelectedPlay);   // M11c-5: attacker run-up follows the play
+		}
 		EnterArmed();
 	}
 	else if (OwnerPC->WasInputKeyJustPressed(EKeys::RightMouseButton) || OwnerPC->WasInputKeyJustPressed(EKeys::Escape))
@@ -305,6 +410,12 @@ void UTacticalContactComponent::EnterArmed()
 	{
 		HintText->SetText(FText::FromString(TEXT("时机窗口：按左键击球（过早/过晚影响质量）")));
 	}
+	// M11c-5: the timing bar lives on the attack panel; a set keeps its list.
+	if (TacticalUI)
+	{
+		TacticalUI->ShowAttackPanel();
+		TacticalUI->ShowTiming(1.f, TEXT(""));
+	}
 }
 
 void UTacticalContactComponent::ExecuteTimedShot(float TimingError)
@@ -351,6 +462,59 @@ void UTacticalContactComponent::RestoreWorldState()
 	}
 	if (Preview) { Preview->HidePreview(); }
 	if (HintText) { HintText->SetVisibility(false); }
+	if (TacticalUI) { TacticalUI->HideAll(); }
+}
+
+// M11c-5: defense planning entry.
+void UTacticalContactComponent::EnterDefensePlanning()
+{
+	if (State == ETacticalState::DefensePlanning) { return; }
+	State = ETacticalState::DefensePlanning;
+	DefenseTimer = 3.0f;
+	DefenseSelected = 0;
+	SavedTimeDilation = GetWorld()->GetWorldSettings()->TimeDilation;
+	GetWorld()->GetWorldSettings()->TimeDilation = 0.3f;
+	if (Pawn.IsValid() && OwnerPC.IsValid())
+	{
+		Pawn->DisableInput(OwnerPC.Get());
+		OwnerPC->SetShowMouseCursor(true);
+		OwnerPC->SetInputMode(FInputModeGameAndUI());
+	}
+	if (TacticalUI)
+	{
+		TacticalUI->ShowDefensePanel();
+		TacticalUI->UpdateDefenseList(0);
+	}
+	UE_LOG(LogVolleyballRules, Log, TEXT("[DefensePlanning] opponent attack incoming - player chooses plan"));
+}
+
+void UTacticalContactComponent::ConfirmDefensePlan()
+{
+	// Index 0..7 maps onto EVolleyballDefensePlan (1 == SingleBlock .. 8 == DiveDig).
+	const EVolleyballDefensePlan Plan = static_cast<EVolleyballDefensePlan>(DefenseSelected + 1);
+	DefensePlan = Plan;
+	if (GM.IsValid()) { GM->SetPlayerDefensePlan(Plan); }
+	RestoreWorldState();
+	State = ETacticalState::Normal;
+	if (TacticalUI) { TacticalUI->HideAll(); }
+	UE_LOG(LogVolleyballRules, Log, TEXT("[DefensePlan] player chose plan=%d"), DefenseSelected + 1);
+}
+
+void UTacticalContactComponent::HandleSetPlayPicked(int32 Index)
+{
+	const TArray<FSetPlayDefinition>& Plays = SESetPlays::GetPlays();
+	if (Plays.IsValidIndex(Index))
+	{
+		SelectedPlay = Index;
+		if (TacticalUI) { TacticalUI->UpdateSetList(SelectedPlay); }
+	}
+}
+
+void UTacticalContactComponent::HandleDefensePicked(int32 Index)
+{
+	DefenseSelected = FMath::Clamp(Index, 0, 7);
+	if (TacticalUI) { TacticalUI->UpdateDefenseList(DefenseSelected); }
+	ConfirmDefensePlan();
 }
 
 

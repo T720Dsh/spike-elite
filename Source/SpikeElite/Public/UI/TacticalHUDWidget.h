@@ -1,0 +1,98 @@
+// SPDX-License-Identifier: MIT
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Blueprint/UserWidget.h"
+#include "Volleyball/VolleyballTrajectory.h"
+#include "Volleyball/SetPlay.h"
+#include "TacticalHUDWidget.generated.h"
+
+class UTextBlock;
+class UProgressBar;
+class UCanvasPanel;
+class UVerticalBox;
+class UBorder;
+class UButton;
+
+DECLARE_MULTICAST_DELEGATE_OneParam(FOnSetPlaySelected, int32);
+DECLARE_MULTICAST_DELEGATE_OneParam(FOnDefensePlanSelected, int32);
+
+/**
+ * M11c-5: the REAL screen UMG for tactical play — replaces the world-space
+ * UTextRenderComponent hint. One widget, three panels:
+ *  - AttackPanel: touch type, target landing, power, solved initial speed,
+ *    arc apex, flight time, net/in-bounds verdict and the armed timing bar.
+ *  - SetPanel: the full 13+1 data-driven set-play list with highlight,
+ *    category / attacker / apex / speed / flight time / risk details.
+ *  - DefensePanel: the 8 defensive plan choices (block / line / dig).
+ * Panels are hidden except while their state is active; every SetText call is
+ * gated by a dirty comparison so nothing is rebuilt per frame.
+ */
+UCLASS()
+class SPIKEELITE_API UTacticalHUDWidget : public UUserWidget
+{
+	GENERATED_BODY()
+
+public:
+	UTacticalHUDWidget(const FObjectInitializer& ObjectInitializer);
+	virtual TSharedRef<SWidget> RebuildWidget() override;
+
+	/** Panels: which mode is visible right now. */
+	void ShowAttackPanel();
+	void ShowSetPanel();
+	void ShowDefensePanel();
+	void HideAll();
+
+	/** Attack panel data (called only when the plan actually changes). */
+	void UpdateAttackInfo(const FShotIntent& Intent, const SEVolleyballTrajectory::FShotSolution& Sol);
+	void ShowTiming(float Progress01, const FString& Status);
+
+	/** Set-play list: rebuild highlight / details from the current selection. */
+	void UpdateSetList(int32 Selected);
+	/** Defense list highlight. */
+	void UpdateDefenseList(int32 Selected);
+
+	FOnSetPlaySelected OnSetPlaySelected;
+	FOnDefensePlanSelected OnDefensePlanSelected;
+
+protected:
+	UPROPERTY() TObjectPtr<UCanvasPanel> Root;
+	UPROPERTY() TObjectPtr<UBorder> AttackBorder;
+	UPROPERTY() TObjectPtr<UBorder> SetBorder;
+	UPROPERTY() TObjectPtr<UBorder> DefenseBorder;
+
+	UPROPERTY() TObjectPtr<UTextBlock> AttackHeader;
+	UPROPERTY() TObjectPtr<UTextBlock> AttackTarget;
+	UPROPERTY() TObjectPtr<UTextBlock> AttackPower;
+	UPROPERTY() TObjectPtr<UTextBlock> AttackArc;
+	UPROPERTY() TObjectPtr<UTextBlock> AttackVerdict;
+	UPROPERTY() TObjectPtr<UTextBlock> AttackHelp;
+	UPROPERTY() TObjectPtr<UProgressBar> TimingBar;
+	UPROPERTY() TObjectPtr<UTextBlock> TimingLabel;
+
+	UPROPERTY() TObjectPtr<UTextBlock> SetTitle;
+	UPROPERTY() TObjectPtr<UVerticalBox> SetList;
+	UPROPERTY() TObjectPtr<UTextBlock> SetDetails;
+	UPROPERTY() TObjectPtr<UTextBlock> SetHelp;
+	TArray<TObjectPtr<UTextBlock>> SetRows;
+	TArray<TObjectPtr<UButton>> SetRowButtons;
+
+	UPROPERTY() TObjectPtr<UTextBlock> DefenseTitle;
+	UPROPERTY() TObjectPtr<UVerticalBox> DefenseList;
+	UPROPERTY() TObjectPtr<UTextBlock> DefenseHelp;
+	TArray<TObjectPtr<UTextBlock>> DefenseRows;
+	TArray<TObjectPtr<UButton>> DefenseRowButtons;
+
+	FString LastAttackKey;
+	FString LastSetKey;
+	int32 LastSetSelected = -1;
+	int32 LastDefenseSelected = -1;
+
+	void BuildWidgetTree();
+	void BuildAttackPanel();
+	void BuildSetPanel();
+	void BuildDefensePanel();
+
+	UFUNCTION() void HandleSetRowClick(int32 Index) { OnSetPlaySelected.Broadcast(Index); }
+	UFUNCTION() void HandleDefenseRowClick(int32 Index) { OnDefensePlanSelected.Broadcast(Index); }
+};

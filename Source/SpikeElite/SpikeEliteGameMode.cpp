@@ -1,5 +1,6 @@
 ﻿// SPDX-License-Identifier: MIT
 #include "SpikeEliteGameMode.h"
+#include "Volleyball/SetPlay.h"
 
 // M11b-5c dive-window state (GameMode-owned; reset in StartMatch).
 static float GM_NetCrossWindow = 0.f;
@@ -768,6 +769,12 @@ void ASpikeEliteGameMode::EndRally(ERallyEndReason Reason, EVolleyballTeam Scori
 	for (auto& C : TeamAPlayers) { if (C) { C->bServiceZoneActive = false; } }
 	for (auto& C : TeamBPlayers) { if (C) { C->bServiceZoneActive = false; } }
 
+	// M11c-5: per-rally tactical state is cleared — the set play only applies to
+	// the rally it was chosen for, and the defense plan never leaks into the
+	// next rally.
+	ActiveSetPlayId = -1;
+	PlayerDefensePlan = EVolleyballDefensePlan::NoPlan;
+
 	// M11b-2: the 1st referee blows the end-of-rally whistle.
 	if (Officials) { Officials->Whistle(); }
 
@@ -1444,6 +1451,46 @@ int32 ASpikeEliteGameMode::SelectAttackerPlayer(EVolleyballTeam Team) const
 	return Best;
 }
 
+int32 ASpikeEliteGameMode::SelectAttackerForPlay(EVolleyballTeam Team) const
+{
+	const TArray<TObjectPtr<ASpikeEliteCharacter>>& Roster = (Team == EVolleyballTeam::TeamA) ? TeamAPlayers : TeamBPlayers;
+	const TArray<FSetPlayDefinition>& Plays = SESetPlays::GetPlays();
+	if (!Plays.IsValidIndex(ActiveSetPlayId)) { return SelectAttackerPlayer(Team); }
+	const FSetPlayDefinition& Play = Plays[ActiveSetPlayId];
+
+	// Which slot the play targets: 四号位 -> P4 (front-left), 二号位 -> P2
+	// (front-right), 副攻 -> P3 (front-middle), 后排 -> nearest back-row slot,
+	// anything else -> the generic selector.
+	TArray<int32> Preferred;
+	if (Play.Category == TEXT("四号位")) { Preferred = { 3 }; }           // roster index 3 == P4
+	else if (Play.Category == TEXT("二号位")) { Preferred = { 1 }; }     // roster index 1 == P2
+	else if (Play.Category == TEXT("副攻")) { Preferred = { 2 }; }       // roster index 2 == P3
+	else if (Play.Category == TEXT("后排")) { Preferred = { 0, 4, 5 }; } // P1/P5/P6
+
+	const FVector RunupWorld = SESetPlays::MirrorLocal(Play.AttackRunupLocal, (Team == EVolleyballTeam::TeamA) ? 1 : -1);
+
+	for (int32 Slot : Preferred)
+	{
+		if (Roster.IsValidIndex(Slot) && Roster[Slot] && SEVolleyballRules::IsFrontRowSlot(Slot) == !Play.bBackRowAttack)
+		{
+			if (Slot == RallyState.LastTouchPlayerIndex && RallyState.LastTouchTeam == Team) { continue; }
+			if (FVector::Dist2D(Roster[Slot]->GetActorLocation(), RunupWorld) < 600.f) { return Slot; }
+		}
+	}
+
+	// No exact slot hitter in range — nearest player to the run-up point.
+	int32 Best = -1;
+	float BestDist = TNumericLimits<float>::Max();
+	for (int32 i = 0; i < Roster.Num(); i++)
+	{
+		if (!Roster[i]) continue;
+		if (i == RallyState.LastTouchPlayerIndex && RallyState.LastTouchTeam == Team) continue;
+		const float D = FVector::Dist2D(Roster[i]->GetActorLocation(), RunupWorld);
+		if (D < BestDist) { BestDist = D; Best = i; }
+	}
+	return Best;
+}
+
 FVector ASpikeEliteGameMode::ComputeAITouchDirection(const ASpikeEliteCharacter* Toucher, EBallTouchType Type) const
 {
 	const int32 Side = Toucher ? Toucher->TeamSide : 1;
@@ -1618,15 +1665,19 @@ void ASpikeEliteGameMode::UpdateAIDirectives(float DeltaSeconds)
 					}
 				}
 				break;
-			case 2: // Attack: front-row slot takes the front point; a back-row
-				// attacker takes off from behind the 3 m line (rear attack).
-				Primary = SelectAttackerPlayer(Team);
+			case 2: // Attack: M11c-5 the hitter and the run-up come from the
+				// active set play (data-driven), falling back to the generic
+				// selection; a back-row attacker takes off behind the 3 m line.
+				Primary = (ActiveSetPlayId >= 0) ? SelectAttackerForPlay(Team) : SelectAttackerPlayer(Team);
 				PrimaryBehavior = EAIBehavior::Attack;
 				{
 					const float SideX = (Team == EVolleyballTeam::TeamA) ? 150.f : -150.f;
 					const float AttackX = SEVolleyballRules::IsFrontRowSlot(Primary) ? SideX : SideX * (380.f / 150.f);
-					PrimaryTarget = FVector(AttackX,
-						FMath::Clamp(Ball ? Ball->GetActorLocation().Y : 0.f, -300.f, 300.f), 220.f);
+					const FVector2D Runup = SESetPlays::GetPlays().IsValidIndex(ActiveSetPlayId)
+						? SESetPlays::GetPlays()[ActiveSetPlayId].AttackRunupLocal : FVector2D(AttackX, 0.f);
+					const FVector RunupWorld = SESetPlays::MirrorLocal(Runup, (Team == EVolleyballTeam::TeamA) ? 1 : -1);
+					PrimaryTarget = FVector(FMath::Max(FMath::Abs(RunupWorld.X), FMath::Abs(AttackX)),
+						FMath::Clamp(RunupWorld.Y, -350.f, 350.f), 220.f);
 				}
 				break;
 			default:
@@ -1678,8 +1729,13 @@ void ASpikeEliteGameMode::UpdateAIDirectives(float DeltaSeconds)
 				// M11c-3: dive gating moved to the shared helper — only a fast ball
 				// that already completed a real net crossing (and is NOT a serve
 				// flight) can trigger a dive; recovery blocks re-dives.
-				const bool bDiveSituation = IsDiveSituation(RallyState, bBallOnOwnSide, BallZ,
+				bool bDiveSituation = IsDiveSituation(RallyState, bBallOnOwnSide, BallZ,
 					BallVel.Size2D()) && !C->IsDiveRecovering();
+				// M11c-5: the human's plan may demand a dive dig even on a slower ball.
+				if (PlayerDefensePlan == EVolleyballDefensePlan::DiveDig && bBallOnOwnSide && BallZ < 200.f && !C->IsDiveRecovering())
+				{
+					bDiveSituation = true;
+				}
 				if (i == RecvIdx)
 				{
 					if (bDiveSituation)
@@ -1695,18 +1751,61 @@ void ASpikeEliteGameMode::UpdateAIDirectives(float DeltaSeconds)
 				// — or a high ball is on our side — the front row slides to the
 				// front point at the ball's Y and attempts a block (primary handler
 				// asks TryBlockBall, which re-checks the front-row gate and reach).
+				// M11c-5: the human's defense plan steers block count and lane.
 				else if (bFrontRow
 					&& (RallyState.TouchCount >= 2 || (bBallOnOwnSide && BallZ > 130.f)))
 				{
 					const float SideX = (Team == EVolleyballTeam::TeamA) ? 120.f : -120.f;
-					const FVector BlockPt = FVector(SideX,
-						FMath::Clamp(Ball ? Ball->GetActorLocation().Y : 0.f, -350.f, 350.f), Home.Z);
+					const float BallY = FMath::Clamp(Ball ? Ball->GetActorLocation().Y : 0.f, -350.f, 350.f);
+					float BlockY = BallY;
+					// 封直线: commit to the sideline lane; 封斜线: commit to the
+					// diagonal (toward the ball's far side); default: at the ball.
+					if (PlayerDefensePlan == EVolleyballDefensePlan::LineDefense)
+					{
+						BlockY = (BallY >= 0.f) ? FMath::Min(330.f, BallY + 90.f) : FMath::Max(-330.f, BallY - 90.f);
+					}
+					else if (PlayerDefensePlan == EVolleyballDefensePlan::AngleDefense)
+					{
+						BlockY = FMath::Clamp(BallY * 0.5f, -250.f, 250.f);
+					}
+					const FVector BlockPt = FVector(SideX, BlockY, Home.Z);
 					SetAIDirective(C, EAIBehavior::MoveToBlock, BlockPt, true);
+
+					// 双人拦网: the SECOND nearest front-row player also moves to
+					// the block point (the block lane logic in TryBlockBall still
+					// gates legality — this only steers positioning).
+					if (PlayerDefensePlan == EVolleyballDefensePlan::DoubleBlock && i != -1)
+					{
+						// Find the closest OTHER front-row player to the block point.
+						int32 Second = -1;
+						float SecondDist = TNumericLimits<float>::Max();
+						for (int32 k = 0; k < Roster.Num(); k++)
+						{
+							if (!Roster[k] || k == i) continue;
+							if (!SEVolleyballRules::IsFrontRowSlot(k)) continue;
+							if (k == RallyState.LastTouchPlayerIndex && RallyState.LastTouchTeam == Team) continue;
+							const float D = FVector::Dist2D(Roster[k]->GetActorLocation(), BlockPt);
+							if (D < SecondDist) { SecondDist = D; Second = k; }
+						}
+						if (Second >= 0)
+						{
+							SetAIDirective(Roster[Second].Get(), EAIBehavior::MoveToBlock, BlockPt, true);
+						}
+					}
 				}
 				else
 				{
 					FVector Defensive = Home;
 					if (bFrontRow) { Defensive = FVector((Team == EVolleyballTeam::TeamA) ? 230.f : -230.f, Home.Y, Home.Z); }
+					// M11c-5: back-row lane plans shift the court defence.
+					if (PlayerDefensePlan == EVolleyballDefensePlan::BackLine)
+					{
+						Defensive.Y = (Home.Y >= 0.f) ? FMath::Max(Home.Y, 200.f) : FMath::Min(Home.Y, -200.f);
+					}
+					else if (PlayerDefensePlan == EVolleyballDefensePlan::BackAngle)
+					{
+						Defensive.Y = FMath::Clamp(Home.Y * 0.5f, -280.f, 280.f);
+					}
 					SetAIDirective(C, EAIBehavior::Wait, Defensive, false);
 				}
 			}

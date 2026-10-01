@@ -43,6 +43,12 @@ public:
 	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaSeconds) override;
 
+	/** M11c-5: set the active data-driven set play (tactical UI on confirm). */
+	void SetActiveSetPlay(int32 PlayId) { ActiveSetPlayId = PlayId; }
+
+	/** M11c-5: the human player's chosen defense plan (steers block/back-row). */
+	void SetPlayerDefensePlan(EVolleyballDefensePlan Plan) { PlayerDefensePlan = Plan; }
+
 	/** M11c-2: per-team rotation counters (1..6, wrap via
 	 *  SEVolleyballRules::AdvanceRotationIndex). Each team owns its own rotation
 	 *  so a side-out only advances the receiving team that gained the serve. */
@@ -369,6 +375,16 @@ protected:
 	int32 SelectSetterPlayer(EVolleyballTeam Team) const;
 	/** Choose the attacker: closest to the front attack point near the net. */
 	int32 SelectAttackerPlayer(EVolleyballTeam Team) const;
+
+	/** M11c-5: pick the hitter whose rotation slot matches the active set play
+	 *  (四号位 -> P4, 二号位 -> P2, 副攻 -> P3, 后排 -> nearest back-row slot). */
+	int32 SelectAttackerForPlay(EVolleyballTeam Team) const;
+
+	/** Current data-driven set play (set by the tactical UI on set confirmation). */
+	int32 ActiveSetPlayId = -1;
+
+	/** Defense plan chosen by the human player before the opponent's attack. */
+	EVolleyballDefensePlan PlayerDefensePlan = EVolleyballDefensePlan::NoPlan;
 	/** Predict where the ball will land (or where it would cross floor height). */
 	FVector PredictBallLanding() const;
 	/** Direction for an AI touch given the phase (receive/set/attack). */

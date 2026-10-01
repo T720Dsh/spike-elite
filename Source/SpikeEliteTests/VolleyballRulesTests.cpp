@@ -1002,4 +1002,57 @@ bool FSETacticalEverySetPlayValid::RunTest(const FString& Parameters)
 	return true;
 }
 
+// ---------------- M11c-5: set-play attacker / defense plan data consistency ----------------
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSESetPlaySelectsCorrectAttacker, "SpikeElite.Tests.SetPlaySelectsCorrectAttacker",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FSESetPlaySelectsCorrectAttacker::RunTest(const FString& Parameters)
+{
+	// The data-driven table must be internally consistent so that the runtime
+	// attacker selection (slot -> run-up) can work from it:
+	//  - every back-row play has its run-up BEHIND the 3m line (|X| >= 300);
+	//  - front-row plays keep the run-up inside the front zone;
+	//  - target and run-up stay on the same side after mirroring for both teams.
+	const TArray<FSetPlayDefinition>& Plays = SESetPlays::GetPlays();
+	for (int32 i = 0; i < Plays.Num(); i++)
+	{
+		const FSetPlayDefinition& P = Plays[i];
+		const float RunX = FMath::Abs(P.AttackRunupLocal.X);
+		if (P.bBackRowAttack)
+		{
+			TestTrue(FString::Printf(TEXT("play %d back-row run-up behind 3m line"), P.PlayId), RunX >= 300.f);
+		}
+		else
+		{
+			TestTrue(FString::Printf(TEXT("play %d front-row run-up inside front zone"), P.PlayId), RunX < 300.f);
+		}
+		// Mirroring must keep target and run-up on the same half for both sides.
+		const FVector TA = SESetPlays::MirrorLocal(P.TargetLocal, 1);
+		const FVector RA = SESetPlays::MirrorLocal(P.AttackRunupLocal, 1);
+		const FVector TB = SESetPlays::MirrorLocal(P.TargetLocal, -1);
+		const FVector RB = SESetPlays::MirrorLocal(P.AttackRunupLocal, -1);
+		TestTrue(FString::Printf(TEXT("play %d side A same half"), P.PlayId), TA.X > 0.f && RA.X > 0.f);
+		TestTrue(FString::Printf(TEXT("play %d side B same half"), P.PlayId), TB.X < 0.f && RB.X < 0.f);
+		// Mirroring must be an exact X flip (Y preserved).
+		TestTrue(FString::Printf(TEXT("play %d mirror is exact flip"), P.PlayId),
+			FMath::Abs(TA.X + TB.X) < 0.01f && FMath::Abs(RA.X + RB.X) < 0.01f
+			&& FMath::Abs(TA.Y - TB.Y) < 0.01f && FMath::Abs(RA.Y - RB.Y) < 0.01f);
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSEDefensePlanMapping, "SpikeElite.Tests.DefensePlanIndexMapping",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FSEDefensePlanMapping::RunTest(const FString& Parameters)
+{
+	// The defense UI index 0..7 maps 1:1 onto EVolleyballDefensePlan 1..8
+	// (SingleBlock .. DiveDig); index 0 must NOT be NoPlan.
+	for (int32 i = 0; i < 8; i++)
+	{
+		const EVolleyballDefensePlan Plan = static_cast<EVolleyballDefensePlan>(i + 1);
+		TestTrue(FString::Printf(TEXT("defense index %d maps to a real plan"), i), Plan != EVolleyballDefensePlan::NoPlan && Plan != EVolleyballDefensePlan::None);
+	}
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

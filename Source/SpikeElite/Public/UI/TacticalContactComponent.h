@@ -4,10 +4,12 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "Volleyball/VolleyballTrajectory.h"
+#include "Volleyball/VolleyballEnums.h"
 #include "TacticalContactComponent.generated.h"
 
 class UTrajectoryPreviewComponent;
 class UTextRenderComponent;
+class UTacticalHUDWidget;
 class ASpikeEliteCharacter;
 class ASpikeEliteGameMode;
 class ASpikeElitePlayerController;
@@ -20,7 +22,8 @@ enum class ETacticalState : uint8
 	ContactWindow,
 	TacticalPlanning,
 	TacticalArmed,
-	ContactResolved
+	ContactResolved,
+	DefensePlanning
 };
 
 /**
@@ -68,12 +71,21 @@ public:
 	/** Cancel the planning phase (restores dilation, input, mouse). */
 	void CancelShot();
 
+	/** Current human defense plan (read by the GameMode while defending). */
+	EVolleyballDefensePlan DefensePlan = EVolleyballDefensePlan::NoPlan;
+
+	/** True while the defense-planning panel is open. */
+	bool IsDefensePlanning() const { return State == ETacticalState::DefensePlanning; }
+
 protected:
 	UPROPERTY()
 	TObjectPtr<UTrajectoryPreviewComponent> Preview;
 
 	UPROPERTY()
 	TObjectPtr<UTextRenderComponent> HintText;
+
+	UPROPERTY()
+	TObjectPtr<UTacticalHUDWidget> TacticalUI;
 
 	UPROPERTY()
 	TWeakObjectPtr<ASpikeElitePlayerController> OwnerPC;
@@ -86,8 +98,20 @@ protected:
 
 	float WindowTimer = 0.f;
 	float ArmedTimer = 0.f;
+	float DefenseTimer = 0.f;
 	float SavedTimeDilation = 1.f;
 	bool bWorldFrozen = false;
+	int32 DefenseSelected = 0;
+
+	/** Open the defense-planning panel (opponent about to attack). */
+	void EnterDefensePlanning();
+
+	/** Apply the selected defense plan and restore normal play. */
+	void ConfirmDefensePlan();
+
+	/** UI callbacks: mouse-click on a set-play / defense row. */
+	void HandleSetPlayPicked(int32 Index);
+	void HandleDefensePicked(int32 Index);
 
 	EBallTouchType PendingTouchType = EBallTouchType::Unknown;
 

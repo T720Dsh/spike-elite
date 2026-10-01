@@ -40,3 +40,25 @@ enum class EMatchState : uint8
 	SetOver            UMETA(DisplayName = "Set finished"),
 	MatchOver          UMETA(DisplayName = "Match finished")
 };
+
+/**
+ * M11c-5: the human player's defensive plan, chosen in the defense planning
+ * UI just before the opponent's attack crosses the net. The GameMode reads it
+ * to steer block count, block lane and back-row defence positioning. Reset to
+ * NoPlan after every rally / rematch (AI uses its own defaults when NoPlan).
+ */
+UENUM(BlueprintType)
+enum class EVolleyballDefensePlan : uint8
+{
+	NoPlan         UMETA(DisplayName = "AI default"),
+	SingleBlock    UMETA(DisplayName = "Single block"),
+	DoubleBlock    UMETA(DisplayName = "Double block"),
+	LineDefense    UMETA(DisplayName = "Block the line"),
+	AngleDefense   UMETA(DisplayName = "Block the angle"),
+	BackLine       UMETA(DisplayName = "Back-row line defence"),
+	BackAngle      UMETA(DisplayName = "Back-row angle defence"),
+	RegularDig     UMETA(DisplayName = "Regular move dig"),
+	DiveDig        UMETA(DisplayName = "Dive dig"),
+	None           UMETA(Hidden)
+};
+
