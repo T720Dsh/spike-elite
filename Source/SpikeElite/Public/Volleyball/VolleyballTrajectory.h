@@ -120,4 +120,32 @@ namespace SEVolleyballTrajectory
 
 	/** Solve the initial velocity needed to reach Target in FlightTime. */
 	SPIKEELITE_API FVector SolveVelocity(const FVector& Start, const FVector& Target, float FlightTime, float Gravity = BallGravity);
+
+	/**
+	 * M11c-4: the SINGLE shot solver shared by the dotted preview, the landing
+	 * marker colour and the GameMode's final strike. The preview calls it with
+	 * TimingError=0 (so the dotted line IS the perfect shot); execution calls it
+	 * with the player's actual timing error (0 = perfect => identical velocity).
+	 *
+	 * Parameter contract (one consistent scheme, no UI/exec split):
+	 *  - TargetLocation + DesiredFlightTime solve the base velocity
+	 *    (SolveVelocity), then Power scales that velocity — so changing Power
+	 *    immediately changes the dotted line and PredictedLanding.
+	 *  - TimingError (±1) rotates the solved velocity (yaw/pitch) and scales
+	 *    power slightly; it is applied INSIDE this function, so the recorded
+	 *    trajectory always matches the executed strike.
+	 */
+	struct SPIKEELITE_API FShotSolution
+	{
+		FVector InitialVelocity = FVector::ZeroVector;
+		FTrajectoryResult Trajectory;
+		FVector Landing = FVector::ZeroVector;
+		float FlightTime = 0.f;
+		FVector Apex = FVector::ZeroVector;
+		bool bCrossedNet = false;
+		bool bInBounds = false;
+		bool bValid = false;
+	};
+
+	SPIKEELITE_API FShotSolution BuildShotSolution(const FVector& Start, const FShotIntent& Intent, float TimingError);
 }

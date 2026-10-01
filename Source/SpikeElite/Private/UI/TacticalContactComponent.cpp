@@ -11,10 +11,11 @@
 #include "GameFramework/Pawn.h"
 #include "Kismet/GameplayStatics.h"
 #include "Engine/World.h"
+#include "Misc/App.h"
 
 namespace
 {
-	constexpr float TacticalWindowSeconds = 0.35f;
+	constexpr float TacticalWindowSeconds = 0.1f;   // M11c-4: fast balls only stay in reach ~0.26s
 	constexpr float ArmedWindowSeconds = 0.8f;
 	constexpr float SlowMotionDilation = 0.15f;
 	constexpr float TouchReach2D = 220.f;
@@ -62,6 +63,11 @@ void UTacticalContactComponent::BeginPlay()
 void UTacticalContactComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+
+	// M11c-4: planning/armed run under TimeDilation != 1, so all UI input and
+	// timing windows must use the REAL unscaled frame time (FApp::GetDeltaTime)
+	// — otherwise W/S/Q/E and the timing bar stop responding when frozen.
+	const float RealDt = FApp::GetDeltaTime();
 
 	if (!GM.IsValid())
 	{
@@ -178,6 +184,9 @@ void UTacticalContactComponent::EnterPlanning(EBallTouchType Type)
 
 void UTacticalContactComponent::TickPlanning(float DeltaTime)
 {
+	// M11c-4: DeltaTime here is the REAL frame time, so W/S/Q/E adjust the plan
+	// even while the world is time-dilated/frozen.
+
 	// Mouse -> landing spot (only for free aim; a selected set tactic locks the
 	// target to the mirrored play target).
 	const bool bSetTacticLocked = (PendingTouchType == EBallTouchType::Set && SelectedPlay >= 0
@@ -268,19 +277,21 @@ void UTacticalContactComponent::RebuildPreview()
 	if (!GM.IsValid() || !GM->GetBall() || !Pawn.IsValid()) { return; }
 
 	const FVector Start = GM->GetBall()->GetActorLocation();
-	// Solve the initial velocity for the current target/flight-time.
-	FVector Vel = SEVolleyballTrajectory::SolveVelocity(Start, Intent.TargetLocation, Intent.DesiredFlightTime);
-	const SEVolleyballTrajectory::FTrajectoryResult R = SEVolleyballTrajectory::Predict(Start, Vel);
+	// M11c-4: ONE solver for preview AND execution. The preview is the perfect
+	// shot (TimingError = 0); the GameMode re-runs this same function with the
+	// actual timing error, so a perfect hit reproduces the dotted line exactly.
+	const SEVolleyballTrajectory::FShotSolution Sol =
+		SEVolleyballTrajectory::BuildShotSolution(Start, Intent, 0.f);
 
-	Intent.PredictedLanding = R.Landing;
-	Intent.PredictedFlightTime = R.FlightTime;
-	Intent.bPredictedCrossedNet = R.bCrossedNet;
-	Intent.bPredictedNetTouch = R.bNetTouch;
-	Intent.bPredictedInBounds = R.bInBounds;
+	Intent.PredictedLanding = Sol.Landing;
+	Intent.PredictedFlightTime = Sol.FlightTime;
+	Intent.bPredictedCrossedNet = Sol.bCrossedNet;
+	Intent.bPredictedNetTouch = Sol.Trajectory.bNetTouch;
+	Intent.bPredictedInBounds = Sol.bInBounds;
 
 	if (Preview)
 	{
-		Preview->ShowPreview(Start, Vel);
+		Preview->ShowPreview(Start, Sol.InitialVelocity);
 	}
 }
 
@@ -298,13 +309,19 @@ void UTacticalContactComponent::EnterArmed()
 
 void UTacticalContactComponent::ExecuteTimedShot(float TimingError)
 {
-	if (GM.IsValid() && Pawn.IsValid())
+	Intent.TimingError = TimingError;
+	const bool bShot = GM.IsValid() && Pawn.IsValid() && GM->ExecuteTacticalShot(Pawn.Get(), Intent);
+	if (bShot)
 	{
-		Intent.TimingError = TimingError;
-		GM->ExecuteTacticalShot(Pawn.Get(), Intent);
+		RestoreWorldState();
+		State = ETacticalState::ContactResolved;
 	}
-	RestoreWorldState();
-	State = ETacticalState::ContactResolved;
+	else
+	{
+		// The GameMode refused the shot (rules/phase/reach) — restore everything
+		// and do NOT claim the shot was completed.
+		CancelShot();
+	}
 }
 
 void UTacticalContactComponent::CancelShot()

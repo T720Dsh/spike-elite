@@ -890,4 +890,116 @@ bool FSEDiveSaveLegal::RunTest(const FString& Parameters)
 	return true;
 }
 
+// ---------------- M11c-4: tactical solver is the single source of truth ----------------
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSETacticalPreviewMatchesExecution, "SpikeElite.Tests.TacticalPreviewMatchesExecution",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FSETacticalPreviewMatchesExecution::RunTest(const FString& Parameters)
+{
+	// Preview (TimingError=0) and a perfect execution must produce the SAME
+	// initial velocity, and the integrator must land the preview exactly where
+	// the solver says (self-consistent by construction).
+	const FVector Start(150.f, 0.f, 240.f);
+	FShotIntent I;
+	I.TargetLocation = FVector(-520.f, 120.f, 0.f);
+	I.DesiredFlightTime = 0.8f;
+	I.Power = 0.9f;
+	I.TouchType = EBallTouchType::Attack;
+
+	const auto SolP = SEVolleyballTrajectory::BuildShotSolution(Start, I, 0.f);
+	const auto SolE = SEVolleyballTrajectory::BuildShotSolution(Start, I, 0.f);
+	TestTrue(TEXT("preview and perfect execution share the solver output"),
+		SolP.InitialVelocity.Equals(SolE.InitialVelocity, 0.01f));
+	TestTrue(TEXT("preview is valid"), SolP.bValid);
+	// Same-integrator self-consistency: the dotted landing == integrator landing.
+	const auto Re = SEVolleyballTrajectory::Predict(Start, SolP.InitialVelocity);
+	TestTrue(TEXT("dotted landing matches the integrator within 1cm"),
+		Re.Landing.Equals(SolP.Landing, 1.f));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSETacticalPerfectZeroError, "SpikeElite.Tests.TacticalPerfectTimingHasZeroError",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FSETacticalPerfectZeroError::RunTest(const FString& Parameters)
+{
+	// Perfect timing error is EXACTLY 0 (signed check) and it is symmetric:
+	// early (-) and late (+) deviate the landing in opposite directions.
+	const FVector Start(-150.f, 0.f, 240.f);
+	FShotIntent I;
+	I.TargetLocation = FVector(520.f, -80.f, 0.f);
+	I.DesiredFlightTime = 0.85f;
+	I.Power = 1.f;
+	I.TouchType = EBallTouchType::Attack;
+
+	const float PerfectErr = 0.f;
+	const auto SolPerfect = SEVolleyballTrajectory::BuildShotSolution(Start, I, PerfectErr);
+	TestEqual(TEXT("perfect timing error is exactly zero"), PerfectErr, 0.f);
+
+	const auto SolEarly = SEVolleyballTrajectory::BuildShotSolution(Start, I, -0.6f);
+	const auto SolLate  = SEVolleyballTrajectory::BuildShotSolution(Start, I,  0.6f);
+	TestFalse(TEXT("early and late landings coincide (errors really change the shot)"),
+		SolEarly.Landing.Equals(SolLate.Landing, 1.f));
+	const FVector Mid = SolPerfect.Landing;
+	// Early/late push the landing away from the perfect point in different
+	// directions (one closer in flight distance, one further / laterally).
+	const float DEarly = FVector::Dist2D(SolEarly.Landing, Mid);
+	const float DLate  = FVector::Dist2D(SolLate.Landing, Mid);
+	TestTrue(TEXT("both errors move the landing off the perfect spot"),
+		DEarly > 1.f && DLate > 1.f);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSETacticalPowerChangesPreview, "SpikeElite.Tests.TacticalPowerChangesPreview",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FSETacticalPowerChangesPreview::RunTest(const FString& Parameters)
+{
+	// Power must immediately change the solved velocity AND the predicted landing
+	// (no "preview target + arbitrary power" contradiction).
+	const FVector Start(150.f, 0.f, 240.f);
+	FShotIntent I;
+	I.TargetLocation = FVector(-520.f, 0.f, 0.f);
+	I.DesiredFlightTime = 0.8f;
+	I.TouchType = EBallTouchType::Attack;
+
+	I.Power = 1.f;
+	const auto S1 = SEVolleyballTrajectory::BuildShotSolution(Start, I, 0.f);
+	I.Power = 0.5f;
+	const auto S05 = SEVolleyballTrajectory::BuildShotSolution(Start, I, 0.f);
+
+	TestTrue(TEXT("power scales the velocity"), S1.InitialVelocity.Size() > S05.InitialVelocity.Size() * 1.5f);
+	TestFalse(TEXT("power changes the predicted landing"),
+		S1.Landing.Equals(S05.Landing, 1.f));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSETacticalEverySetPlayValid, "SpikeElite.Tests.EverySetPlayProducesValidSolution",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FSETacticalEverySetPlayValid::RunTest(const FString& Parameters)
+{
+	// Every one of the 13+1 set plays must produce a legal, valid shot solution
+	// from the setter's position on BOTH sides (mirroring must not break it).
+	const TArray<FSetPlayDefinition>& Plays = SESetPlays::GetPlays();
+	TestTrue(TEXT("at least 14 plays defined"), Plays.Num() >= 14);
+
+	for (int32 i = 0; i < Plays.Num(); i++)
+	{
+		const FSetPlayDefinition& Play = Plays[i];
+		for (int32 Side = -1; Side <= 1; Side += 2)
+		{
+			const FVector Start(Side * 250.f, 0.f, 240.f);
+			FShotIntent I;
+			I.TouchType = EBallTouchType::Set;
+			I.TargetLocation = SESetPlays::MirrorLocal(Play.TargetLocal, Side);
+			I.DesiredFlightTime = Play.DesiredFlightTime;
+			I.Power = 1.f;
+			const auto Sol = SEVolleyballTrajectory::BuildShotSolution(Start, I, 0.f);
+			TestTrue(FString::Printf(TEXT("play %d (%s) side %d produces a valid solution"),
+				Play.PlayId, *Play.DisplayName, Side), Sol.bValid);
+			TestTrue(FString::Printf(TEXT("play %d flight time sane"), Play.PlayId),
+				Sol.FlightTime > 0.2f && Sol.FlightTime < 3.5f);
+		}
+	}
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

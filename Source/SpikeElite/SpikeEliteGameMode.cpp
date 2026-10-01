@@ -1129,28 +1129,24 @@ bool ASpikeEliteGameMode::ExecuteTacticalShot(ASpikeEliteCharacter* Toucher, con
 		return false;
 	}
 
-	// Re-derive the intended velocity from the validated intent and predict.
-	const FVector Start = BallLoc;
-	const float T = FMath::Clamp(Intent.DesiredFlightTime, 0.3f, 3.0f);
-	FVector Vel = SEVolleyballTrajectory::SolveVelocity(Start, Intent.TargetLocation, T);
-	// Timing error biases direction (lateral) and power.
-	const float Err = FMath::Clamp(Intent.TimingError, -1.f, 1.f);
+	// M11c-4: the SAME solver the preview used. BuildShotSolution(Start, Intent,
+	// TimingError) applies Power and the timing error INSIDE the shared math, so
+	// with TimingError=0 the executed strike is the dotted preview; with an error
+	// the deviation is computed by the very same integrator that drew the line.
+	const SEVolleyballTrajectory::FShotSolution Sol = SEVolleyballTrajectory::BuildShotSolution(BallLoc, Intent, Intent.TimingError);
+	if (!Sol.bValid)
 	{
-		FRotator Rot = Vel.Rotation();
-		Rot.Yaw += Err * 14.f;   // early/late -> lateral bias
-		Rot.Pitch -= Err * 6.f;  // early/late -> flatter/lofted
-		Vel = Rot.Vector() * Vel.Size();
+		UE_LOG(LogVolleyballRules, Warning, TEXT("[TacticalShot] invalid solution — shot refused (not executed)"));
+		return false;
 	}
-	const float PowerScale = FMath::Clamp(1.f + Err * 0.25f, 0.6f, 1.4f);
-
-	FVector Dir = Vel.GetSafeNormal();
+	FVector Dir = Sol.InitialVelocity.GetSafeNormal();
 	Dir.Z = FMath::Max(Dir.Z, 0.05f);
 	Dir.Normalize();
-	const float Power = (Intent.Power * 1100.f) * PowerScale;
+	const float Power = Sol.InitialVelocity.Size();
 
-	UE_LOG(LogVolleyballRules, Log, TEXT("[TacticalShot] team=%s player=%d target=(%.0f,%.0f) flight=%.2f power=%.2f err=%.2f net=%d in=%d"),
-		TeamStr(Team), Index, Intent.TargetLocation.X, Intent.TargetLocation.Y, T, Intent.Power, Err,
-		Intent.bPredictedCrossedNet ? 1 : 0, Intent.bPredictedInBounds ? 1 : 0);
+	UE_LOG(LogVolleyballRules, Log, TEXT("[TacticalShot] team=%s player=%d target=(%.0f,%.0f) flight=%.2f power=%.0f err=%.2f net=%d in=%d"),
+		TeamStr(Team), Index, Intent.TargetLocation.X, Intent.TargetLocation.Y, Sol.FlightTime, Power, Intent.TimingError,
+		Sol.bCrossedNet ? 1 : 0, Sol.bInBounds ? 1 : 0);
 
 	return DoTouch(Toucher, (Intent.TouchType != EBallTouchType::Unknown) ? Intent.TouchType : EBallTouchType::Attack,
 		Dir, Power, Intent.SpinRadS);

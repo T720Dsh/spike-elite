@@ -98,3 +98,36 @@ FVector SEVolleyballTrajectory::SolveVelocity(const FVector& Start, const FVecto
 	return V;
 }
 
+SEVolleyballTrajectory::FShotSolution SEVolleyballTrajectory::BuildShotSolution(
+	const FVector& Start, const FShotIntent& Intent, float TimingError)
+{
+	FShotSolution S;
+	const float FlightTime = FMath::Clamp(Intent.DesiredFlightTime, 0.3f, 3.0f);
+
+	// Target + flight time solve the base velocity; Power scales it so the
+	// dotted preview and PredictedLanding react to power changes immediately.
+	const FVector Base = SolveVelocity(Start, Intent.TargetLocation, FlightTime);
+	FVector Vel = Base * FMath::Clamp(Intent.Power, 0.1f, 1.0f);
+
+	// Timing error is applied INSIDE the shared solver: early = negative,
+	// late = positive, symmetric around 0, and Perfect = exactly 0.
+	const float Err = FMath::Clamp(TimingError, -1.f, 1.f);
+	if (FMath::Abs(Err) > 0.0001f)
+	{
+		FRotator Rot = Vel.Rotation();
+		Rot.Yaw += Err * 14.f;   // early/late -> lateral bias
+		Rot.Pitch -= Err * 6.f;  // early/late -> flatter/lofted
+		Vel = Rot.Vector() * Vel.Size();
+	}
+
+	S.InitialVelocity = Vel;
+	S.Trajectory = Predict(Start, Vel);
+	S.Landing = S.Trajectory.Landing;
+	S.FlightTime = S.Trajectory.FlightTime;
+	S.Apex = S.Trajectory.Apex;
+	S.bCrossedNet = S.Trajectory.bCrossedNet;
+	S.bInBounds = S.Trajectory.bInBounds;
+	S.bValid = S.Trajectory.bValid;
+	return S;
+}
+
