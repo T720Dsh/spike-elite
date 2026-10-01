@@ -163,6 +163,13 @@ struct FVolleyballRallyState
 	/** True while a rally is live (ball in play). */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
 	bool bBallInPlay = false;
+
+	/** True once the serve has legally crossed the net (M11c). While a serve is
+	 *  in flight (LastTouchType == Serve && !bServeCrossedNet) NOBODY may touch
+	 *  the ball — not even the serving team. This is the single source of truth
+	 *  shared by GameMode, AI directives and the tests. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+	bool bServeCrossedNet = false;
 };
 
 namespace SEVolleyballRules
@@ -207,10 +214,18 @@ namespace SEVolleyballRules
 	SPIKEELITE_API ETouchResult EvaluateTouch(FVolleyballRallyState& State, EVolleyballTeam Team, int32 PlayerIndex,
 		EBallTouchType Type = EBallTouchType::Attack);
 
+	/**
+	 * Record the serve touch WITHOUT consuming one of the serving team's three
+	 * touches and WITHOUT granting possession. LastTouch* is recorded so a serve
+	 * that lands out is awarded to the opponent; TouchCount stays 0 and
+	 * PossessingTeam stays None until the ball legally crosses the net.
+	 */
+	SPIKEELITE_API void RecordServeTouch(FVolleyballRallyState& State, EVolleyballTeam Team, int32 PlayerIndex);
+
 	/** The ball legally crossed the net into NewPossessor's half: switch possession, reset counter. */
 	SPIKEELITE_API void OnBallCrossedNet(FVolleyballRallyState& State, EVolleyballTeam NewPossessor);
 
-	/** Begin a fresh rally; the serving team starts in possession with 0 touches. */
+	/** Begin a fresh rally; nobody possesses until the serve crosses the net. */
 	SPIKEELITE_API void BeginRally(FVolleyballRallyState& State, EVolleyballTeam ServingTeam);
 
 	/** Settle the rally; returns true only on the first call (single settlement). */
@@ -232,12 +247,13 @@ namespace SEVolleyballRules
 		State.bBallInPlay = true;
 	}
 
-	/** Serve-fault classification (M11): a serve that never legally crossed the
+	/** Serve-fault classification (M11c): a serve that never legally crossed the
 	 *  net counts as a serve fault whether it lands in or out, so both landings
-	 *  are reported as 发球失误 instead of a generic IN/OUT. */
+	 *  are reported as 发球失误 instead of a generic IN/OUT. Uses the serve
+	 *  record itself (not TouchCount — the serve never consumes a touch). */
 	inline bool IsServeFault(const FVolleyballRallyState& State, bool bServeCrossedNet)
 	{
-		return State.TouchCount == 1 && !bServeCrossedNet;
+		return State.LastTouchType == EBallTouchType::Serve && !bServeCrossedNet;
 	}
 
 	/** Whether the serving player may auto-serve without pressing E (M11).

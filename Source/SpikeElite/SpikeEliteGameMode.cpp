@@ -147,7 +147,6 @@ void ASpikeEliteGameMode::StartMatch()
 	RallyResultText.Empty();
 	RallyResultDisplayTimer = 0.0f;
 	SEVolleyballRules::BeginRally(RallyState, ServingTeam);
-
 	FActorSpawnParameters Params;
 	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 
@@ -184,6 +183,7 @@ void ASpikeEliteGameMode::StartMatch()
 			HC->HomePosition = PosA[0];
 			HC->PlayerId = 0;
 			HC->JerseyNumber = 1;
+			HC->bServiceZoneActive = false;
 			HC->SetActorEnableCollision(true);
 			HC->SetActorLocation(PosA[0] + FVector(0,0,100.0f));
 			HC->bTouchArmed = true;
@@ -314,6 +314,8 @@ void ASpikeEliteGameMode::CleanupMatch()
 	MatchState = EMatchState::PreMatch;
 	RallyResultText.Empty();
 	RallyResultDisplayTimer = 0.0f;
+	for (auto& C : TeamAPlayers) if (C) C->bServiceZoneActive = false;
+	for (auto& C : TeamBPlayers) if (C) C->bServiceZoneActive = false;
 	SEVolleyballRules::BeginRally(RallyState, EVolleyballTeam::TeamA);
 	SetScoresA.Reset();
 	SetScoresB.Reset();
@@ -694,10 +696,10 @@ void ASpikeEliteGameMode::OnBallLanded(const FVector& BallLocation)
 
 	ERallyEndReason Reason = bIn ? ERallyEndReason::BallIn : ERallyEndReason::BallOut;
 
-	// M11: a serve that never legally crossed the net is a serve fault whether it
-	// lands IN (own side, impossible to be in-bounds there but keep the rule) or
-	// OUT — classification comes from the shared rule core, not a BallIn-only case.
-	if (SEVolleyballRules::IsServeFault(RallyState, bServeCrossedNet))
+	// M11c: a serve that never legally crossed the net is a serve fault whether
+	// it lands in or out — classification comes from the shared rule core using
+	// the authoritative RallyState flag (not a GameMode copy that can drift).
+	if (SEVolleyballRules::IsServeFault(RallyState, RallyState.bServeCrossedNet))
 	{
 		Reason = ERallyEndReason::ServeFault;
 	}
@@ -716,6 +718,11 @@ void ASpikeEliteGameMode::OnBallLanded(const FVector& BallLocation)
 void ASpikeEliteGameMode::EndRally(ERallyEndReason Reason, EVolleyballTeam ScoringTeam)
 {
 	if (!SEVolleyballRules::SettleRally(RallyState)) return;  // single settlement
+
+	// M11c-1: the service window is over for everyone (server may now re-enter
+	// the court; normal movement bounds apply again).
+	for (auto& C : TeamAPlayers) { if (C) { C->bServiceZoneActive = false; } }
+	for (auto& C : TeamBPlayers) { if (C) { C->bServiceZoneActive = false; } }
 
 	// M11b-2: the 1st referee blows the end-of-rally whistle.
 	if (Officials) { Officials->Whistle(); }
@@ -811,13 +818,26 @@ void ASpikeEliteGameMode::BeginServiceAuthorized()
 
 	TArray<TObjectPtr<ASpikeEliteCharacter>>& Roster = (ServingTeam == EVolleyballTeam::TeamA) ? TeamAPlayers : TeamBPlayers;
 	ASpikeEliteCharacter* Server = (Roster.Num() > 0) ? Roster[0].Get() : nullptr;
-	const FVector ServerPos = Server ? Server->GetActorLocation()
-		: FVector(ServingTeam == EVolleyballTeam::TeamA ? 770.f : -770.f, 0.f, 0.f);
+
+	// M11c-1: the server must stand BEHIND the end line (X=±900) inside the
+	// service zone (~±1150..1300) during the authorized window; only after the
+	// ball is hit may they step back on court. Temporarily pinning HomePosition
+	// to the service spot keeps the AI from dragging the server back inside; the
+	// next RespawnPlayersToPositions restores the rotation slot.
+	const float ServeSpotX = (ServingTeam == EVolleyballTeam::TeamA) ? 1200.f : -1200.f;
+	const FVector ServerPos = Server
+		? FVector(ServeSpotX, FMath::Clamp(Server->GetActorLocation().Y, -350.f, 350.f), 0.f)
+		: FVector(ServeSpotX, 0.f, 0.f);
+	if (Server)
+	{
+		Server->SetActorLocation(ServerPos + FVector(0, 0, 100.f));
+		Server->HomePosition = ServerPos;
+		Server->bServiceZoneActive = true;   // widen movement bounds to the service zone
+	}
 
 	Ball->ResetBall(ServerPos + FVector(0,0,180.f));
 	BallPrevX = Ball->GetActorLocation().X;
 	bNetContactLatched = false;
-	bServeCrossedNet = false;
 	SEVolleyballRules::BeginRally(RallyState, ServingTeam);
 	ServerPlayerIndex = (Server && !Server->bIsBot) ? 0 : -1;
 
@@ -921,16 +941,15 @@ void ASpikeEliteGameMode::ExecuteServe()
 	bInToss = false;
 
 	Ball->Strike(TossDir, TossPower, 0.f);
-	bServeCrossedNet = false;
 
-	// The serve counts as the serving team's first touch.
+	// M11c (P0 fix): the serve is NOT one of the team's three touches. It is
+	// recorded separately (LastTouch for OUT calls) while TouchCount stays 0 and
+	// PossessingTeam stays None, so the serving team can never continue with
+	// Set/Attack before the ball has legally crossed the net. The shared rules
+	// core rejects any touch during the serve flight.
 	if (ServerPlayerIndex >= 0)
 	{
-		const ETouchResult R = SEVolleyballRules::EvaluateTouch(RallyState, ServingTeam, ServerPlayerIndex);
-		if (R != ETouchResult::Allowed)
-		{
-			UE_LOG(LogVolleyballRules, Warning, TEXT("Serve touch unexpectedly rejected: %d"), (int32)R);
-		}
+		SEVolleyballRules::RecordServeTouch(RallyState, ServingTeam, ServerPlayerIndex);
 	}
 
 	MatchState = EMatchState::Rally;
@@ -945,7 +964,7 @@ void ASpikeEliteGameMode::ExecuteServe()
 			Roster[ServerPlayerIndex]->NotifyContact(EBallTouchType::Serve);
 		}
 	}
-	UE_LOG(LogVolleyballRules, Log, TEXT("[Serve] team=%s player=%d power=%.0f dir=(%.2f,%.2f,%.2f) ballInPlay=1"),
+	UE_LOG(LogVolleyballRules, Log, TEXT("[Serve] team=%s player=%d power=%.0f dir=(%.2f,%.2f,%.2f) touches=0 ballInPlay=1"),
 		TeamStr(ServingTeam), ServerPlayerIndex, TossPower, TossDir.X, TossDir.Y, TossDir.Z);
 	UpdateScoreboard();
 }
@@ -956,10 +975,9 @@ void ASpikeEliteGameMode::OnBallCrossedNet()
 
 	const EVolleyballTeam NewPossessor = (Ball && Ball->GetActorLocation().X < 0.f) ? EVolleyballTeam::TeamB : EVolleyballTeam::TeamA;
 	SEVolleyballRules::OnBallCrossedNet(RallyState, NewPossessor);
-	bServeCrossedNet = true;
 
 	ShowBanner(FString::Printf(TEXT("球过网 → %s 队控球"), TeamStr(NewPossessor)), 0.8f);
-	UE_LOG(LogVolleyballRules, Log, TEXT("[NetCross] possession -> %s, touches reset"), TeamStr(NewPossessor));
+	UE_LOG(LogVolleyballRules, Log, TEXT("[NetCross] possession -> %s, touches=0"), TeamStr(NewPossessor));
 	UpdateScoreboard();
 }
 
@@ -1418,6 +1436,40 @@ void ASpikeEliteGameMode::UpdateAIDirectives(float DeltaSeconds)
 
 	auto DirectTeam = [&](EVolleyballTeam Team, TArray<TObjectPtr<ASpikeEliteCharacter>>& Roster)
 	{
+		// M11c (P0 fix): during the serve flight nobody possesses the ball. The
+		// serving team holds its formation (its own serve must never be chased or
+		// touched — that would be an illegal second contact); the receiving team's
+		// closest player moves to the predicted landing to receive. Only after
+		// [NetCross] does possession logic take over.
+		const bool bServeInFlight = (RallyState.LastTouchType == EBallTouchType::Serve
+			&& !RallyState.bServeCrossedNet);
+		if (bServeInFlight)
+		{
+			const bool bIsServingTeam = (ServingTeam == Team);
+			for (int32 i = 0; i < Roster.Num(); i++)
+			{
+				ASpikeEliteCharacter* C = Roster[i].Get();
+				if (!C || !C->bIsBot) continue;
+				if (bIsServingTeam)
+				{
+					SetAIDirective(C, EAIBehavior::ReturnHome, C->HomePosition, false);
+				}
+				else
+				{
+					const int32 Recv = SelectReceivePlayer(Team, Landing);
+					if (i == Recv)
+					{
+						SetAIDirective(C, EAIBehavior::MoveToReceive, Landing, true);
+					}
+					else
+					{
+						SetAIDirective(C, EAIBehavior::Wait, C->HomePosition, false);
+					}
+				}
+			}
+			return;
+		}
+
 		const bool bPossess = (RallyState.PossessingTeam == Team);
 		int32 Primary = -1;
 		EAIBehavior PrimaryBehavior = EAIBehavior::ReturnHome;

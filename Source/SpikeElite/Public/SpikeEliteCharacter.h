@@ -147,6 +147,13 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Character")
 	bool bDiveRecovering = false;
 
+	/** M11c-1: set by the GameMode while this player is the authorized server.
+	 *  While true, movement bounds widen to the service zone (X up to ±1550,
+	 *  Y ±450) so the human can move behind the end line to serve instead of
+	 *  being clamped back inside the court. Cleared at EndRally/cleanup. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Character")
+	bool bServiceZoneActive = false;
+
 	/** Pose shown for this frame (drives the procedural joints). */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Character")
 	EAnimPose CurrentPose = EAnimPose::Idle;

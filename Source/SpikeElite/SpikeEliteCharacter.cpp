@@ -195,13 +195,17 @@ void ASpikeEliteCharacter::Tick(float DeltaSeconds)
 		return;
 	}
 
-	// Human player boundary.
+	// Human player boundary. M11c-1: while the authorized server, widen the X
+	// range to the service zone behind the end line (X=±900) so the player can
+	// step back to ±1150..1300 to serve; Y stays within the 9 m-wide service
+	// zone. Normal play keeps the ±950 / ±500 court bounds.
 	FVector Loc = GetActorLocation();
-	const float MaxX = 950.0f;
-	const float MaxY = 500.0f;
+	const float MaxX = bServiceZoneActive ? 1550.0f : 950.0f;
+	const float MinX = bServiceZoneActive ? (TeamSide > 0 ? 30.0f : -1550.0f) : 50.0f;
+	const float MaxY = bServiceZoneActive ? 450.0f : 500.0f;
 	bool bClamped = false;
-	if (Loc.X < 50.0f)   { Loc.X = 50.0f;   bClamped = true; }
-	if (Loc.X > MaxX)    { Loc.X = MaxX;    bClamped = true; }
+	if (Loc.X < MinX)  { Loc.X = MinX; bClamped = true; }
+	if (Loc.X > MaxX)  { Loc.X = MaxX; bClamped = true; }
 	if (FMath::Abs(Loc.Y) > MaxY) { Loc.Y = FMath::Clamp(Loc.Y, -MaxY, MaxY); bClamped = true; }
 	if (bClamped) SetActorLocation(Loc, true);
 }
@@ -255,16 +259,25 @@ void ASpikeEliteCharacter::TickBot(float DeltaSeconds)
 		// consumption, which deferred-spawned pawns without a controller may skip).
 		const float Step = FMath::Min(BotSpeed * DeltaSeconds, Dist);
 		FVector NewLoc = GetActorLocation() + ToDest.GetSafeNormal() * Step;
-		NewLoc.X = (TeamSide > 0) ? FMath::Clamp(NewLoc.X, 30.f, 950.f) : FMath::Clamp(NewLoc.X, -950.f, -30.f);
-		NewLoc.Y = FMath::Clamp(NewLoc.Y, -500.f, 500.f);
+		const float XMax = bServiceZoneActive ? 1550.f : 950.f;
+		NewLoc.X = (TeamSide > 0) ? FMath::Clamp(NewLoc.X, 30.f, XMax) : FMath::Clamp(NewLoc.X, -XMax, -30.f);
+		NewLoc.Y = FMath::Clamp(NewLoc.Y, bServiceZoneActive ? -450.f : -500.f, bServiceZoneActive ? 450.f : 500.f);
 		SetActorLocation(NewLoc, true);
 	}
 
 	// ---- Boundary: stay on own half, don't run out ----
 	FVector Loc = GetActorLocation();
-	if (TeamSide > 0) { Loc.X = FMath::Clamp(Loc.X, 30.0f, 950.0f); }
-	else              { Loc.X = FMath::Clamp(Loc.X, -950.0f, -30.0f); }
-	Loc.Y = FMath::Clamp(Loc.Y, -500.0f, 500.0f);
+	if (bServiceZoneActive)
+	{
+		Loc.X = (TeamSide > 0) ? FMath::Clamp(Loc.X, 30.f, 1550.f) : FMath::Clamp(Loc.X, -1550.f, -30.f);
+		Loc.Y = FMath::Clamp(Loc.Y, -450.f, 450.f);
+	}
+	else
+	{
+		if (TeamSide > 0) { Loc.X = FMath::Clamp(Loc.X, 30.0f, 950.0f); }
+		else              { Loc.X = FMath::Clamp(Loc.X, -950.0f, -30.0f); }
+		Loc.Y = FMath::Clamp(Loc.Y, -500.0f, 500.0f);
+	}
 	if (Loc != GetActorLocation()) { SetActorLocation(Loc, true); }
 
 	// ---- Touch: only the primary handler, and only via the GameMode ----

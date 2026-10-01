@@ -25,6 +25,16 @@ namespace SEVolleyballRules
 		if (State.bRallySettled) { return ETouchResult::RallySettled; }
 		if (Team == EVolleyballTeam::None || PlayerIndex < 0) { return ETouchResult::WrongTeam; }
 
+		// M11c: serve-flight gate. The serve was recorded (LastTouchType == Serve)
+		// but has not yet legally crossed the net, so NOBODY may touch the ball —
+		// not the serving team (a second illegal contact), not the receiving team
+		// (the ball is not over the net yet). This prevents the old P0 sequence
+		// [Serve] -> [Touch 2/3 Set] -> [Touch 3/3 Attack] before [NetCross].
+		if (State.LastTouchType == EBallTouchType::Serve && !State.bServeCrossedNet)
+		{
+			return ETouchResult::WrongPhase;
+		}
+
 		// M11b-5 block: a front-row block is legal at any touch count, does not
 		// consume one of the team's three touches and does not trip the
 		// double-touch rule (the blocker may touch again right after). It also
@@ -71,8 +81,19 @@ namespace SEVolleyballRules
 		return ETouchResult::Allowed;
 	}
 
+	void RecordServeTouch(FVolleyballRallyState& State, EVolleyballTeam Team, int32 PlayerIndex)
+	{
+		State.LastTouchTeam = Team;
+		State.LastTouchPlayerIndex = PlayerIndex;
+		State.LastTouchType = EBallTouchType::Serve;
+		State.PossessingTeam = EVolleyballTeam::None;   // nobody possesses during serve flight
+		State.bServeCrossedNet = false;
+		State.TouchCount = 0;                           // the serve is NOT a team touch
+	}
+
 	void OnBallCrossedNet(FVolleyballRallyState& State, EVolleyballTeam NewPossessor)
 	{
+		State.bServeCrossedNet = true;
 		State.PossessingTeam = NewPossessor;
 		State.TouchCount = 0;
 		// LastTouchTeam/LastTouchPlayerIndex stay unchanged: they still decide OUT calls.
@@ -80,13 +101,14 @@ namespace SEVolleyballRules
 
 	void BeginRally(FVolleyballRallyState& State, EVolleyballTeam ServingTeam)
 	{
-		State.PossessingTeam = ServingTeam;
+		State.PossessingTeam = EVolleyballTeam::None;  // no possession until the serve crosses
 		State.TouchCount = 0;
 		State.LastTouchTeam = EVolleyballTeam::None;
 		State.LastTouchPlayerIndex = -1;
 		State.LastTouchType = EBallTouchType::Unknown;
 		State.bRallySettled = false;
 		State.bBallInPlay = false;
+		State.bServeCrossedNet = false;
 	}
 
 	bool SettleRally(FVolleyballRallyState& State)

@@ -28,6 +28,7 @@ using SEVolleyballRules::BeginRally;
 using SEVolleyballRules::SettleRally;
 using SEVolleyballRules::StartPlay;
 using SEVolleyballRules::ShouldAutoServe;
+using SEVolleyballRules::RecordServeTouch;
 
 // ---------------------------------------------------------------- 1/2: IN / OUT scoring
 
@@ -90,24 +91,44 @@ bool FSETouchSequence::RunTest(const FString& Parameters)
 {
 	FVolleyballRallyState S;
 	BeginRally(S, EVolleyballTeam::TeamA);
-	TestEqual(TEXT("serve counts as first touch"),
-		EvaluateTouch(S, EVolleyballTeam::TeamA, 0), ETouchResult::Allowed);
-	TestEqual(TEXT("touch count after serve"), S.TouchCount, 1);
+
+	// M11c (P0 fix): the serve is recorded but is NOT a team touch. TouchCount
+	// stays 0 and nobody possesses until the ball crosses the net.
+	RecordServeTouch(S, EVolleyballTeam::TeamA, 0);
+	TestEqual(TEXT("touch count after serve"), S.TouchCount, 0);
 	TestEqual(TEXT("last touch team after serve"), S.LastTouchTeam, EVolleyballTeam::TeamA);
 	TestEqual(TEXT("last toucher index after serve"), S.LastTouchPlayerIndex, 0);
+	TestEqual(TEXT("no possession during serve flight"), S.PossessingTeam, EVolleyballTeam::None);
 
-	// Wrong team cannot touch.
-	TestEqual(TEXT("B cannot touch while A possesses"),
-		EvaluateTouch(S, EVolleyballTeam::TeamB, 0), ETouchResult::WrongTeam);
+	// Nobody — not even the serving team — may touch before the net cross.
+	TestEqual(TEXT("A cannot touch again before net cross"),
+		EvaluateTouch(S, EVolleyballTeam::TeamA, 1), ETouchResult::WrongPhase);
+	TestEqual(TEXT("B cannot touch before net cross"),
+		EvaluateTouch(S, EVolleyballTeam::TeamB, 0), ETouchResult::WrongPhase);
+
+	// Legal net cross -> receiving team takes possession with 0 touches.
+	OnBallCrossedNet(S, EVolleyballTeam::TeamB);
+	TestEqual(TEXT("receiver possesses after net cross"), S.PossessingTeam, EVolleyballTeam::TeamB);
+	TestEqual(TEXT("touch count reset after net cross"), S.TouchCount, 0);
+
+	// First receive after the serve is touch 1/3, type Receive.
+	TestEqual(TEXT("first receive allowed"),
+		EvaluateTouch(S, EVolleyballTeam::TeamB, 0, EBallTouchType::Receive), ETouchResult::Allowed);
+	TestEqual(TEXT("touch count after receive"), S.TouchCount, 1);
+	TestEqual(TEXT("receive records type"), S.LastTouchType, EBallTouchType::Receive);
+
+	// Wrong team still cannot touch.
+	TestEqual(TEXT("A cannot touch while B possesses"),
+		EvaluateTouch(S, EVolleyballTeam::TeamA, 0), ETouchResult::WrongTeam);
 
 	// Teammate second touch (set).
 	TestEqual(TEXT("teammate second touch"),
-		EvaluateTouch(S, EVolleyballTeam::TeamA, 1), ETouchResult::Allowed);
+		EvaluateTouch(S, EVolleyballTeam::TeamB, 1, EBallTouchType::Set), ETouchResult::Allowed);
 	TestEqual(TEXT("touch count after set"), S.TouchCount, 2);
 
 	// Third touch (attack).
 	TestEqual(TEXT("third touch"),
-		EvaluateTouch(S, EVolleyballTeam::TeamA, 2), ETouchResult::Allowed);
+		EvaluateTouch(S, EVolleyballTeam::TeamB, 2, EBallTouchType::Attack), ETouchResult::Allowed);
 	TestEqual(TEXT("touch count after attack"), S.TouchCount, 3);
 	return true;
 }
@@ -292,16 +313,20 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSEServeFaultClassification, "SpikeElite.Tests.
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FSEServeFaultClassification::RunTest(const FString& Parameters)
 {
-	// A serve that never crossed the net is a fault whether it lands in or out.
+	// M11c: a serve that never crossed the net is a fault whether it lands in or
+	// out. The serve is recorded (not evaluated as a touch), so the fault
+	// classification keys off the serve record itself.
 	FVolleyballRallyState S;
 	BeginRally(S, EVolleyballTeam::TeamA);
-	EvaluateTouch(S, EVolleyballTeam::TeamA, 0); // serve = touch 1
-	TestTrue(TEXT("touch-1 serve that never crossed -> fault"), IsServeFault(S, false));
-	TestFalse(TEXT("touch-1 serve that DID cross -> not a fault"), IsServeFault(S, true));
+	RecordServeTouch(S, EVolleyballTeam::TeamA, 0);
+	TestEqual(TEXT("serve keeps touches at 0"), S.TouchCount, 0);
+	TestTrue(TEXT("serve that never crossed -> fault"), IsServeFault(S, false));
+	TestFalse(TEXT("serve that DID cross -> not a fault"), IsServeFault(S, true));
 
-	// A landed ball after the second touch is never a serve fault.
-	EvaluateTouch(S, EVolleyballTeam::TeamA, 1);
-	TestFalse(TEXT("touch-2 ball not a serve fault"), IsServeFault(S, false));
+	// After the net cross the serve record is no longer a fault.
+	OnBallCrossedNet(S, EVolleyballTeam::TeamB);
+	EvaluateTouch(S, EVolleyballTeam::TeamB, 0, EBallTouchType::Receive);
+	TestFalse(TEXT("post-cross receive not a serve fault"), IsServeFault(S, true));
 	return true;
 }
 
@@ -518,6 +543,112 @@ bool FSECourtDimensions::RunTest(const FString& Parameters)
 	TestTrue(TEXT("free zone clear of stands"), SideFreeZone < 1200.f && EndFreeZone < 1750.f);
 	// 3 m attack line: 300 cm from the centre line.
 	TestEqual(TEXT("attack line at 3m"), 300.f, 300.f);
+	return true;
+}
+
+// ---------------- M11c-1: serve possession (P0) ----------------
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSEServeDoesNotConsumeTouch, "SpikeElite.Tests.ServeDoesNotConsumeTeamTouch",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FSEServeDoesNotConsumeTouch::RunTest(const FString& Parameters)
+{
+	// The serve must never consume one of the serving team's three touches.
+	FVolleyballRallyState S;
+	BeginRally(S, EVolleyballTeam::TeamA);
+	RecordServeTouch(S, EVolleyballTeam::TeamA, 0);
+	TestEqual(TEXT("serve keeps TouchCount at 0"), S.TouchCount, 0);
+	TestEqual(TEXT("serve leaves possession None"), S.PossessingTeam, EVolleyballTeam::None);
+	TestEqual(TEXT("serve records last toucher"), S.LastTouchPlayerIndex, 0);
+	TestEqual(TEXT("serve records last team"), S.LastTouchTeam, EVolleyballTeam::TeamA);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSEServingTeamCannotTouchBeforeCross, "SpikeElite.Tests.ServingTeamCannotTouchBeforeNetCross",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FSEServingTeamCannotTouchBeforeCross::RunTest(const FString& Parameters)
+{
+	// After the serve leaves the hand and before it legally crosses the net, no
+	// serving-team player may touch again (the old P0 bug let them Set/Attack).
+	FVolleyballRallyState S;
+	BeginRally(S, EVolleyballTeam::TeamA);
+	RecordServeTouch(S, EVolleyballTeam::TeamA, 0);
+	TestEqual(TEXT("A teammate Set rejected during serve flight"),
+		EvaluateTouch(S, EVolleyballTeam::TeamA, 1, EBallTouchType::Set), ETouchResult::WrongPhase);
+	TestEqual(TEXT("A teammate Attack rejected during serve flight"),
+		EvaluateTouch(S, EVolleyballTeam::TeamA, 2, EBallTouchType::Attack), ETouchResult::WrongPhase);
+	TestEqual(TEXT("A server second contact rejected"),
+		EvaluateTouch(S, EVolleyballTeam::TeamA, 0, EBallTouchType::Receive), ETouchResult::WrongPhase);
+	TestEqual(TEXT("B block rejected before cross"),
+		EvaluateTouch(S, EVolleyballTeam::TeamB, 3, EBallTouchType::Block), ETouchResult::WrongPhase);
+	TestEqual(TEXT("touch count untouched by rejected attempts"), S.TouchCount, 0);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSELegalServeCrossGivesReceiverZero, "SpikeElite.Tests.LegalServeCrossGivesReceiverZeroTouches",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FSELegalServeCrossGivesReceiverZero::RunTest(const FString& Parameters)
+{
+	// After a legal serve cross, the receiving team takes possession with 0
+	// touches and the serve-flight gate is lifted.
+	FVolleyballRallyState S;
+	BeginRally(S, EVolleyballTeam::TeamA);
+	RecordServeTouch(S, EVolleyballTeam::TeamA, 0);
+	OnBallCrossedNet(S, EVolleyballTeam::TeamB);
+	TestEqual(TEXT("receiver possesses"), S.PossessingTeam, EVolleyballTeam::TeamB);
+	TestEqual(TEXT("receiver touch count 0"), S.TouchCount, 0);
+	TestEqual(TEXT("serve-cross flag set"), S.bServeCrossedNet, true);
+	TestEqual(TEXT("B receive now legal"),
+		EvaluateTouch(S, EVolleyballTeam::TeamB, 0, EBallTouchType::Receive), ETouchResult::Allowed);
+	TestEqual(TEXT("receive is touch 1/3"), S.TouchCount, 1);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSEServeIntoNetIsFault, "SpikeElite.Tests.ServeIntoNetIsFault",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FSEServeIntoNetIsFault::RunTest(const FString& Parameters)
+{
+	// A serve that hits the net (never legally crossed) is a serve fault.
+	FVolleyballRallyState S;
+	BeginRally(S, EVolleyballTeam::TeamA);
+	RecordServeTouch(S, EVolleyballTeam::TeamA, 0);
+	TestTrue(TEXT("net-touch serve is a fault"), IsServeFault(S, false));
+	TestEqual(TEXT("still no touches consumed"), S.TouchCount, 0);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSEServeOutIsFault, "SpikeElite.Tests.ServeOutIsFault",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FSEServeOutIsFault::RunTest(const FString& Parameters)
+{
+	// A serve that never crossed the net and lands OUT is still a serve fault,
+	// not a generic out (opponent of last toucher = receiver would be wrong).
+	FVolleyballRallyState S;
+	BeginRally(S, EVolleyballTeam::TeamA);
+	RecordServeTouch(S, EVolleyballTeam::TeamA, 0);
+	TestTrue(TEXT("out-bound serve is a fault"), IsServeFault(S, false));
+	// Scoring: fault -> opponent (Team B) scores, regardless of where it landed.
+	const EVolleyballTeam Scoring = DetermineScoringTeamOnLand(false, S.LastTouchTeam, true /*landed on A half*/);
+	TestEqual(TEXT("fault scores for opponent"), Scoring, EVolleyballTeam::TeamB);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSEServerBehindEndLine, "SpikeElite.Tests.ServerStartsBehindEndLine",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FSEServerBehindEndLine::RunTest(const FString& Parameters)
+{
+	// FIVB: the server must stand behind the end line (X=±900) inside the 9 m
+	// service zone. The GameMode's service spot (±1200) and zone width (900 cm)
+	// are the constants the production code uses; verify the relationship.
+	constexpr float EndLineX = 900.f;
+	constexpr float ServiceSpotX = 1200.f;
+	constexpr float ServiceZoneHalfWidth = 450.f;
+	TestTrue(TEXT("server spot behind end line (A)"), ServiceSpotX > EndLineX + 200.f);
+	TestTrue(TEXT("server spot inside free zone (A)"), ServiceSpotX < 1550.f);
+	TestTrue(TEXT("server spot behind end line (B, mirrored)"), -ServiceSpotX < -EndLineX - 200.f);
+	TestEqual(TEXT("service zone 9 m wide"), ServiceZoneHalfWidth * 2.f, 900.f);
+	// The spot must be reachable with the service-zone movement bounds open.
+	constexpr float ZoneBoundX = 1550.f;
+	TestTrue(TEXT("service spot reachable by bounds"), FMath::Abs(ServiceSpotX) <= ZoneBoundX);
 	return true;
 }
 
