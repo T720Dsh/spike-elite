@@ -10,6 +10,7 @@ class UCameraComponent;
 class USpringArmComponent;
 class UStaticMeshComponent;
 class USceneComponent;
+class UTextRenderComponent;
 class ASpikeEliteGameMode;
 
 /**
@@ -167,6 +168,9 @@ public:
 	/** Dev aid (-Closeup): shorten the spring arm so the body fills the view. */
 	void SetThirdPersonArmLength(float NewLength);
 
+	/** Refresh the chest/back number after GameMode assigns JerseyNumber. */
+	void RefreshJerseyNumberVisual();
+
 protected:
 	virtual void BeginPlay() override;
 
@@ -189,6 +193,20 @@ protected:
 	TObjectPtr<UStaticMeshComponent> Torso;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Character")
 	TObjectPtr<UStaticMeshComponent> Head;
+
+	/** M11d-6: rounded stylized silhouette — shoulder spheres + hip block. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Character")
+	TObjectPtr<UStaticMeshComponent> ShoulderL;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Character")
+	TObjectPtr<UStaticMeshComponent> ShoulderR;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Character")
+	TObjectPtr<UStaticMeshComponent> HipPad;
+
+	/** M11d-6: jersey number rendered on the chest and back. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Character")
+	TObjectPtr<UTextRenderComponent> JerseyFront;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Character")
+	TObjectPtr<UTextRenderComponent> JerseyBack;
 
 	UPROPERTY()
 	FProceduralLimb ArmL;

@@ -85,6 +85,21 @@ AVolleyballBall::AVolleyballBall()
 	BandMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	BandMesh->SetCastShadow(false);
 
+	// M11d-6: white meridian stripe (pole-to-pole) crosses the blue equator into
+	// a simple four-panel look. Same compensated scale / tint approach as above;
+	// no trademarked art anywhere.
+	BandMesh2 = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("BandMesh2"));
+	BandMesh2->SetupAttachment(Mesh);
+	if (CylMesh.Succeeded())
+	{
+		BandMesh2->SetStaticMesh(CylMesh.Object);
+		BandMesh2->SetRelativeRotation(FRotator(0.f, 90.f, 0.f));
+		BandMesh2->SetRelativeScale3D(FVector(0.213f / 0.21f, 0.213f / 0.21f, 0.012f / 0.21f));
+		ApplyTint(BandMesh2, FLinearColor(0.92f, 0.94f, 0.96f));
+	}
+	BandMesh2->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	BandMesh2->SetCastShadow(false);
+
 	Projectile = CreateDefaultSubobject<UProjectileMovementComponent>(TEXT("Projectile"));
 	Projectile->SetUpdatedComponent(Mesh);
 	Projectile->InitialSpeed = 0.0f;
@@ -117,6 +132,7 @@ void AVolleyballBall::BeginPlay()
 		Mesh->SetRelativeScale3D(FVector(1.f));
 		Mesh->SetMaterial(0, LicensedBallMaterial);
 		if (BandMesh) { BandMesh->SetVisibility(false); }
+		if (BandMesh2) { BandMesh2->SetVisibility(false); }
 	}
 }
 

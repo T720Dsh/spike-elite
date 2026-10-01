@@ -10,6 +10,8 @@
 #include "Components/InputComponent.h"
 #include "Camera/CameraComponent.h"
 #include "GameFramework/SpringArmComponent.h"
+#include "Components/TextRenderComponent.h"
+#include "Engine/Font.h"
 #include "Kismet/GameplayStatics.h"
 #include "Materials/MaterialInstanceDynamic.h"
 
@@ -53,6 +55,14 @@ ASpikeEliteCharacter::ASpikeEliteCharacter()
 	if (SphereMesh.Succeeded())
 	{
 		Head->SetStaticMesh(SphereMesh.Object);
+
+		// M11d-6: rounded silhouette — sphere shoulder pads + a low hip block,
+		// so the torso reads as a stylized athlete, not a single cube.
+		ShoulderL = MakeMesh(TEXT("ShoulderL"), TorsoJoint, FVector(0.16f, 0.11f, 0.11f), FVector(0.f, -24.f, 57.f));
+		ShoulderL->SetStaticMesh(SphereMesh.Object);
+		ShoulderR = MakeMesh(TEXT("ShoulderR"), TorsoJoint, FVector(0.16f, 0.11f, 0.11f), FVector(0.f, 24.f, 57.f));
+		ShoulderR->SetStaticMesh(SphereMesh.Object);
+		HipPad = MakeMesh(TEXT("HipPad"), TorsoJoint, FVector(0.34f, 0.20f, 0.14f), FVector(0.f, 0.f, 2.f));
 	}
 
 	// Limbs. Shoulder/hip joint at the root of each limb; upper segment hangs
@@ -81,6 +91,42 @@ ASpikeEliteCharacter::ASpikeEliteCharacter()
 	ArmR = BuildLimb(TEXT("ArmR"), TorsoJoint,  24.f, true);
 	LegL = BuildLimb(TEXT("LegL"), RootComponent, -10.f, false);
 	LegR = BuildLimb(TEXT("LegR"), RootComponent,  10.f, false);
+
+	// M11d-6: jersey number on chest and back (engine default font, no external
+	// assets). The capsule is the only collider and is hidden, so the text
+	// renders through it without interfering with gameplay.
+	{
+		static ConstructorHelpers::FObjectFinder<UFont> RobotoFont(TEXT("/Engine/EngineFonts/Roboto"));
+		const FVector NumScale(1.f);
+		const FLinearColor NumColor(1.f, 1.f, 1.f);
+
+		JerseyFront = CreateDefaultSubobject<UTextRenderComponent>(TEXT("JerseyFront"));
+		JerseyFront->SetupAttachment(TorsoJoint);
+		// TextRender's glyph plane faces along local +X.  The torso cube is 46 cm
+		// deep, so place the number just outside its surface (the old 0.26 cm
+		// offset left both labels buried inside the opaque cube).
+		JerseyFront->SetRelativeLocation(FVector(23.6f, 0.f, 34.f));
+		JerseyFront->SetRelativeRotation(FRotator::ZeroRotator);
+		JerseyFront->SetRelativeScale3D(NumScale);
+		JerseyFront->SetWorldSize(24.f);
+		JerseyFront->SetTextRenderColor(NumColor.ToFColor(true));
+		JerseyFront->SetHorizontalAlignment(EHTA_Center);
+		JerseyFront->SetVerticalAlignment(EVRTA_TextCenter);
+		JerseyFront->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		JerseyFront->SetCastShadow(false);
+
+		JerseyBack = CreateDefaultSubobject<UTextRenderComponent>(TEXT("JerseyBack"));
+		JerseyBack->SetupAttachment(TorsoJoint);
+		JerseyBack->SetRelativeLocation(FVector(-23.6f, 0.f, 34.f));
+		JerseyBack->SetRelativeRotation(FRotator(0.f, 180.f, 0.f));
+		JerseyBack->SetRelativeScale3D(NumScale);
+		JerseyBack->SetWorldSize(24.f);
+		JerseyBack->SetTextRenderColor(NumColor.ToFColor(true));
+		JerseyBack->SetHorizontalAlignment(EHTA_Center);
+		JerseyBack->SetVerticalAlignment(EVRTA_TextCenter);
+		JerseyBack->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		JerseyBack->SetCastShadow(false);
+	}
 
 	GetCapsuleComponent()->SetCapsuleHalfHeight(84.f);
 	GetCapsuleComponent()->SetCapsuleRadius(32.f);
@@ -120,6 +166,8 @@ void ASpikeEliteCharacter::BeginPlay()
 {
 	Super::BeginPlay();
 	ApplyJerseyColor();
+	RefreshJerseyNumberVisual();
+
 	if (!bIsBot)
 	{
 		UpdateCameraView();
@@ -131,6 +179,13 @@ void ASpikeEliteCharacter::BeginPlay()
 		if (ThirdPersonCamera) ThirdPersonCamera->Deactivate();
 		if (FirstPersonCamera) FirstPersonCamera->Deactivate();
 	}
+}
+
+void ASpikeEliteCharacter::RefreshJerseyNumberVisual()
+{
+	const FString Num = (JerseyNumber > 0) ? FString::FromInt(JerseyNumber) : TEXT("");
+	if (JerseyFront) { JerseyFront->SetText(FText::FromString(Num)); }
+	if (JerseyBack)  { JerseyBack->SetText(FText::FromString(Num)); }
 }
 
 void ASpikeEliteCharacter::SetThirdPersonArmLength(float NewLength)
@@ -167,6 +222,9 @@ void ASpikeEliteCharacter::ApplyJerseyColor()
 	};
 
 	Tint(Torso, Jersey);
+	Tint(ShoulderL, Jersey);
+	Tint(ShoulderR, Jersey);
+	Tint(HipPad, Shorts);
 	Tint(ArmL.Upper, Jersey);
 	Tint(ArmR.Upper, Jersey);
 	Tint(ArmL.Lower, Jersey);

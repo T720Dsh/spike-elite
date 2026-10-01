@@ -61,6 +61,11 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ball")
 	TObjectPtr<UStaticMeshComponent> BandMesh;
 
+	/** M11d-6: white meridian stripe — original un-branded multi-panel look
+	 *  (yellow sphere, blue equator, white pole-to-pole stripe). */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Ball")
+	TObjectPtr<UStaticMeshComponent> BandMesh2;
+
 	/**
 	 * Licensed V200W ball asset slots (M11b-6). Empty until the user provides a
 	 * legally licensed Mikasa V200W model + textures with ASSET_LICENSE.md next
