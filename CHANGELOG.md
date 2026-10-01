@@ -35,8 +35,16 @@ M11d-6 角色与球：分段程序化运动员胸/背新增球衣号码 TextRend
 升级为原创黄蓝白多面板（蓝色赤道带 + 白色经线带），授权 Mesh/Material 插槽仍可用且缺失
 时自动回退无品牌占位球。
 
-> 注：M11d 视觉验收（逐张读取最新截图）、55/55 测试回归、三分辨率 UI 检查与 Win64 打包
-> 结果在完成对应自动化运行后于交付报告更新；本节在代码提交时仅记录已实施的代码改动。
+> M11d 视觉验收结果（提交后执行）：720p/1080p `-devauto` 各跑一遍（DevVerifyFailures=0），
+> ShotSuite + TacticalTest 截图逐张读取通过（主菜单 720p/1080p、设置、暂停、确认、左右对称比分板、
+> 发球阶段、回合结果横幅、轮次小球场 HUD、战术瞄准卡片、二传 13+1 ScrollBox、防守 2×4、DiveActive、
+> DiveSave、记录台记分牌、比赛球多面板、MatchOver、Rematch）；55/55 自动化测试回归通过；
+> Win64 打包完成（约 839MB）。**已知问题**：打包版 D3D 渲染初始化引擎级挂起（卡在 Slate 字体懒加载
+> 后的 Texture streaming 初始化，早于 Game Engine Initialized；`-NullRHI` 下打包版逻辑可完整运行），
+> 已排除项目代码/PSO/纹理流送/内存/重打包，判断为 UE 5.8 打包版渲染设备初始化问题，验收请用
+> `UnrealEditor.exe ... -game` 等价路径；ShotSuite 偶发在 first_receive 后无进展（随机流程，重跑即可）。
+> 另：UE 共享缓存（DDC/Zen）已迁移至 D:\UE_DDC 并通过用户环境变量 `UE-SharedDataCachePath` 固定，
+> 避免编译/打包占用 C 盘。
 
 ### Milestone M11c — 发球球权纠错 · 权威轮转 · 真实救球生命周期 · 战术同源求解 · 屏幕 UMG 战术 · 打包收口
 

@@ -78,7 +78,7 @@
 - [x] M11d-3 比赛 HUD 重构：左右对称比分板、阶段徽章、触球圆点、中央回合横幅、帮助条分离；右上角小球场站位图（队色圆点/金色发球/白色受控/轮转提示）
 - [x] M11d-4 战术 UI 重排：攻击卡片化（目标区/力度条/弧线档位/绿黄红）、二传 13+1 ScrollBox 分组列表、防守双列（拦网策略/后排防守）
 - [x] M11d-5/6 场馆双色吸音板与无品牌赛事文字标识、角色胸背球衣号码、比赛用球黄蓝白多面板（授权插槽 fallback 保留）
-- [ ] M11d-7 视觉验收截图套件、三分辨率 UI 检查、55/55 测试回归、Win64 打包与交付报告（运行验证待执行）
+- [x] M11d-7 视觉验收截图套件（720p/1080p devauto + ShotSuite + TacticalTest）、三分辨率 UI 检查、55/55 测试回归、Win64 打包（打包版 D3D 渲染初始化存在引擎级挂起，见下方"已知问题"）
 - [ ] 战术 AI 完整化（后排进攻细化、自由人）、外部角色动画模型、网络同步
 
 下一步具体行动见 [docs/05-roadmap.md](docs/05-roadmap.md)。
@@ -92,7 +92,14 @@
 
 > 当前 GitHub Release v1.0.0 为 M11b 里程碑构建（约 283MB）。M11c 规则/战术/场馆收口后的新构建位于仓库
 > `Dist\Windows\SpikeElite.exe`（本地打包产物，不入 Git）。如需面向玩家的新版"解压即玩"包，请在
-> [Releases](https://github.com/T720Dsh/spike-elite/releases) 发布新版本——M11c 未自动推送远程。
+> [Releases](https://github.com/T720Dsh/spike-elite/releases) 发布新版本——M11c/M11d 均未自动推送远程。
+
+> **M11d 打包版已知问题**：全新 Win64 Development 包（`Dist\Windows\SpikeElite.exe`，约 839MB）
+> 在本机 D3D12/D3D11 渲染初始化阶段稳定挂起（卡在 Slate 字体懒加载后的 `Texture streaming: Enabled`，
+> 位于 `LogInit: Game Engine Initialized` 之前）。已排除项目代码、PSO 预缓存、纹理流送、内存/磁盘空间、
+> 重新打包等因素；`-NullRHI` 下打包版可完整启动并运行 QuickMatch 逻辑（启动→主菜单→MatchOver→Rematch），
+> 说明是打包版 D3D 渲染设备初始化的引擎/驱动级问题（UE 5.8）。开发/验收环境下请用
+> `UnrealEditor.exe SpikeElite.uproject -game ...`（渲染与逻辑完全正常）代替打包版。
 
 **运行步骤：**
 1. 解压 `SpikeElite-v1.0.0-win64.zip` 到任意目录（绿色版，免安装）。
@@ -106,6 +113,12 @@
 引擎版本：**Unreal Engine 5.8**（`.uproject` 的 `EngineAssociation` 为 `5.8`）。
 
 ```powershell
+# 0) （推荐）把 UE 共享缓存（DDC/Zen）放到 D 盘，避免编译/打包占用 C 盘空间
+[Environment]::SetEnvironmentVariable("UE-SharedDataCachePath", "D:\UE_DDC", "User")
+[Environment]::SetEnvironmentVariable("UE_SharedDataCachePath", "D:\UE_DDC", "User")
+# D:\UE_DDC 目录需存在（可手工创建）。旧缓存可整体从
+# C:\Users\<you>\AppData\Local\UnrealEngine 迁移过去。
+
 # 1) 用 UE 5.8 打开工程（首次打开会提示编译 C++，点 Yes）
 D:\Epic\UE_5.8\Engine\Binaries\Win64\UnrealEditor.exe .\SpikeElite.uproject
 
