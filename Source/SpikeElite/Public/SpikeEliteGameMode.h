@@ -114,6 +114,31 @@ public:
 	/** Dead-ball window in which a team timeout may legally be requested. */
 	bool CanRequestTimeout() const;
 
+	// ---------------- M11h-5: substitutions (FIVB 15.1/15.2/15.6 subset) ----------------
+	/** Substitutions remaining this set (FIVB: 6 per set). */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Volleyball|Flow")
+	int32 SubstitutionsLeftA = 6;
+	int32 SubstitutionsLeftB = 6;
+	/** Bench PlayerIds currently off court. */
+	TArray<FString> SubPoolA;
+	TArray<FString> SubPoolB;
+	/** Bench player -> the one starter they may replace (and who may replace
+	 *  them back). Built per set from the registered roster pairing. */
+	TMap<FString, FString> SubPairingA;
+	TMap<FString, FString> SubPairingB;
+
+	/** Legal substitution request (dead ball, allowance, pairing, on-court index
+	 *  validity). Applies atomically: identity switch + jersey refresh, no
+	 *  transient 7/5-man court, no duplicate PlayerId. */
+	UFUNCTION(BlueprintCallable, Category = "Volleyball|Flow")
+	bool RequestSubstitution(EVolleyballTeam Team, int32 CourtIndex, const FString& SubId);
+
+	/** Same gates as RequestSubstitution, with a human-readable rejection reason. */
+	bool CanRequestSubstitution(EVolleyballTeam Team, int32 CourtIndex, const FString& SubId, FString& OutReason) const;
+
+	/** Rebuild bench/pairing/allowances for a new set or match. */
+	void ResetSubstitutionState();
+
 	/** M11d-3: previous serving team, so the rotation HUD can flag side-out 轮转. */
 	EVolleyballTeam LastRotationServeTeam = EVolleyballTeam::None;
 

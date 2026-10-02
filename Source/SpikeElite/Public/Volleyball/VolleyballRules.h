@@ -301,6 +301,12 @@ namespace SEVolleyballRules
 	inline int32 TimeoutsPerSet() { return 2; }
 	inline float TimeoutSeconds() { return 30.f; }
 
+	/** M11h-5: substitutions — FIVB 15.2 allows 6 per set; requests only in the
+	 *  same dead-ball window as timeouts (before the service whistle). */
+	inline bool CanSubstituteInPhase(EMatchState State) { return CanRequestTimeoutInPhase(State); }
+	inline int32 SubstitutionsPerSet() { return 6; }
+	inline int32 SubstitutionsLeftAfter(int32 Left) { return Left > 0 ? Left - 1 : 0; }
+
 	/** Mark the rally as live. Called by GameMode when the serve is actually hit
 	 *  out (ExecuteServe) and the state enters Rally. Tests assert the lifecycle
 	 *  BeginRally(false) -> StartPlay(true) -> SettleRally(false). */

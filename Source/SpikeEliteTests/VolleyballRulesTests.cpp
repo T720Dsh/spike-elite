@@ -1597,6 +1597,67 @@ bool FSEITimeoutAllowanceConsumption::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSEISubstitutionLegalWindows,
+	"SpikeElite.Tests.SubstitutionLegalWindows",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FSEISubstitutionLegalWindows::RunTest(const FString& Parameters)
+{
+	// FIVB 15.2: substitutions only on a dead ball before the service whistle —
+	// the same window as team timeouts.
+	TestTrue(TEXT("between rallies"),  SEVolleyballRules::CanSubstituteInPhase(EMatchState::BetweenRallies));
+	TestTrue(TEXT("service authorized"), SEVolleyballRules::CanSubstituteInPhase(EMatchState::ServiceAuthorized));
+	TestFalse(TEXT("rally live"),      SEVolleyballRules::CanSubstituteInPhase(EMatchState::Rally));
+	TestFalse(TEXT("serving toss"),    SEVolleyballRules::CanSubstituteInPhase(EMatchState::ServingToss));
+	TestFalse(TEXT("timeout"),         SEVolleyballRules::CanSubstituteInPhase(EMatchState::Timeout));
+	TestFalse(TEXT("set over"),        SEVolleyballRules::CanSubstituteInPhase(EMatchState::SetOver));
+	TestFalse(TEXT("match over"),      SEVolleyballRules::CanSubstituteInPhase(EMatchState::MatchOver));
+	TestEqual(TEXT("per set"),         SEVolleyballRules::SubstitutionsPerSet(), 6);
+	int32 Left = SEVolleyballRules::SubstitutionsPerSet();
+	for (int32 i = 0; i < 6; ++i)
+	{
+		Left = SEVolleyballRules::SubstitutionsLeftAfter(Left);
+	}
+	TestEqual(TEXT("never negative"), Left, 0);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSEIRosterPairingAndStarters,
+	"SpikeElite.Tests.RosterPairingAndStarters",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FSEIRosterPairingAndStarters::RunTest(const FString& Parameters)
+{
+	// M11h-5: default rosters give 12 registered players, 6 starters, 6 bench;
+	// PlayerIds are unique and the six starters are exactly the court six.
+	FTeamRosterState A, B;
+	SEVolleyballRoster::BuildDefaultRoster(EVolleyballTeam::TeamA, A);
+	SEVolleyballRoster::BuildDefaultRoster(EVolleyballTeam::TeamB, B);
+	FString Problem;
+	TestTrue(TEXT("roster A valid"), SEVolleyballRoster::ValidateRoster(A, Problem));
+	TestTrue(TEXT("roster B valid"), SEVolleyballRoster::ValidateRoster(B, Problem));
+
+	TSet<FString> IdsA, IdsB;
+	for (const FPlayerIdentity& P : A.Registered) { IdsA.Add(P.PlayerId); }
+	for (const FPlayerIdentity& P : B.Registered) { IdsB.Add(P.PlayerId); }
+	TestEqual(TEXT("A 12 unique ids"), IdsA.Num(), 12);
+	TestEqual(TEXT("B 12 unique ids"), IdsB.Num(), 12);
+	TestEqual(TEXT("A starting six"), A.StartingLineup.Num(), 6);
+	TestEqual(TEXT("A court six"),   A.OnCourtLineup.Num(), 6);
+
+	// Bench = registered minus court six (derived helper used by GameMode pool).
+	TArray<FString> BenchA = A.GetBench();
+	TestEqual(TEXT("A bench six"), BenchA.Num(), 6);
+	for (const FString& BenchId : BenchA)
+	{
+		TestFalse(TEXT("bench not on court"), A.OnCourtLineup.Contains(BenchId));
+	}
+	// No libero is enabled by default (M11h-1 identity guard).
+	for (const FPlayerIdentity& P : A.Registered)
+	{
+		TestTrue(TEXT("no libero default"), P.Role != EPlayerRole::Libero);
+	}
+	return true;
+}
+
 
 #endif // WITH_DEV_AUTOMATION_TESTS
 
