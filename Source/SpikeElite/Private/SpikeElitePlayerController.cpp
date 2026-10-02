@@ -644,14 +644,39 @@ void ASpikeElitePlayerController::DevShotSuite()
 		}
 
 		// 02: first receive after a legal serve (TouchCount==1, type Receive).
-		if (!Done(2) && CanShot() && GM->IsRallyLive() && GM->GetTouchCount() == 1
-			&& GM->GetLastTouchType() == EBallTouchType::Receive && GM->GetServeCrossedNet())
+		// Natural capture when the rally provides it; deterministic fallback
+		// after 20 s pins the Receive pose on a defender so the suite can
+		// never stall on this shot forever.
+		if (!Done(2) && CanShot() && GM->IsRallyLive())
 		{
-			const int32 PIdx = GM->GetLastTouchPlayerIndex();
+			const bool bRealReceive = GM->GetTouchCount() == 1
+				&& GM->GetLastTouchType() == EBallTouchType::Receive
+				&& GM->GetServeCrossedNet();
 			ASpikeEliteCharacter* Rec = nullptr;
-			const EVolleyballTeam LastTeam = GM->GetLastTouchTeam();
-			const TArray<TObjectPtr<ASpikeEliteCharacter>>& Roster = GM->GetTeamPlayers(LastTeam);
-			if (Roster.IsValidIndex(PIdx)) { Rec = Roster[PIdx]; }
+			int32 PIdx = -1;
+			if (bRealReceive)
+			{
+				PIdx = GM->GetLastTouchPlayerIndex();
+				const EVolleyballTeam LastTeam = GM->GetLastTouchTeam();
+				const TArray<TObjectPtr<ASpikeEliteCharacter>>& Roster = GM->GetTeamPlayers(LastTeam);
+				if (Roster.IsValidIndex(PIdx)) { Rec = Roster[PIdx]; }
+			}
+			else if (Elapsed > 20.0)
+			{
+				// Deterministic fallback: pin a Receive pose on the defending
+				// team's first player so the shot is reproducible even if the
+				// fast rally window was sampled past.
+				const EVolleyballTeam DefTeam = GM->GetPossessingTeam();
+				const TArray<TObjectPtr<ASpikeEliteCharacter>>& Roster = GM->GetTeamPlayers(DefTeam);
+				if (Roster.Num() > 0)
+				{
+					Rec = Roster[0];
+					Rec->DevSetPoseOverride(EAnimPose::Receive, true);
+					PIdx = 0;
+					UE_LOG(LogSEMenu, Log, TEXT("DEV SHOT SUITE: first-receive fallback (team=%d)"),
+						(int32)DefTeam);
+				}
+			}
 			if (Rec)
 			{
 				const FVector L = Rec->GetActorLocation();
@@ -921,7 +946,7 @@ void ASpikeElitePlayerController::DevShotSuite()
 			&& ShotLastAt >= 0.f && Elapsed - ShotLastAt > 1.0)
 		{
 			// Give the async screenshot for the last shot time to flush to disk.
-			UE_LOG(LogSEMenu, Log, TEXT("DEV SHOT SUITE: all %d shots captured, quitting"), Num - 1);
+			UE_LOG(LogSEMenu, Log, TEXT("DEV SHOT SUITE: all %d shot groups captured, quitting"), Num - 1);
 			PC->ConsoleCommand(TEXT("quit"));
 			return false;
 		}

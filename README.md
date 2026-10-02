@@ -79,6 +79,9 @@
 - [x] M11d-4 战术 UI 重排：攻击卡片化（目标区/力度条/弧线档位/绿黄红）、二传 13+1 ScrollBox 分组列表、防守双列（拦网策略/后排防守）
 - [x] M11d-5/6 场馆双色吸音板与无品牌赛事文字标识、角色胸背球衣号码、比赛用球黄蓝白多面板（授权插槽 fallback 保留）
 - [x] M11e-1 打包版有画面启动闭环：M11e-0 修正后全新 Win64 包在 D3D12（3 次冷启动）/D3D11 真实渲染下完整跑通 QuickMatch+Rematch 流程，TacticalTest PASS，主菜单/比赛/战术/结果截图逐张验收，启动器默认指向验收包（M11d 挂起重打包后不再复现，根因边界见 docs/M11e-report.md）
+- [x] M11e-3 角色姿态验收序列：`-PoseSuite` 11 姿态 × 正/侧/背 + Run 相位帧，纯 3D 截图逐张验收（Idle/Block/Dive 构图合格）
+- [x] M11e-4 场馆构图美术：记录台实体记分牌正向可读、裁判台护栏、坐姿观众（ISM）、替补坐姿、球网细网格
+- [x] M11e-5 确定性验收与最终图形包：ShotSuite fallback 修复、57/57 测试、三组 Seed + RematchStress 5 次 PASS、新 Win64 包（905MB）固化 Dist 且打包版 seed 42 冒烟 PASS
 - [ ] 战术 AI 完整化（后排进攻细化、自由人）、外部角色动画模型、网络同步
 
 下一步具体行动见 [docs/05-roadmap.md](docs/05-roadmap.md)。

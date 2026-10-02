@@ -26,6 +26,41 @@ M11e-0 现场修正后的全新 Win64 Development 包（`Dist\Windows\SpikeElite
 - 诊断开关 `-NoJerseyText`（Development）：跳过角色 CDO 中的 TextRender 号码组件，用于 bisect
   引擎初始化期的字体/文本材质同步加载路径。
 
+### M11e-3 角色姿态验收序列（2026-10-02）
+
+- 新增 `-devauto -PoseSuite`：11 个姿态（Idle/Run/Jump/Receive/Set/Spike/Block/Dive/
+  Recover/Serve/RaiseHands）× 正/侧/背 + Run 8 帧相位序列，全部纯 3D 截图（无 HUD）。
+- 构图方案：主体固定到场地固定点、速度清零、比赛球推离近景、专用 Dev 相机以 330cm
+  轨道围绕躯干（正面/侧面/背面），球衣号码清晰可读。
+- 截图逐张读取验收：Idle（深蓝 1 号背身）、Block（双臂高举全身）、Dive（低姿态前扑伸臂）
+  构图合格；Run 帧序列可见运动相位。
+- 修复合购：`-PoseSuite` 分发走真实比赛流程；提交前 Editor/Game 编译通过。
+
+### M11e-4 场馆构图美术（2026-10-02）
+
+- 记录台记分牌实体化：桌上底座 + 竖立面板（朝球场 -X 面），TextRender Yaw 180 黄色文字
+  正向可读（截图 `shot_ss_08_scorer00016` 实测 "SET 1 / A2 / Serve A"），记录员移至面板后不再遮挡。
+- 第一裁判台增加两根护栏柱（平台呈裁判塔造型，非悬浮板）。
+- 观众改为坐姿轮廓（低宽身体 + 深色腿 + 头，全 ISM/HISM，无每观众 Actor）；替补席球员坐姿化。
+- 球网网格加密（12cm→8cm 间距、线更细、颜色更深），不再像白色栅栏遮挡对侧；地板保持自带
+  木地板/运动地板材质。
+- 验证：Editor+Game 编译通过，ShotSuite 完整退出，记录台/裁判/场馆机位截图逐张验收。
+
+### M11e-5 确定性验收与最终图形包（2026-10-02）
+
+- ShotSuite 偶发停滞修复：`first_receive` 增加 20s 确定性 fallback（防方第一球员固定 Receive
+  姿态摆拍），日志口径改为 "shot groups"。
+- 验收：自动化测试 57/57（0 fail）；三组 Seed（1/42/4242）QuickMatch 各完成 MatchOver→
+  Rematch→第二场 MatchOver→退出，DevVerifyFailures=0；RematchStress 5 次审计 PASS
+  （court/arena/ball/officials/rotwidget/scoreboard 各 1、chars=12、validActors=33 稳定）。
+- 分辨率：`-ResX/-ResY/-ForceRes/r.SetRes` 在本机 unattended 环境下均被桌面分辨率覆盖，
+  UI 使用 UMG 锚点/DPI 自适应，1707×1067 运行 DevVerifyFailures=0（1280×720 布局已在
+  M11d/M11e-1 打包版截图验收）。
+- 最终包：`BuildCookRun -skipcook -build -stage -pak -archive` 生成新 Win64 Development 包
+  （`Saved\Archive\Windows`，48 文件 / 905MB），固化 `Dist\Windows`；打包版 seed 42 冒烟 PASS
+  （50s、MatchOver→Confirm-cancel→第二场→退出、DevVerifyFailures=0），日志仅引擎环境噪声
+  （aqProf/Vtune/PIX dll 缺失），无项目自身 Fatal/Ensure/Missing Package。
+
 ### M11d 现场复核修正（2026-10-02）
 
 修复分段肢体的缩放继承与髋/躯干连接，恢复正常尺寸的前臂、手、大腿、小腿；
