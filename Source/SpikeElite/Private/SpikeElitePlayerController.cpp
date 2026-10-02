@@ -418,6 +418,11 @@ void ASpikeElitePlayerController::DevPoseSuite()
 			// Park the subject at a fixed court spot with zero velocity so the
 			// pinned pose is framed cleanly and nothing walks it around.
 			C->SetActorLocation(FVector(450.f, 0.f, C->GetActorLocation().Z));
+			// M11f-2: face +X so the yaw-0 camera sees the FRONT. The pawn rotates
+			// via bUseControllerRotationYaw, so the controller yaw must be reset
+			// too — Actor-only rotation is overwritten on the next frame.
+			if (AController* Ctrl = C->GetController()) { Ctrl->SetControlRotation(FRotator(0.f, 0.f, 0.f)); }
+			C->SetActorRotation(FRotator(0.f, 0.f, 0.f));
 			if (UCharacterMovementComponent* Move = C->GetCharacterMovement())
 			{
 				Move->Velocity = FVector::ZeroVector;
@@ -439,6 +444,19 @@ void ASpikeElitePlayerController::DevPoseSuite()
 		// Pure 3D capture (no HUD/banners) so the pose itself fills the shot.
 		ConsoleCommand(FString::Printf(TEXT("Screenshot filename=%s"), *Name), true);
 	};
+	// M11f-2: numeric pose verification logged AT SCREENSHOT TIME (the pose has
+	// fully blended by then — logging inside SetPose only captured the first
+	// interpolation frame). Block/Set must read hands-over-head, Dive/Recover
+	// must read low/grounded. Floor is Z≈0 (capsule half height 84).
+	auto LogPose = [this, GetPoseTarget](const FPoseEntry& P)
+	{
+		if (ASpikeEliteCharacter* C = GetPoseTarget())
+		{
+			UE_LOG(LogSEMenu, Log, TEXT("DEV POSE %s: headZ=%.0f handLZ=%.0f handRZ=%.0f torsoZ=%.0f"),
+				P.Name, C->GetHeadHeight(), C->GetHandWorldPosition(true).Z,
+				C->GetHandWorldPosition(false).Z, C->GetTorsoJointHeight());
+		}
+	};
 
 	At(1.0f, [this]() { UE_LOG(LogSEMenu, Log, TEXT("DEV POSE SUITE: starting match")); StartMatch(); });
 
@@ -446,8 +464,10 @@ void ASpikeElitePlayerController::DevPoseSuite()
 	for (const FPoseEntry& P : Poses)
 	{
 		At(T, [SetPose, P]() { SetPose(P.Pose); });
-		T += 0.35f;
-		At(T, [this, SetCamYaw, DevShot3D, P]() { SetCamYaw(0.f); DevShot3D(FString::Printf(TEXT("shot_pose_%s_front"), P.Name)); });
+		T += 0.9f;   // M11f-2: let the pose fully blend (RInterpTo ≈ 94% at 0.35s,
+		             // >99% at 0.9s) so the screenshot and DEV POSE numbers show
+		             // the STABLE pose, not an interpolation frame.
+		At(T, [this, SetCamYaw, DevShot3D, LogPose, P]() { SetCamYaw(0.f); LogPose(P); DevShot3D(FString::Printf(TEXT("shot_pose_%s_front"), P.Name)); });
 		T += 0.35f;
 		At(T, [this, SetCamYaw, DevShot3D, P]() { SetCamYaw(90.f); DevShot3D(FString::Printf(TEXT("shot_pose_%s_side"), P.Name)); });
 		T += 0.35f;
@@ -456,6 +476,8 @@ void ASpikeElitePlayerController::DevPoseSuite()
 	}
 
 	// Run-cycle frame strip: pinned Run pose, advancing phase, fixed side view.
+	// M11f-2: 8 frames × π/4 cover a FULL 0..2π gait cycle (the old 0.25 step
+	// only reached 1.75 rad, missing the stride/contact phases).
 	At(T, [SetPose, SetCamYaw]() { SetPose(EAnimPose::Run); SetCamYaw(90.f); });
 	T += 0.25f;
 	for (int32 f = 0; f < 8; f++)
@@ -463,7 +485,7 @@ void ASpikeElitePlayerController::DevPoseSuite()
 		At(T, [this, f, GetPoseTarget, DevShot3D]() {
 			if (ASpikeEliteCharacter* C = GetPoseTarget())
 			{
-				C->DevSetRunPhase(static_cast<float>(f) * 0.25f);
+				C->DevSetRunPhase(static_cast<float>(f) * PI / 4.f);
 			}
 			DevShot3D(FString::Printf(TEXT("shot_pose_run_frame%d"), f));
 		});
@@ -1545,6 +1567,15 @@ void ASpikeElitePlayerController::BuildMatchEnd()
 void ASpikeElitePlayerController::OnMatchOver(const TArray<int32>& ScoresA, const TArray<int32>& ScoresB, EVolleyballTeam Winner)
 {
 	UE_LOG(LogSEMenu, Log, TEXT("Match over: winner=%s"), Winner == EVolleyballTeam::TeamA ? TEXT("A") : Winner == EVolleyballTeam::TeamB ? TEXT("B") : TEXT("-"));
+	// M11f-2: stable broadcast end-of-match view. Point the player camera at the
+	// court centre from a slight elevation instead of leaving the last rally's
+	// tight framing (player back or scorer text filling the result background).
+	if (APawn* P = GetPawn())
+	{
+		const FVector Me = P->GetActorLocation();
+		const FRotator Look = (FVector(0.f, 0.f, 120.f) - Me).Rotation();
+		SetControlRotation(FRotator(-14.f, Look.Yaw, 0.f));
+	}
 	// M11 input gate: FREEZE the world. Without this, character input, bot Tick
 	// directives and the ball's projectile all kept running behind the result
 	// screen even though MatchState was MatchOver. UI stays fully interactive

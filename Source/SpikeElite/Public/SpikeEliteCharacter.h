@@ -151,6 +151,13 @@ public:
 	bool IsDiveRecovering() const { return DiveState.IsRecovering(); }
 	bool WasDiveSaveRecorded() const { return DiveState.bSaveRecorded; }
 
+	/** M11f-2: world position of the left/right hand tip (pose-verification aid). */
+	FVector GetHandWorldPosition(bool bLeft) const;
+	/** M11f-2: world Z of the top of the head (pose-verification aid). */
+	float GetHeadHeight() const;
+	/** M11f-2: world Z of the torso joint (0 = feet on floor). */
+	float GetTorsoJointHeight() const;
+
 	/** M11c-1: set by the GameMode while this player is the authorized server.
 	 *  While true, movement bounds widen to the service zone (X up to ±1550,
 	 *  Y ±450) so the human can move behind the end line to serve instead of
@@ -244,7 +251,7 @@ protected:
 	bool bFirstPerson = false;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera", meta = (ClampMin = "50.0", ClampMax = "800.0"))
-	float ThirdPersonArmLength = 380.0f;
+	float ThirdPersonArmLength = 430.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera", meta = (ClampMin = "0.01", ClampMax = "5.0"))
 	float LookSensitivity = 1.0f;

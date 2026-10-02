@@ -152,11 +152,14 @@ ASpikeEliteCharacter::ASpikeEliteCharacter()
 
 	// M10 camera pass: longer arm, raised + shoulder offset, collision tests and
 	// a slight lag so the ball at court centre is not hidden behind the body.
+	// M11f-2: raise the boom and lengthen the arm so the third-person frame shows
+	// the lower body, the ball and the net together; the camera itself gets a
+	// small downward tilt in UpdateCameraView so the court centre fills the frame.
 	CameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
 	CameraBoom->SetupAttachment(RootComponent);
 	CameraBoom->TargetArmLength = ThirdPersonArmLength;
-	CameraBoom->SetRelativeLocation(FVector(0.f, 0.f, 70.f));
-	CameraBoom->SocketOffset = FVector(0.f, 55.f, 35.f);  // shoulder offset
+	CameraBoom->SetRelativeLocation(FVector(0.f, 0.f, 90.f));
+	CameraBoom->SocketOffset = FVector(0.f, 70.f, 45.f);  // shoulder offset
 	CameraBoom->bUsePawnControlRotation = true;
 	CameraBoom->bDoCollisionTest = true;          // never clip through walls/stands/players
 	CameraBoom->ProbeSize = 14.f;
@@ -168,6 +171,7 @@ ASpikeEliteCharacter::ASpikeEliteCharacter()
 	ThirdPersonCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("ThirdPersonCamera"));
 	ThirdPersonCamera->SetupAttachment(CameraBoom, USpringArmComponent::SocketName);
 	ThirdPersonCamera->bUsePawnControlRotation = false;
+	ThirdPersonCamera->SetRelativeRotation(FRotator(-8.f, 0.f, 0.f));
 
 	FirstPersonCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("FirstPersonCamera"));
 	FirstPersonCamera->SetupAttachment(RootComponent);
@@ -192,6 +196,28 @@ void ASpikeEliteCharacter::BeginPlay()
 		if (ThirdPersonCamera) ThirdPersonCamera->Deactivate();
 		if (FirstPersonCamera) FirstPersonCamera->Deactivate();
 	}
+}
+
+FVector ASpikeEliteCharacter::GetHandWorldPosition(bool bLeft) const
+{
+	const FProceduralLimb& L = bLeft ? ArmL : ArmR;
+	if (!L.BendJoint) { return FVector::ZeroVector; }
+	// Hand tip mesh centre: 24cm forearm + 2cm offset below the bend joint.
+	const FVector TipLocal(0.f, 0.f, -26.f);
+	return L.BendJoint->GetComponentTransform().TransformPosition(TipLocal);
+}
+
+float ASpikeEliteCharacter::GetHeadHeight() const
+{
+	if (!Head) { return GetActorLocation().Z + 110.f; }
+	// Head sphere centre is 78cm above the torso joint (20cm above root) + 11cm radius.
+	return Head->GetComponentTransform().GetLocation().Z + 11.f;
+}
+
+float ASpikeEliteCharacter::GetTorsoJointHeight() const
+{
+	if (!TorsoJoint) { return GetActorLocation().Z; }
+	return TorsoJoint->GetComponentTransform().GetLocation().Z;
 }
 
 void ASpikeEliteCharacter::RefreshJerseyNumberVisual()
@@ -459,6 +485,9 @@ void ASpikeEliteCharacter::UpdateCameraView()
 		if (ThirdPersonCamera) ThirdPersonCamera->SetActive(true);
 		if (FirstPersonCamera) FirstPersonCamera->SetActive(false);
 		if (Head) Head->SetVisibility(true);
+		// M11f-2: keep the third-person framing (slight downward tilt) whenever we
+		// switch back — the court centre and net stay in frame, not the sky.
+		if (ThirdPersonCamera) ThirdPersonCamera->SetRelativeRotation(FRotator(-8.f, 0.f, 0.f));
 	}
 }
 
@@ -605,6 +634,20 @@ void ASpikeEliteCharacter::ApplyPose(EAnimPose Pose, float DeltaSeconds)
 		if (!Comp) return;
 		Comp->SetRelativeRotation(FMath::RInterpTo(Comp->GetRelativeRotation(), Target, 1.f, Blend * 8.f));
 	};
+	// M11f-2: the torso joint also has a per-pose HEIGHT (the visual root of the
+	// whole body). Dive lowers it toward the floor and shifts it forward (real
+	// grounded lunge); Recover holds a low crouch; Receive sits slightly lower;
+	// everything else stands at the default height. This is what stops the body
+	// from floating mid-air in dive/recover poses.
+	auto LerpLoc = [Blend](USceneComponent* Comp, const FVector& Target)
+	{
+		if (!Comp) return;
+		Comp->SetRelativeLocation(FMath::VInterpTo(Comp->GetRelativeLocation(), Target, 1.f, Blend * 8.f));
+	};
+
+	const FVector StandHeight(0.f, 0.f, 20.f);
+	const FVector DiveHeight(18.f, 0.f, -22.f);
+	const FVector ReceiveHeight(0.f, 0.f, 8.f);
 
 	// Base rest.
 	const FRotator Rest(0.f, 0.f, 0.f);
@@ -619,16 +662,20 @@ void ASpikeEliteCharacter::ApplyPose(EAnimPose Pose, float DeltaSeconds)
 	FRotator EL = ElbowRest, ER = ElbowRest;
 	FRotator HL = HipRest, HR = HipRest;
 	FRotator KL = KneeRest, KR = KneeRest;
+	FVector TorsoLoc = StandHeight;
 
 	switch (Pose)
 	{
 	case EAnimPose::Run:
 	{
+		// UE is left-handed: POSITIVE pitch swings a hanging limb toward +X
+		// (forward/up), negative toward -X (back/up). Legs alternate — the lead
+		// leg swings forward (+), the trail leg back (-), knees bend forward.
 		const float Swing = FMath::Sin(RunPhase) * 26.f;
 		const float SwingO = FMath::Sin(RunPhase + PI) * 26.f;
 		const float KneeBend = 45.f + 30.f * (0.5f + 0.5f * FMath::Sin(RunPhase));
-		HL = FRotator(-Swing, 0.f, 0.f);           // legs alternate
-		HR = FRotator(-SwingO, 0.f, 0.f);
+		HL = FRotator(Swing, 0.f, 0.f);
+		HR = FRotator(SwingO, 0.f, 0.f);
 		KL = FRotator(KneeBend, 0.f, 0.f);
 		KR = FRotator(KneeBend, 0.f, 0.f);
 		SL = FRotator(SwingO * 0.8f, 0.f, 8.f);    // opposite arm swing
@@ -640,8 +687,9 @@ void ASpikeEliteCharacter::ApplyPose(EAnimPose Pose, float DeltaSeconds)
 	}
 	case EAnimPose::Jump:
 	{
-		HL = FRotator(-18.f, 0.f, 0.f);
-		HR = FRotator(-18.f, 0.f, 0.f);
+		// Tucked jump: thighs lift forward, knees fold, arms rise slightly.
+		HL = FRotator(18.f, 0.f, 0.f);
+		HR = FRotator(18.f, 0.f, 0.f);
 		KL = FRotator(65.f, 0.f, 0.f);
 		KR = FRotator(65.f, 0.f, 0.f);
 		SL = FRotator(12.f, 0.f, 10.f);
@@ -653,9 +701,10 @@ void ASpikeEliteCharacter::ApplyPose(EAnimPose Pose, float DeltaSeconds)
 	}
 	case EAnimPose::Receive:
 	{
-		// Arms pressed forward-down (platform receive), knees bent, torso leaning.
-		SL = FRotator(-55.f, 0.f, 0.f);
-		SR = FRotator(-55.f, 0.f, 0.f);
+		// Platform receive: upper arms forward-down, forearms folded back into a
+		// flat platform, knees bent, torso leaning forward.
+		SL = FRotator(55.f, 0.f, 0.f);
+		SR = FRotator(55.f, 0.f, 0.f);
 		EL = FRotator(-20.f, 0.f, 0.f);
 		ER = FRotator(-20.f, 0.f, 0.f);
 		HL = FRotator(8.f, 0.f, 0.f);
@@ -663,15 +712,18 @@ void ASpikeEliteCharacter::ApplyPose(EAnimPose Pose, float DeltaSeconds)
 		KL = FRotator(50.f, 0.f, 0.f);
 		KR = FRotator(50.f, 0.f, 0.f);
 		T = FRotator(25.f, 0.f, 0.f);
+		TorsoLoc = ReceiveHeight;
 		break;
 	}
 	case EAnimPose::Set:
 	{
-		// Both hands raised to forehead height, elbows bent.
-		SL = FRotator(-150.f, 0.f, 0.f);
-		SR = FRotator(-150.f, 0.f, 0.f);
-		EL = FRotator(-85.f, 0.f, 0.f);
-		ER = FRotator(-85.f, 0.f, 0.f);
+		// Overhead set: upper arms fully raised (+180, vertical), forearms nearly
+		// straight (measured 185 with 176/-20 — the straight vertical raise puts
+		// the hands clearly above the head top, target handZ ≥ 205).
+		SL = FRotator(180.f, 0.f, 0.f);
+		SR = FRotator(180.f, 0.f, 0.f);
+		EL = FRotator(-10.f, 0.f, 0.f);
+		ER = FRotator(-10.f, 0.f, 0.f);
 		HL = FRotator(-8.f, 0.f, 0.f);
 		HR = FRotator(-8.f, 0.f, 0.f);
 		KL = FRotator(28.f, 0.f, 0.f);
@@ -685,23 +737,23 @@ void ASpikeEliteCharacter::ApplyPose(EAnimPose Pose, float DeltaSeconds)
 		const float Stage = FMath::Clamp(1.f - ContactPoseTimer / 0.5f, 0.f, 1.f);
 		if (Stage < 0.3f)
 		{
-			SR = FRotator(110.f, 0.f, 0.f);      // wind-up: right arm back/up
-			ER = FRotator(-100.f, 0.f, 0.f);
-			SL = FRotator(-50.f, 0.f, 0.f);      // left arm forward guard
+			SR = FRotator(-110.f, 0.f, 0.f);      // wind-up: right arm back/up
+			ER = FRotator(-30.f, 0.f, 0.f);
+			SL = FRotator(50.f, 0.f, 0.f);        // left arm forward guard
 			EL = FRotator(-30.f, 0.f, 0.f);
 		}
 		else if (Stage < 0.6f)
 		{
-			SR = FRotator(-150.f, 0.f, 0.f);     // swing: right arm forward/up
+			SR = FRotator(150.f, 0.f, 0.f);       // swing: right arm forward/up
 			ER = FRotator(-50.f, 0.f, 0.f);
-			SL = FRotator(-40.f, 0.f, 0.f);
+			SL = FRotator(40.f, 0.f, 0.f);
 			EL = FRotator(-20.f, 0.f, 0.f);
 		}
 		else
 		{
-			SR = FRotator(-70.f, 0.f, 0.f);      // follow-through
+			SR = FRotator(70.f, 0.f, 0.f);        // follow-through
 			ER = FRotator(-25.f, 0.f, 0.f);
-			SL = FRotator(-30.f, 0.f, 0.f);
+			SL = FRotator(30.f, 0.f, 0.f);
 			EL = FRotator(-15.f, 0.f, 0.f);
 		}
 		HL = FRotator(-15.f, 0.f, 0.f);
@@ -713,11 +765,13 @@ void ASpikeEliteCharacter::ApplyPose(EAnimPose Pose, float DeltaSeconds)
 	}
 	case EAnimPose::Block:
 	{
-		// Both hands straight up overhead.
-		SL = FRotator(-175.f, 0.f, 0.f);
-		SR = FRotator(-175.f, 0.f, 0.f);
-		EL = FRotator(5.f, 0.f, 0.f);
-		ER = FRotator(5.f, 0.f, 0.f);
+		// Both hands straight up FORWARD-overhead. +178 is essentially vertical
+		// (hands measure ≈head+10); the old 168 left the hands 5cm BELOW the top
+		// of the head, so the block read as "arms up" but not "hands over head".
+		SL = FRotator(178.f, 0.f, 0.f);
+		SR = FRotator(178.f, 0.f, 0.f);
+		EL = FRotator(3.f, 0.f, 0.f);
+		ER = FRotator(3.f, 0.f, 0.f);
 		HL = FRotator(-15.f, 0.f, 0.f);
 		HR = FRotator(-15.f, 0.f, 0.f);
 		KL = FRotator(55.f, 0.f, 0.f);
@@ -727,39 +781,47 @@ void ASpikeEliteCharacter::ApplyPose(EAnimPose Pose, float DeltaSeconds)
 	}
 	case EAnimPose::Dive:
 	{
-		// Forward lunge: torso down, arms forward, legs trailing.
-		SL = FRotator(-85.f, 0.f, 0.f);
-		SR = FRotator(-85.f, 0.f, 0.f);
-		EL = FRotator(-10.f, 0.f, 0.f);
-		ER = FRotator(-10.f, 0.f, 0.f);
-		HL = FRotator(35.f, 0.f, 0.f);
-		HR = FRotator(35.f, 0.f, 0.f);
-		KL = FRotator(10.f, 0.f, 0.f);
-		KR = FRotator(10.f, 0.f, 0.f);
-		T = FRotator(50.f, 0.f, 0.f);
+		// M11f-2: grounded forward dive — torso nearly horizontal and LOW, arms
+		// reaching forward-down toward the floor (positive pitch), legs stretched
+		// back/up (negative pitch). The torso joint sinks 42cm and shifts forward
+		// so the body never floats.
+		SL = FRotator(60.f, 0.f, 0.f);
+		SR = FRotator(60.f, 0.f, 0.f);
+		EL = FRotator(12.f, 0.f, 0.f);
+		ER = FRotator(12.f, 0.f, 0.f);
+		HL = FRotator(-65.f, 0.f, 0.f);
+		HR = FRotator(-65.f, 0.f, 0.f);
+		KL = FRotator(0.f, 0.f, 0.f);
+		KR = FRotator(0.f, 0.f, 0.f);
+		T = FRotator(70.f, 0.f, 0.f);
+		TorsoLoc = DiveHeight;
 		break;
 	}
 	case EAnimPose::Recover:
 	{
-		// Low crouch, arms forward-down for balance.
-		SL = FRotator(-40.f, 0.f, 0.f);
-		SR = FRotator(-40.f, 0.f, 0.f);
-		EL = FRotator(-20.f, 0.f, 0.f);
-		ER = FRotator(-20.f, 0.f, 0.f);
-		HL = FRotator(5.f, 0.f, 0.f);
-		HR = FRotator(5.f, 0.f, 0.f);
-		KL = FRotator(85.f, 0.f, 0.f);
-		KR = FRotator(85.f, 0.f, 0.f);
-		T = FRotator(22.f, 0.f, 0.f);
+		// Low crouch: hips sink, thighs come slightly forward, knees deep —
+		// a grounded "get up" pose, feet planted under the hips, torso near
+		// upright (the old 35/45 combo read as a backward lean).
+		SL = FRotator(45.f, 0.f, 0.f);
+		SR = FRotator(45.f, 0.f, 0.f);
+		EL = FRotator(-35.f, 0.f, 0.f);
+		ER = FRotator(-35.f, 0.f, 0.f);
+		HL = FRotator(25.f, 0.f, 0.f);
+		HR = FRotator(25.f, 0.f, 0.f);
+		KL = FRotator(95.f, 0.f, 0.f);
+		KR = FRotator(95.f, 0.f, 0.f);
+		T = FRotator(15.f, 0.f, 0.f);
+		TorsoLoc = FVector(0.f, 0.f, -18.f);
 		break;
 	}
 	case EAnimPose::Serve:
 	{
-		// Right arm high/back for the serve swing, weight shift.
-		SR = FRotator(120.f, 0.f, 0.f);
-		ER = FRotator(-70.f, 0.f, 0.f);
-		SL = FRotator(-10.f, 0.f, 0.f);
-		EL = FRotator(15.f, 0.f, 0.f);
+		// Right arm high/back for the serve swing (negative pitch = back/up),
+		// weight shift forward.
+		SR = FRotator(-120.f, 0.f, 0.f);
+		ER = FRotator(70.f, 0.f, 0.f);
+		SL = FRotator(10.f, 0.f, 0.f);
+		EL = FRotator(-15.f, 0.f, 0.f);
 		HL = FRotator(-8.f, 0.f, 0.f);
 		HR = FRotator(4.f, 0.f, 0.f);
 		KL = FRotator(20.f, 0.f, 0.f);
@@ -769,10 +831,11 @@ void ASpikeEliteCharacter::ApplyPose(EAnimPose Pose, float DeltaSeconds)
 	}
 	case EAnimPose::RaiseHands:
 	{
-		// Continuous arm raise driven by RaiseHandsAmount (0 = flat, 1 = high).
+		// Continuous arm raise driven by RaiseHandsAmount (0 = flat forward,
+		// 1 = straight up overhead), positive pitch up/forward.
 		const float A = RaiseHandsAmount;
-		SL = FRotator(-90.f - 80.f * A, 0.f, 0.f);
-		SR = FRotator(-90.f - 80.f * A, 0.f, 0.f);
+		SL = FRotator(90.f + 80.f * A, 0.f, 0.f);
+		SR = FRotator(90.f + 80.f * A, 0.f, 0.f);
 		EL = FRotator(25.f * (1.f - A), 0.f, 0.f);
 		ER = FRotator(25.f * (1.f - A), 0.f, 0.f);
 		HL = FRotator(-6.f * A, 0.f, 0.f);
@@ -798,6 +861,7 @@ void ASpikeEliteCharacter::ApplyPose(EAnimPose Pose, float DeltaSeconds)
 	}
 	}
 
+	if (TorsoJoint) LerpLoc(TorsoJoint, TorsoLoc);
 	if (TorsoJoint) Lerp(TorsoJoint, T);
 	if (ArmL.Joint) Lerp(ArmL.Joint, SL);
 	if (ArmR.Joint) Lerp(ArmR.Joint, SR);
@@ -811,7 +875,11 @@ void ASpikeEliteCharacter::ApplyPose(EAnimPose Pose, float DeltaSeconds)
 
 void ASpikeEliteCharacter::SetPoseIdle()
 {
-	if (TorsoJoint) TorsoJoint->SetRelativeRotation(FRotator::ZeroRotator);
+	if (TorsoJoint)
+	{
+		TorsoJoint->SetRelativeRotation(FRotator::ZeroRotator);
+		TorsoJoint->SetRelativeLocation(FVector(0.f, 0.f, 20.f));   // M11f-2: restore standing height
+	}
 	if (ArmL.Joint) ArmL.Joint->SetRelativeRotation(FRotator::ZeroRotator);
 	if (ArmR.Joint) ArmR.Joint->SetRelativeRotation(FRotator::ZeroRotator);
 	if (ArmL.BendJoint) ArmL.BendJoint->SetRelativeRotation(FRotator::ZeroRotator);
