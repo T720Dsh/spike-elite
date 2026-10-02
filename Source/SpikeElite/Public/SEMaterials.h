@@ -37,6 +37,23 @@ namespace SEMaterials
 	}
 
 	/** Assign a freshly created tint MID to slot 0 of a mesh component. */
+	inline UMaterialInstanceDynamic* MakeSurface(UObject* Owner, const FLinearColor& Color,
+		float Roughness = .78f, float Metallic = 0.f)
+	{
+		static UMaterialInterface* Base = LoadObject<UMaterialInterface>(nullptr,
+			TEXT("/Game/Materials/M_ArtSurface.M_ArtSurface"));
+		if (!Base) return MakeTint(Owner, Color);
+		auto* M = UMaterialInstanceDynamic::Create(Base, Owner);
+		if (M)
+		{
+			M->SetVectorParameterValue(TEXT("Color"), Color);
+			M->SetScalarParameterValue(TEXT("Roughness"), FMath::Clamp(Roughness,0.f,1.f));
+			M->SetScalarParameterValue(TEXT("Metallic"), FMath::Clamp(Metallic,0.f,1.f));
+		}
+		return M;
+	}
+
+	/** Assign a freshly created tint MID to slot 0 of a mesh component. */
 	inline void TintMesh(UMeshComponent* Mesh, UObject* Owner, const FLinearColor& Color)
 	{
 		if (!Mesh) { return; }

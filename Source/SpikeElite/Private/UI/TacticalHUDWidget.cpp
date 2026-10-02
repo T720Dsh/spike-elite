@@ -310,6 +310,7 @@ void UTacticalHUDWidget::UpdateAttackInfo(const FShotIntent& Intent, const SEVol
 	FLinearColor VerdictColor = SEUiStyle::Colors::Error;
 	const bool bSameSideTouch = (Intent.TouchType == EBallTouchType::Set || Intent.TouchType == EBallTouchType::Receive);
 	if (!Sol.bValid) { Verdict = TEXT("不可行"); }
+	else if (Sol.Trajectory.bNetTouch) { Verdict = TEXT("触网"); }
 	else if (bSameSideTouch)
 	{
 		// Same-side pass/set is NOT required to cross the net: in-bounds is a
@@ -340,11 +341,17 @@ void UTacticalHUDWidget::UpdateAttackInfo(const FShotIntent& Intent, const SEVol
 
 void UTacticalHUDWidget::ShowTiming(float Progress01, const FString& Status)
 {
-	if (TimingBar) { TimingBar->SetPercent(FMath::Clamp(Progress01, 0.f, 1.f)); }
+	const bool bBest = FMath::Abs(Progress01 - .45f) <= .12f;
+	if (TimingBar)
+	{
+		TimingBar->SetPercent(FMath::Clamp(Progress01, 0.f, 1.f));
+		TimingBar->SetFillColorAndOpacity(bBest ? SEUiStyle::Colors::Safe : SEUiStyle::Colors::Gold);
+	}
 	if (AttackStage) { AttackStage->SetText(FText::FromString(TEXT("等待击球时机"))); }
 	if (TimingLabel)
 	{
-		const FString Text = Status.IsEmpty() ? TEXT("时机窗口：按左键击球") : Status;
+		const FString Text = (bBest ? TEXT("最佳击球区 · ") : Progress01 > .45f ? TEXT("稍早 · ") : TEXT("稍晚 · "))
+			+ (Status.IsEmpty() ? FString(TEXT("按左键击球")) : Status);
 		if (Text != LastAttackKey)
 		{
 			LastAttackKey = Text;

@@ -211,6 +211,13 @@ protected:
 	TObjectPtr<UStaticMeshComponent> Torso;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Character")
 	TObjectPtr<UStaticMeshComponent> Head;
+	UPROPERTY() TObjectPtr<USceneComponent> HeadJoint;
+	UPROPERTY() TArray<TObjectPtr<UStaticMeshComponent>> ArtDetails;
+	FVector PreviousAnimationLocation = FVector::ZeroVector;
+	float AnimationMoveSpeed = 0.f;
+	bool bAnimationLocationReady = false;
+	void BuildArtDetails();
+	void ApplyArtMeshes();
 
 	/** M11d-6: rounded stylized silhouette — shoulder spheres + hip block. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Character")

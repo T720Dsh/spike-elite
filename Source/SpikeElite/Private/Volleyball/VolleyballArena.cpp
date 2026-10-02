@@ -14,10 +14,11 @@
 #include "UObject/ConstructorHelpers.h"
 #include "Engine/World.h"
 #include "SEMaterials.h"
+#include "SEArtGeometry.h"
 
 static UMaterialInstanceDynamic* ArenaMakeMID(UObject* Owner, const FLinearColor& Color)
 {
-	return SEMaterials::MakeTint(Owner, Color);
+	return SEMaterials::MakeSurface(Owner, Color, .82f);
 }
 
 AVolleyballArena::AVolleyballArena()
@@ -26,7 +27,7 @@ AVolleyballArena::AVolleyballArena()
 
 	Root = CreateDefaultSubobject<UBoxComponent>(TEXT("Root"));
 	Root->SetBoxExtent(FVector(HallHalfLength, HallHalfWidth, 10.f));
-	Root->SetCollisionProfileName(TEXT("BlockAll"));
+	Root->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	RootComponent = Root;
 
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeFinder(TEXT("/Engine/BasicShapes/Cube.Cube"));
@@ -59,6 +60,50 @@ void AVolleyballArena::BuildHall(UStaticMesh* Cube)
 	WallEndB = MakeWall(TEXT("WallEndB"), FVector(-HallHalfLength, 0, HallHeight/2), FVector(W/100.f, HallHalfWidth*2/100.f, HallHeight/100.f));
 	WallSideA = MakeWall(TEXT("WallSideA"), FVector(0,  HallHalfWidth, HallHeight/2), FVector(HallHalfLength*2/100.f, W/100.f, HallHeight/100.f));
 	WallSideB = MakeWall(TEXT("WallSideB"), FVector(0, -HallHalfWidth, HallHeight/2), FVector(HallHalfLength*2/100.f, W/100.f, HallHeight/100.f));
+	// A real visible floor replaces the old invisible 20 cm root slab.
+	MakeWall(TEXT("ConcourseFloor"), FVector(0, 0, -12.f), FVector(HallHalfLength*2/100.f, HallHalfWidth*2/100.f, .2f));
+	auto Instances = [&](const TCHAR* Name, FLinearColor Color)
+	{
+		auto* C = CreateDefaultSubobject<UInstancedStaticMeshComponent>(Name);
+		C->SetupAttachment(Root); C->SetStaticMesh(Cube);
+		C->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		C->SetMaterial(0, ArenaMakeMID(C, Color)); return C;
+	};
+	Structure = Instances(TEXT("RoofStructure"), FLinearColor(.32f,.36f,.43f));
+	Structure->SetMaterial(0, SEMaterials::MakeSurface(Structure, FLinearColor(.32f,.36f,.43f), .38f, .65f));
+	LightFixtures = Instances(TEXT("LightFixtures"), FLinearColor(.85f,.88f,.94f));
+	for (int32 Bay=-3; Bay<=3; ++Bay)
+	{
+		const float X=Bay*850.f;
+		for (float Z : {1330.f, 1420.f})
+			Structure->AddInstance(FTransform(FRotator::ZeroRotator,FVector(X,0,Z),FVector(.1f,54.f,.1f)));
+		for(int32 Segment=-8; Segment<=8; ++Segment)
+		{
+			const FVector A(X, Segment*300.f, 1330.f), B(X,(Segment+1)*300.f,1420.f);
+			const FVector D=B-A;
+			Structure->AddInstance(FTransform(D.Rotation(),(A+B)*.5f,FVector(D.Size()/100.f,.045f,.045f)));
+		}
+		for(float Y : {-900.f,900.f})
+		{
+			LightFixtures->AddInstance(FTransform(FRotator::ZeroRotator,FVector(X,Y,1290.f),FVector(1.7f,.7f,.12f)));
+			Structure->AddInstance(FTransform(FRotator::ZeroRotator,FVector(X,Y,1350.f),FVector(.035f,.035f,1.2f)));
+		}
+		for(float Y : {-HallHalfWidth+65.f,HallHalfWidth-65.f})
+			Structure->AddInstance(FTransform(FRotator::ZeroRotator,FVector(X,Y,700.f),FVector(.32f,.32f,14.f)));
+	}
+	// End-wall service portals and frames, outside the playing/free area.
+	for(int32 Side : {-1,1})
+	{
+		const float X=Side*(HallHalfLength-235.f);
+		for(float Y : {-1500.f,1500.f})
+		{
+			auto* Door=MakeWall(*FString::Printf(TEXT("Portal_%d_%d"),Side,int32(Y)),FVector(X,Y,140.f),FVector(.1f,2.1f,2.8f));
+			Door->SetMaterial(0,ArenaMakeMID(Door,FLinearColor(.035f,.065f,.09f)));
+			for(float Offset : {-112.f,112.f})
+				Structure->AddInstance(FTransform(FRotator::ZeroRotator,FVector(X-Side*6.f,Y+Offset,145.f),FVector(.18f,.12f,2.9f)));
+			Structure->AddInstance(FTransform(FRotator::ZeroRotator,FVector(X-Side*6.f,Y,292.f),FVector(.18f,2.36f,.12f)));
+		}
+	}
 
 	// Deep dark far wall colour is already the wall tint; add a large dark
 	// backdrop plane slightly inside the end walls so the hall reads as a big
@@ -136,10 +181,10 @@ void AVolleyballArena::BuildHall(UStaticMesh* Cube)
 		T->SetCastShadow(false);
 		return T;
 	};
-	MakeSign(TEXT("SignA"), TEXT("SPIKE ELITE"), FVector(HallHalfLength - 150.f, 0.f, 1100.f), FRotator(0.f, 90.f, 0.f));
-	MakeSign(TEXT("SignB"), TEXT("SPIKE ELITE"), FVector(-(HallHalfLength - 150.f), 0.f, 1100.f), FRotator(0.f, -90.f, 0.f));
-	MakeSign(TEXT("SignC"), TEXT("PLAY FAIR"), FVector(0.f, HallHalfWidth - 150.f, 900.f), FRotator(0.f, 0.f, 0.f));
-	MakeSign(TEXT("SignD"), TEXT("PLAY FAIR"), FVector(0.f, -(HallHalfWidth - 150.f), 900.f), FRotator(0.f, 180.f, 0.f));
+	MakeSign(TEXT("SignA"), TEXT("SPIKE ELITE"), FVector(HallHalfLength - 250.f, 0.f, 1100.f), FRotator(0.f, 180.f, 0.f));
+	MakeSign(TEXT("SignB"), TEXT("SPIKE ELITE"), FVector(-(HallHalfLength - 250.f), 0.f, 1100.f), FRotator(0.f, 0.f, 0.f));
+	MakeSign(TEXT("SignC"), TEXT("PLAY FAIR"), FVector(0.f, HallHalfWidth - 150.f, 900.f), FRotator(0.f, -90.f, 0.f));
+	MakeSign(TEXT("SignD"), TEXT("PLAY FAIR"), FVector(0.f, -(HallHalfWidth - 150.f), 900.f), FRotator(0.f, 90.f, 0.f));
 }
 
 void AVolleyballArena::BuildLighting()
@@ -160,6 +205,7 @@ void AVolleyballArena::BuildLighting()
 	CourtLightA = MakeSpot(TEXT("CourtLightA"), FVector( 500.f, 0.f, 1250.f), 22000.f, 52.f);
 	CourtLightB = MakeSpot(TEXT("CourtLightB"), FVector(-500.f, 0.f, 1250.f), 22000.f, 52.f);
 	FillLight = MakeSpot(TEXT("FillLight"), FVector(0.f, 0.f, 1400.f), 6000.f, 100.f);
+	MakeSpot(TEXT("OfficialsWorkLight"), FVector(0,-1200,850),9000.f,55.f);
 
 	USkyLightComponent* Sky = CreateDefaultSubobject<USkyLightComponent>(TEXT("HallSkyLight"));
 	Sky->SetupAttachment(Root);
@@ -242,11 +288,32 @@ void AVolleyballArena::BuildStands(UStaticMesh* Cube)
 	CrowdLegs->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	if (auto* M = ArenaMakeMID(CrowdLegs, FLinearColor(0.16f, 0.17f, 0.22f)))
 		CrowdLegs->SetMaterial(0, M);
+	auto Detail = [&](const TCHAR* Name, FLinearColor Color)
+	{
+		auto* C=CreateDefaultSubobject<UInstancedStaticMeshComponent>(Name);
+		C->SetupAttachment(Root); C->SetStaticMesh(Cube);
+		C->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		C->SetMaterial(0,ArenaMakeMID(C,Color)); return C;
+	};
+	Seats=Detail(TEXT("SeatPans"), FLinearColor(.07f,.2f,.36f));
+	SeatBacks=Detail(TEXT("SeatBacks"), FLinearColor(.09f,.27f,.47f));
+	CrowdArms=Detail(TEXT("CrowdArms"), FLinearColor(.61f,.4f,.28f));
+	CrowdThighs=Detail(TEXT("CrowdThighs"), FLinearColor(.12f,.14f,.19f));
+	CrowdShoes=Detail(TEXT("CrowdShoes"), FLinearColor(.04f,.045f,.06f));
+	CrowdHair=Detail(TEXT("CrowdHair"), FLinearColor(.035f,.022f,.016f));
 }
 
 void AVolleyballArena::BeginPlay()
 {
 	Super::BeginPlay();
+	for (auto& B : CrowdBodies) B->SetStaticMesh(SEArtGeometry::Get(SEArtGeometry::EProfile::Torso));
+	CrowdHeads->SetStaticMesh(SEArtGeometry::Get(SEArtGeometry::EProfile::Head));
+	CrowdHair->SetStaticMesh(SEArtGeometry::Get(SEArtGeometry::EProfile::Head));
+	CrowdLegs->SetStaticMesh(SEArtGeometry::Get(SEArtGeometry::EProfile::Calf));
+	CrowdThighs->SetStaticMesh(SEArtGeometry::Get(SEArtGeometry::EProfile::Thigh));
+	CrowdArms->SetStaticMesh(SEArtGeometry::Get(SEArtGeometry::EProfile::Forearm));
+	CrowdShoes->SetStaticMesh(SEArtGeometry::Get(SEArtGeometry::EProfile::Shoe));
+	Seats->SetStaticMesh(SEArtGeometry::Get(SEArtGeometry::EProfile::Seat));
 	PopulateStands();
 }
 
@@ -264,6 +331,8 @@ void AVolleyballArena::PopulateStands()
 	if (CrowdLegs) CrowdLegs->ClearInstances();
 	Railings->ClearInstances();
 	for (auto& B : CrowdBodies) if (B) B->ClearInstances();
+	for(auto* C : {Seats.Get(), SeatBacks.Get(), CrowdArms.Get(), CrowdThighs.Get(), CrowdShoes.Get(), CrowdHair.Get()}) C->ClearInstances();
+	FRandomStream CrowdRandom(1978); // art variation must not consume gameplay RNG
 
 	const float SideY0 = StandClearanceY;          // 1150
 	const float EndX0  = StandClearanceX;          // 1750
@@ -271,19 +340,29 @@ void AVolleyballArena::PopulateStands()
 
 	auto AddSpectator = [&](const FVector& BaseLoc)
 	{
-		const int32 Kind = FMath::RandRange(0, BodyKinds - 1);
-		const float Sway = FMath::FRandRange(-3.f, 3.f);
+		const int32 Kind = CrowdRandom.RandRange(0, BodyKinds - 1);
+		const float Sway = CrowdRandom.FRandRange(-3.f, 3.f);
 		// Seated silhouette: low wide body, dark legs below, head on top.
-		FVector BodyLoc(BaseLoc.X + Sway, BaseLoc.Y + Sway, BaseLoc.Z + 14.f);
-		FVector LegLoc(BaseLoc.X + Sway, BaseLoc.Y + Sway, BaseLoc.Z + 2.f);
-		FVector HeadLoc(BaseLoc.X + Sway, BaseLoc.Y + Sway, BaseLoc.Z + 44.f);
+		FVector BodyLoc(BaseLoc.X + Sway, BaseLoc.Y + Sway, BaseLoc.Z + 66.f);
+		FVector HeadLoc(BaseLoc.X + Sway, BaseLoc.Y + Sway, BaseLoc.Z + 108.f);
 		// M11f-4: orient the elongated body axis toward court centre so the four
 		// stands all face the match instead of one shared zero rotation.
 		const float FacingYaw = FMath::RadiansToDegrees(FMath::Atan2(-BodyLoc.Y, -BodyLoc.X));
 		const FRotator Facing(0.f, FacingYaw, 0.f);
-		CrowdBodies[Kind]->AddInstance(FTransform(Facing, BodyLoc, FVector(0.32f, 0.24f, 0.34f)));
-		CrowdLegs->AddInstance(FTransform(FRotator::ZeroRotator, LegLoc, FVector(0.22f, 0.20f, 0.26f)));
-		CrowdHeads->AddInstance(FTransform(FRotator::ZeroRotator, HeadLoc, FVector(0.15f, 0.15f, 0.15f)));
+		auto Put=[&](UInstancedStaticMeshComponent* C, FVector Offset, FVector Size, FRotator Local=FRotator::ZeroRotator)
+		{ C->AddInstance(FTransform(Facing+Local,BaseLoc+Facing.RotateVector(Offset),Size/100.f)); };
+		CrowdBodies[Kind]->AddInstance(FTransform(Facing, BodyLoc, FVector(.23f,.39f,.51f)));
+		CrowdHeads->AddInstance(FTransform(Facing, HeadLoc, FVector(.18f,.17f,.24f)));
+		Put(CrowdHair,FVector(Sway,Sway,116),FVector(18,17,10));
+		Put(Seats,FVector(0,0,35),FVector(49,48,7));
+		Put(SeatBacks,FVector(-22,0,62),FVector(6,48,51));
+		for(float Side : {-1.f,1.f})
+		{
+			Put(CrowdThighs,FVector(17,Side*10,38),FVector(16,17,42),FRotator(90,0,0));
+			Put(CrowdLegs,FVector(33,Side*10,18),FVector(11,12,33));
+			Put(CrowdShoes,FVector(39,Side*10,4),FVector(25,13,8));
+			Put(CrowdArms,FVector(15,Side*22,52),FVector(9,10,32),FRotator(45,0,0));
+		}
 	};
 
 	// Side stands (along X), 10 rows, central aisle gap + corner aisles.
@@ -297,8 +376,11 @@ void AVolleyballArena::PopulateStands()
 		if (Row == 0)
 		{
 			const float RY = Y - 20.f;
-			Railings->AddInstance(FTransform(FRotator::ZeroRotator, FVector(0, RY, 55.f), FVector(StepLen, 0.06f, 0.55f)));
-			Railings->AddInstance(FTransform(FRotator::ZeroRotator, FVector(0, -RY, 55.f), FVector(StepLen, 0.06f, 0.55f)));
+			for(float Side : {-1.f,1.f})
+			{
+				for(float ZRail : {45.f,95.f}) Railings->AddInstance(FTransform(FRotator::ZeroRotator,FVector(0,Side*RY,ZRail),FVector(StepLen,.04f,.04f)));
+				for(int32 Post=-16;Post<=16;++Post) Railings->AddInstance(FTransform(FRotator::ZeroRotator,FVector(Post*170.f,Side*RY,47.f),FVector(.04f,.04f,.94f)));
+			}
 		}
 		for (int32 C = -16; C <= 16; ++C)
 		{
@@ -319,8 +401,11 @@ void AVolleyballArena::PopulateStands()
 		if (Row == 0)
 		{
 			const float RX = X - 20.f;
-			Railings->AddInstance(FTransform(FRotator::ZeroRotator, FVector( RX, 0, 55.f), FVector(0.06f, StepLen, 0.55f)));
-			Railings->AddInstance(FTransform(FRotator::ZeroRotator, FVector(-RX, 0, 55.f), FVector(0.06f, StepLen, 0.55f)));
+			for(float Side : {-1.f,1.f})
+			{
+				for(float ZRail : {45.f,95.f}) Railings->AddInstance(FTransform(FRotator::ZeroRotator,FVector(Side*RX,0,ZRail),FVector(.04f,StepLen,.04f)));
+				for(int32 Post=-12;Post<=12;++Post) Railings->AddInstance(FTransform(FRotator::ZeroRotator,FVector(Side*RX,Post*170.f,47.f),FVector(.04f,.04f,.94f)));
+			}
 		}
 		for (int32 C = -10; C <= 10; ++C)
 		{

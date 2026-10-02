@@ -2,6 +2,7 @@
 #include "SpikeEliteCharacter.h"
 #include "SpikeEliteGameMode.h"
 #include "SEMaterials.h"
+#include "SEArtGeometry.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/Controller.h"
 #include "Components/CapsuleComponent.h"
@@ -52,8 +53,9 @@ ASpikeEliteCharacter::ASpikeEliteCharacter()
 
 	// Torso + head (straight on the capsule root).
 	TorsoJoint = MakeJoint(TEXT("TorsoJoint"), RootComponent, FVector(0.f, 0.f, 20.f));
-	Torso = MakeMesh(TEXT("Torso"), TorsoJoint, FVector(0.46f, 0.28f, 0.66f), FVector(0.f, 0.f, 30.f));
-	Head = MakeMesh(TEXT("Head"), TorsoJoint, FVector(0.22f, 0.22f, 0.22f), FVector(0.f, 0.f, 78.f));
+	Torso = MakeMesh(TEXT("Torso"), TorsoJoint, FVector(0.28f, 0.46f, 0.66f), FVector(0.f, 0.f, 30.f));
+	HeadJoint = MakeJoint(TEXT("HeadJoint"), TorsoJoint, FVector(0.f, 0.f, 78.f));
+	Head = MakeMesh(TEXT("Head"), HeadJoint, FVector(0.19f, 0.175f, 0.25f), FVector::ZeroVector);
 	if (SphereMesh.Succeeded())
 	{
 		Head->SetStaticMesh(SphereMesh.Object);
@@ -64,7 +66,7 @@ ASpikeEliteCharacter::ASpikeEliteCharacter()
 		ShoulderL->SetStaticMesh(SphereMesh.Object);
 		ShoulderR = MakeMesh(TEXT("ShoulderR"), TorsoJoint, FVector(0.16f, 0.11f, 0.11f), FVector(0.f, 24.f, 57.f));
 		ShoulderR->SetStaticMesh(SphereMesh.Object);
-		HipPad = MakeMesh(TEXT("HipPad"), TorsoJoint, FVector(0.34f, 0.20f, 0.14f), FVector(0.f, 0.f, 2.f));
+		HipPad = MakeMesh(TEXT("HipPad"), TorsoJoint, FVector(0.26f, 0.34f, 0.14f), FVector(0.f, 0.f, 2.f));
 	}
 
 	// Limbs. Shoulder/hip joint at the root of each limb; upper segment hangs
@@ -86,8 +88,8 @@ ASpikeEliteCharacter::ASpikeEliteCharacter()
 			bArm ? FVector(0.08f, 0.08f, LoLen * 0.01f) : FVector(0.11f, 0.11f, LoLen * 0.01f),
 			FVector(0.f, 0.f, -LoLen * 0.5f));
 		L.Tip = MakeMesh(*FString::Printf(TEXT("%sTip"), Base), L.BendJoint,
-			bArm ? FVector(0.10f, 0.12f, 0.05f) : FVector(0.14f, 0.20f, 0.07f),
-			FVector(bArm ? 0.f : 3.f, 0.f, -LoLen - (bArm ? 2.f : 3.f)));
+			bArm ? FVector(0.075f, 0.095f, 0.12f) : FVector(0.28f, 0.14f, 0.11f),
+			FVector(bArm ? 0.f : 7.f, 0.f, -LoLen - (bArm ? 5.f : 1.5f)));
 		return L;
 	};
 
@@ -97,6 +99,7 @@ ASpikeEliteCharacter::ASpikeEliteCharacter()
 	// there, so leaning/dive poses cannot tear the torso away from the legs.
 	LegL = BuildLimb(TEXT("LegL"), TorsoJoint, -10.f, false);
 	LegR = BuildLimb(TEXT("LegR"), TorsoJoint,  10.f, false);
+	BuildArtDetails();
 
 	// M11d-6: jersey number on chest and back (engine default font, no external
 	// assets). The capsule is the only collider and is hidden, so the text
@@ -118,7 +121,7 @@ ASpikeEliteCharacter::ASpikeEliteCharacter()
 		// TextRender's glyph plane faces along local +X.  The torso cube is 46 cm
 		// deep, so place the number just outside its surface (the old 0.26 cm
 		// offset left both labels buried inside the opaque cube).
-		JerseyFront->SetRelativeLocation(FVector(23.6f, 0.f, 34.f));
+		JerseyFront->SetRelativeLocation(FVector(14.2f, 0.f, 34.f));
 		JerseyFront->SetRelativeRotation(FRotator::ZeroRotator);
 		JerseyFront->SetRelativeScale3D(NumScale);
 		JerseyFront->SetWorldSize(24.f);
@@ -130,7 +133,7 @@ ASpikeEliteCharacter::ASpikeEliteCharacter()
 
 		JerseyBack = CreateDefaultSubobject<UTextRenderComponent>(TEXT("JerseyBack"));
 		JerseyBack->SetupAttachment(TorsoJoint);
-		JerseyBack->SetRelativeLocation(FVector(-23.6f, 0.f, 34.f));
+		JerseyBack->SetRelativeLocation(FVector(-14.2f, 0.f, 34.f));
 		JerseyBack->SetRelativeRotation(FRotator(0.f, 180.f, 0.f));
 		JerseyBack->SetRelativeScale3D(NumScale);
 		JerseyBack->SetWorldSize(24.f);
@@ -182,6 +185,7 @@ ASpikeEliteCharacter::ASpikeEliteCharacter()
 void ASpikeEliteCharacter::BeginPlay()
 {
 	Super::BeginPlay();
+	ApplyArtMeshes();
 	ApplyJerseyColor();
 	RefreshJerseyNumberVisual();
 
@@ -198,13 +202,87 @@ void ASpikeEliteCharacter::BeginPlay()
 	}
 }
 
+void ASpikeEliteCharacter::BuildArtDetails()
+{
+	UStaticMesh* Sphere = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Sphere.Sphere"));
+	UStaticMesh* Cube = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
+	auto Part = [this, Sphere, Cube](const FString& Name, USceneComponent* Parent, FVector Loc, FVector Size, FName Finish, bool bRound = true)
+	{
+		UStaticMeshComponent* C = CreateDefaultSubobject<UStaticMeshComponent>(*Name);
+		C->SetupAttachment(Parent); C->SetStaticMesh(bRound ? Sphere : Cube);
+		C->SetRelativeLocation(Loc); C->SetRelativeScale3D(Size / 100.f);
+		C->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		C->ComponentTags.Add(Finish); ArtDetails.Add(C);
+		if(Size.GetMax()<10.f) C->SetCastShadow(false); // tiny facial/hand detail need not create shadow draws
+		if (Parent == HeadJoint) { C->ComponentTags.Add(TEXT("FaceDetail")); }
+		return C;
+	};
+	Part(TEXT("Neck"), TorsoJoint, FVector(0,0,67), FVector(11,12,16), TEXT("Skin"));
+	Part(TEXT("Hair"), HeadJoint, FVector(-1,0,8.5), FVector(19,18.5,12), TEXT("Hair"));
+	Part(TEXT("Nose"), HeadJoint, FVector(9,0,-.5), FVector(4.5,3.3,6), TEXT("Skin"));
+	Part(TEXT("Mouth"), HeadJoint, FVector(8.7,0,-5), FVector(1.4,5,1), TEXT("Lip"));
+	for (int32 S : {-1, 1})
+	{
+		const FString Side = S < 0 ? TEXT("L") : TEXT("R");
+		Part(TEXT("Ear") + Side, HeadJoint, FVector(0,S*8.7,-1), FVector(4,3,6), TEXT("Skin"));
+		Part(TEXT("EyeWhite") + Side, HeadJoint, FVector(8.5,S*4,2.5), FVector(2.2,3,2), TEXT("White"));
+		Part(TEXT("Iris") + Side, HeadJoint, FVector(9.6,S*4,2.5), FVector(.8,1.25,1.25), TEXT("Hair"));
+		Part(TEXT("Brow") + Side, HeadJoint, FVector(8.7,S*4,4.8), FVector(1.4,3.8,.9), TEXT("Hair"));
+		FProceduralLimb& Arm = S < 0 ? ArmL : ArmR;
+		FProceduralLimb& Leg = S < 0 ? LegL : LegR;
+		Part(TEXT("Sleeve") + Side, Arm.Joint, FVector(0,0,-6), FVector(14,14,15), TEXT("Uniform"));
+		Part(TEXT("Elbow") + Side, Arm.BendJoint, FVector::ZeroVector, FVector(9,9,9), TEXT("Skin"));
+		Part(TEXT("WristTape") + Side, Arm.BendJoint, FVector(0,0,-22), FVector(7,8,3), TEXT("White"));
+		for (int32 Finger = 0; Finger < 4; ++Finger)
+		{
+			Part(FString::Printf(TEXT("Finger%s%d"), *Side, Finger), Arm.BendJoint,
+				FVector(0,(Finger-1.5f)*2.f,-33.5f + FMath::Abs(Finger-1.5f)), FVector(1.8,1.7,8), TEXT("Skin"));
+		}
+		Part(TEXT("Thumb") + Side, Arm.BendJoint, FVector(1,S*5,-28.5f), FVector(2.7,2.4,6), TEXT("Skin"));
+		Part(TEXT("ShortsHem") + Side, Leg.Joint, FVector(0,0,-18), FVector(19,19,29), TEXT("Shorts"));
+		Part(TEXT("KneePad") + Side, Leg.BendJoint, FVector(4,0,-1), FVector(15,15,16), TEXT("Dark"));
+		Part(TEXT("Sock") + Side, Leg.BendJoint, FVector(0,0,-38), FVector(8,9,17), TEXT("White"));
+		Part(TEXT("Sole") + Side, Leg.BendJoint, FVector(7,0,-49), FVector(27,14,2.5), TEXT("White"));
+		for (int32 Lace = 0; Lace < 3; ++Lace)
+		{
+			Part(FString::Printf(TEXT("Lace%s%d"), *Side, Lace), Leg.BendJoint,
+				FVector(7+Lace*2,0,-43.2f-Lace*.5f), FVector(1,9,1), TEXT("White"), false);
+		}
+	}
+	// Seams and collar use unscaled joints; all dimensions above are centimetres.
+	Part(TEXT("Collar"), TorsoJoint, FVector(0,0,61), FVector(15,19,4), TEXT("White"));
+	Part(TEXT("Waistband"), TorsoJoint, FVector(0,0,2), FVector(28,36,4), TEXT("Dark"));
+}
+
+void ASpikeEliteCharacter::ApplyArtMeshes()
+{
+	using namespace SEArtGeometry;
+	auto Replace = [](UStaticMeshComponent* C, EProfile Profile)
+	{
+		if (C) { if (UStaticMesh* M = Get(Profile)) { C->SetStaticMesh(M); } }
+	};
+	Replace(Torso, EProfile::Torso); Replace(Head, EProfile::Head);
+	Replace(HipPad, EProfile::Torso);
+	for(UStaticMeshComponent* Detail : ArtDetails)
+	{
+		if(Detail && Detail->GetName().StartsWith(TEXT("ShortsHem"))) Replace(Detail,EProfile::UpperArm);
+	}
+	for (FProceduralLimb* Arm : {&ArmL,&ArmR})
+	{
+		Replace(Arm->Upper,EProfile::UpperArm); Replace(Arm->Lower,EProfile::Forearm); Replace(Arm->Tip,EProfile::Palm);
+	}
+	for (FProceduralLimb* Leg : {&LegL,&LegR})
+	{
+		Replace(Leg->Upper,EProfile::Thigh); Replace(Leg->Lower,EProfile::Calf); Replace(Leg->Tip,EProfile::Shoe);
+	}
+}
+
 FVector ASpikeEliteCharacter::GetHandWorldPosition(bool bLeft) const
 {
 	const FProceduralLimb& L = bLeft ? ArmL : ArmR;
 	if (!L.BendJoint) { return FVector::ZeroVector; }
 	// Hand tip mesh centre: 24cm forearm + 2cm offset below the bend joint.
-	const FVector TipLocal(0.f, 0.f, -26.f);
-	return L.BendJoint->GetComponentTransform().TransformPosition(TipLocal);
+	return L.Tip ? L.Tip->GetComponentLocation() : L.BendJoint->GetComponentLocation();
 }
 
 float ASpikeEliteCharacter::GetHeadHeight() const
@@ -249,12 +327,13 @@ void ASpikeEliteCharacter::ApplyJerseyColor()
 	// darker shade of the team colour; head is a neutral skin tone.
 	const FLinearColor Jersey = (TeamSide > 0) ? FLinearColor(0.10f, 0.50f, 1.00f) : FLinearColor(0.95f, 0.22f, 0.12f);
 	const FLinearColor Shorts = (TeamSide > 0) ? FLinearColor(0.05f, 0.16f, 0.38f) : FLinearColor(0.38f, 0.07f, 0.05f);
-	const FLinearColor Skin(0.82f, 0.64f, 0.48f, 1.0f);
+	const FLinearColor SkinPalette[] = { FLinearColor(.63f,.40f,.26f), FLinearColor(.82f,.61f,.44f), FLinearColor(.40f,.23f,.15f), FLinearColor(.72f,.48f,.31f) };
+	const FLinearColor Skin = SkinPalette[FMath::Max(0,PlayerId) % UE_ARRAY_COUNT(SkinPalette)];
 
-	auto Tint = [&](UStaticMeshComponent* Comp, const FLinearColor& Col)
+		auto Tint = [&](UStaticMeshComponent* Comp, const FLinearColor& Col)
 	{
 		if (!Comp) return;
-		if (UMaterialInstanceDynamic* MID = SEMaterials::MakeTint(this, Col))
+		if (UMaterialInstanceDynamic* MID = SEMaterials::MakeSurface(this, Col, Col.Equals(Skin) ? .62f : .88f))
 		{
 			Comp->SetMaterial(0, MID);
 		}
@@ -264,10 +343,10 @@ void ASpikeEliteCharacter::ApplyJerseyColor()
 	Tint(ShoulderL, Jersey);
 	Tint(ShoulderR, Jersey);
 	Tint(HipPad, Shorts);
-	Tint(ArmL.Upper, Jersey);
-	Tint(ArmR.Upper, Jersey);
-	Tint(ArmL.Lower, Jersey);
-	Tint(ArmR.Lower, Jersey);
+	Tint(ArmL.Upper, Skin);
+	Tint(ArmR.Upper, Skin);
+	Tint(ArmL.Lower, Skin);
+	Tint(ArmR.Lower, Skin);
 	Tint(ArmL.Tip, Skin);
 	Tint(ArmR.Tip, Skin);
 	Tint(LegL.Upper, Shorts);
@@ -277,11 +356,28 @@ void ASpikeEliteCharacter::ApplyJerseyColor()
 	Tint(LegL.Tip, Shorts);
 	Tint(LegR.Tip, Shorts);
 	Tint(Head, Skin);
+	const FName Finishes[] = {TEXT("Skin"),TEXT("Hair"),TEXT("White"),TEXT("Uniform"),TEXT("Shorts"),TEXT("Dark"),TEXT("Lip")};
+	const FLinearColor Colors[] = {Skin,FLinearColor(.025f,.016f,.01f),FLinearColor(.92f,.94f,.97f),Jersey,Shorts,FLinearColor(.04f,.05f,.07f),Skin*.55f};
+	for (int32 I = 0; I < UE_ARRAY_COUNT(Finishes); ++I)
+	{
+		if (UMaterialInstanceDynamic* M = SEMaterials::MakeSurface(this, Colors[I], I == 0 ? .62f : .86f))
+		{
+			for (UStaticMeshComponent* C : ArtDetails) { if (C && C->ComponentHasTag(Finishes[I])) { C->SetMaterial(0,M); } }
+		}
+	}
 }
 
 void ASpikeEliteCharacter::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+	const FVector Now = GetActorLocation();
+	AnimationMoveSpeed = GetVelocity().Size2D();
+	if (bIsBot && bAnimationLocationReady && DeltaSeconds > SMALL_NUMBER)
+	{
+		const float Travel = FVector::Dist2D(Now, PreviousAnimationLocation);
+		if (Travel < 100.f) { AnimationMoveSpeed = Travel / DeltaSeconds; }
+	}
+	PreviousAnimationLocation = Now; bAnimationLocationReady = true;
 
 	// M11b-3: procedural animation runs for bots and the human alike.
 	UpdateProceduralAnimation(DeltaSeconds);
@@ -360,6 +456,7 @@ void ASpikeEliteCharacter::TickBot(float DeltaSeconds)
 		NewLoc.X = (TeamSide > 0) ? FMath::Clamp(NewLoc.X, 30.f, XMax) : FMath::Clamp(NewLoc.X, -XMax, -30.f);
 		NewLoc.Y = FMath::Clamp(NewLoc.Y, bServiceZoneActive ? -450.f : -500.f, bServiceZoneActive ? 450.f : 500.f);
 		SetActorLocation(NewLoc, true);
+		SetActorRotation(FMath::RInterpTo(GetActorRotation(), ToDest.Rotation(), DeltaSeconds, 10.f));
 	}
 
 	// ---- Boundary: stay on own half, don't run out ----
@@ -479,12 +576,14 @@ void ASpikeEliteCharacter::UpdateCameraView()
 		if (FirstPersonCamera) FirstPersonCamera->SetActive(true);
 		// M11b-3: hide our own head in first person so it cannot occlude the view.
 		if (Head) Head->SetVisibility(false);
+		for (UStaticMeshComponent* C : ArtDetails) { if (C && C->ComponentHasTag(TEXT("FaceDetail"))) { C->SetVisibility(false); } }
 	}
 	else
 	{
 		if (ThirdPersonCamera) ThirdPersonCamera->SetActive(true);
 		if (FirstPersonCamera) FirstPersonCamera->SetActive(false);
 		if (Head) Head->SetVisibility(true);
+		for (UStaticMeshComponent* C : ArtDetails) { if (C && C->ComponentHasTag(TEXT("FaceDetail"))) { C->SetVisibility(true); } }
 		// M11f-2: keep the third-person framing (slight downward tilt) whenever we
 		// switch back — the court centre and net stay in frame, not the sky.
 		if (ThirdPersonCamera) ThirdPersonCamera->SetRelativeRotation(FRotator(-8.f, 0.f, 0.f));
@@ -554,7 +653,7 @@ void ASpikeEliteCharacter::UpdateProceduralAnimation(float DeltaSeconds)
 	}
 
 	// Walk/run cycle phase advances with speed.
-	const float Speed = GetVelocity().Size2D();
+	const float Speed = AnimationMoveSpeed;
 	const float SpeedRatio = FMath::Clamp(Speed / 450.f, 0.f, 1.f);
 	if (Speed > 30.f)
 	{
@@ -562,10 +661,15 @@ void ASpikeEliteCharacter::UpdateProceduralAnimation(float DeltaSeconds)
 	}
 	else
 	{
+#if WITH_DEV_AUTOMATION_TESTS
+		if (!bDevPoseOverride)
+#endif
 		RunPhase *= 0.85f;
 	}
-
-	const EAnimPose Pose = bDevPoseOverride ? DevPose : ResolvePose(DeltaSeconds);
+	EAnimPose Pose = ResolvePose(DeltaSeconds);
+#if WITH_DEV_AUTOMATION_TESTS
+	if (bDevPoseOverride) { Pose = DevPose; }
+#endif
 	CurrentPose = Pose;
 	ApplyPose(Pose, DeltaSeconds);
 }
@@ -587,7 +691,7 @@ void ASpikeEliteCharacter::DevSetRunPhase(float Phase)
 EAnimPose ASpikeEliteCharacter::ResolvePose(float DeltaSeconds)
 {
 	const bool bAirborne = GetCharacterMovement() && GetCharacterMovement()->IsFalling();
-	const float Speed = GetVelocity().Size2D();
+	const float Speed = AnimationMoveSpeed;
 
 	// Contact poses (short window after a real touch) beat locomotion.
 	if (ContactPoseTimer > 0.f)
@@ -632,7 +736,10 @@ void ASpikeEliteCharacter::ApplyPose(EAnimPose Pose, float DeltaSeconds)
 	auto Lerp = [Blend](USceneComponent* Comp, const FRotator& Target)
 	{
 		if (!Comp) return;
-		Comp->SetRelativeRotation(FMath::RInterpTo(Comp->GetRelativeRotation(), Target, 1.f, Blend * 8.f));
+		// Euler pitch wraps at +/-90. Interpolate the actual quaternion so
+		// overhead raises do not oscillate sideways at the wrap boundary.
+		Comp->SetRelativeRotation(FQuat::Slerp(Comp->GetRelativeTransform().GetRotation(),
+			Target.Quaternion(), Blend).GetNormalized());
 	};
 	// M11f-2: the torso joint also has a per-pose HEIGHT (the visual root of the
 	// whole body). Dive lowers it toward the floor and shifts it forward (real
@@ -646,7 +753,7 @@ void ASpikeEliteCharacter::ApplyPose(EAnimPose Pose, float DeltaSeconds)
 	};
 
 	const FVector StandHeight(0.f, 0.f, 20.f);
-	const FVector DiveHeight(18.f, 0.f, -22.f);
+	const FVector DiveHeight(18.f, 0.f, -62.f);
 	const FVector ReceiveHeight(0.f, 0.f, 8.f);
 
 	// Base rest.
@@ -673,16 +780,16 @@ void ASpikeEliteCharacter::ApplyPose(EAnimPose Pose, float DeltaSeconds)
 		// leg swings forward (+), the trail leg back (-), knees bend forward.
 		const float Swing = FMath::Sin(RunPhase) * 26.f;
 		const float SwingO = FMath::Sin(RunPhase + PI) * 26.f;
-		const float KneeBend = 45.f + 30.f * (0.5f + 0.5f * FMath::Sin(RunPhase));
+		const float KneeBend = 15.f + 45.f * FMath::Max(0.f,-FMath::Sin(RunPhase));
 		HL = FRotator(Swing, 0.f, 0.f);
 		HR = FRotator(SwingO, 0.f, 0.f);
-		KL = FRotator(KneeBend, 0.f, 0.f);
-		KR = FRotator(KneeBend, 0.f, 0.f);
+		KL = FRotator(-KneeBend, 0.f, 0.f);
+		KR = FRotator(-15.f-45.f*FMath::Max(0.f,FMath::Sin(RunPhase)), 0.f, 0.f);
 		SL = FRotator(SwingO * 0.8f, 0.f, 8.f);    // opposite arm swing
 		SR = FRotator(Swing * 0.8f, 0.f, -8.f);
 		EL = FRotator(60.f, 0.f, 0.f);
 		ER = FRotator(60.f, 0.f, 0.f);
-		T = FRotator(12.f, 0.f, 0.f);
+		T = FRotator(-8.f, 0.f, 0.f);
 		break;
 	}
 	case EAnimPose::Jump:
@@ -690,8 +797,8 @@ void ASpikeEliteCharacter::ApplyPose(EAnimPose Pose, float DeltaSeconds)
 		// Tucked jump: thighs lift forward, knees fold, arms rise slightly.
 		HL = FRotator(18.f, 0.f, 0.f);
 		HR = FRotator(18.f, 0.f, 0.f);
-		KL = FRotator(65.f, 0.f, 0.f);
-		KR = FRotator(65.f, 0.f, 0.f);
+		KL = FRotator(-65.f, 0.f, 0.f);
+		KR = FRotator(-65.f, 0.f, 0.f);
 		SL = FRotator(12.f, 0.f, 10.f);
 		SR = FRotator(12.f, 0.f, -10.f);
 		EL = FRotator(25.f, 0.f, 0.f);
@@ -703,15 +810,15 @@ void ASpikeEliteCharacter::ApplyPose(EAnimPose Pose, float DeltaSeconds)
 	{
 		// Platform receive: upper arms forward-down, forearms folded back into a
 		// flat platform, knees bent, torso leaning forward.
-		SL = FRotator(55.f, 0.f, 0.f);
-		SR = FRotator(55.f, 0.f, 0.f);
-		EL = FRotator(-20.f, 0.f, 0.f);
-		ER = FRotator(-20.f, 0.f, 0.f);
-		HL = FRotator(8.f, 0.f, 0.f);
-		HR = FRotator(8.f, 0.f, 0.f);
-		KL = FRotator(50.f, 0.f, 0.f);
-		KR = FRotator(50.f, 0.f, 0.f);
-		T = FRotator(25.f, 0.f, 0.f);
+		SL = FRotator(95.f, 0.f, -12.f);
+		SR = FRotator(95.f, 0.f, 12.f);
+		EL = FRotator(0.f, 0.f, 0.f);
+		ER = FRotator(0.f, 0.f, 0.f);
+		HL = FRotator(40.f, 0.f, 0.f);
+		HR = FRotator(40.f, 0.f, 0.f);
+		KL = FRotator(-55.f, 0.f, 0.f);
+		KR = FRotator(-55.f, 0.f, 0.f);
+		T = FRotator(-18.f, 0.f, 0.f);
 		TorsoLoc = ReceiveHeight;
 		break;
 	}
@@ -726,9 +833,9 @@ void ASpikeEliteCharacter::ApplyPose(EAnimPose Pose, float DeltaSeconds)
 		ER = FRotator(-10.f, 0.f, 0.f);
 		HL = FRotator(-8.f, 0.f, 0.f);
 		HR = FRotator(-8.f, 0.f, 0.f);
-		KL = FRotator(28.f, 0.f, 0.f);
-		KR = FRotator(28.f, 0.f, 0.f);
-		T = FRotator(6.f, 0.f, 0.f);
+		KL = FRotator(-12.f, 0.f, 0.f);
+		KR = FRotator(-12.f, 0.f, 0.f);
+		T = FRotator(-5.f, 0.f, 0.f);
 		break;
 	}
 	case EAnimPose::Spike:
@@ -774,9 +881,9 @@ void ASpikeEliteCharacter::ApplyPose(EAnimPose Pose, float DeltaSeconds)
 		ER = FRotator(3.f, 0.f, 0.f);
 		HL = FRotator(-15.f, 0.f, 0.f);
 		HR = FRotator(-15.f, 0.f, 0.f);
-		KL = FRotator(55.f, 0.f, 0.f);
-		KR = FRotator(55.f, 0.f, 0.f);
-		T = FRotator(10.f, 0.f, 0.f);
+		KL = FRotator(-15.f, 0.f, 0.f);
+		KR = FRotator(-15.f, 0.f, 0.f);
+		T = FRotator(-2.f, 0.f, 0.f);
 		break;
 	}
 	case EAnimPose::Dive:
@@ -785,15 +892,15 @@ void ASpikeEliteCharacter::ApplyPose(EAnimPose Pose, float DeltaSeconds)
 		// reaching forward-down toward the floor (positive pitch), legs stretched
 		// back/up (negative pitch). The torso joint sinks 42cm and shifts forward
 		// so the body never floats.
-		SL = FRotator(60.f, 0.f, 0.f);
-		SR = FRotator(60.f, 0.f, 0.f);
+		SL = FRotator(150.f, 0.f, 0.f);
+		SR = FRotator(150.f, 0.f, 0.f);
 		EL = FRotator(12.f, 0.f, 0.f);
 		ER = FRotator(12.f, 0.f, 0.f);
-		HL = FRotator(-65.f, 0.f, 0.f);
-		HR = FRotator(-65.f, 0.f, 0.f);
+		HL = FRotator(-12.f, 0.f, 0.f);
+		HR = FRotator(-12.f, 0.f, 0.f);
 		KL = FRotator(0.f, 0.f, 0.f);
 		KR = FRotator(0.f, 0.f, 0.f);
-		T = FRotator(70.f, 0.f, 0.f);
+		T = FRotator(-78.f, 0.f, 0.f);
 		TorsoLoc = DiveHeight;
 		break;
 	}
@@ -806,11 +913,11 @@ void ASpikeEliteCharacter::ApplyPose(EAnimPose Pose, float DeltaSeconds)
 		SR = FRotator(45.f, 0.f, 0.f);
 		EL = FRotator(-35.f, 0.f, 0.f);
 		ER = FRotator(-35.f, 0.f, 0.f);
-		HL = FRotator(25.f, 0.f, 0.f);
-		HR = FRotator(25.f, 0.f, 0.f);
-		KL = FRotator(95.f, 0.f, 0.f);
-		KR = FRotator(95.f, 0.f, 0.f);
-		T = FRotator(15.f, 0.f, 0.f);
+		HL = FRotator(60.f, 0.f, 0.f);
+		HR = FRotator(60.f, 0.f, 0.f);
+		KL = FRotator(-100.f, 0.f, 0.f);
+		KR = FRotator(-100.f, 0.f, 0.f);
+		T = FRotator(-15.f, 0.f, 0.f);
 		TorsoLoc = FVector(0.f, 0.f, -18.f);
 		break;
 	}
@@ -871,6 +978,18 @@ void ASpikeEliteCharacter::ApplyPose(EAnimPose Pose, float DeltaSeconds)
 	if (LegR.Joint) Lerp(LegR.Joint, HR);
 	if (LegL.BendJoint) Lerp(LegL.BendJoint, KL);
 	if (LegR.BendJoint) Lerp(LegR.BendJoint, KR);
+	// Plant the lower foot of grounded poses at the capsule's walking plane.
+	// This shifts only the visual joint: collision/reach/rules are unchanged.
+	if (TorsoJoint && Pose != EAnimPose::Dive && Pose != EAnimPose::Jump
+		&& GetCharacterMovement() && !GetCharacterMovement()->IsFalling() && LegL.Tip && LegR.Tip)
+	{
+		const float FootMin = FMath::Min(LegL.Tip->CalcBounds(LegL.Tip->GetComponentTransform()).GetBox().Min.Z,
+			LegR.Tip->CalcBounds(LegR.Tip->GetComponentTransform()).GetBox().Min.Z);
+		const float Floor = GetActorLocation().Z - GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
+		FVector Location = TorsoJoint->GetRelativeLocation();
+		Location.Z += FMath::Clamp(Floor - FootMin, -85.f, 45.f);
+		TorsoJoint->SetRelativeLocation(Location);
+	}
 }
 
 void ASpikeEliteCharacter::SetPoseIdle()

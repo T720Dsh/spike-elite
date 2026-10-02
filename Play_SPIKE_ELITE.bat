@@ -1,13 +1,13 @@
 @echo off
 REM ============================================================
 REM  SPIKE ELITE - launcher
-REM  M11e-1: packaged build verified on D3D12/D3D11 (cold starts,
-REM  QuickMatch/Rematch, tactical UI). Default: packaged game.
+REM  Prefer the M11g art/scene build; keep the older package as fallback.
 REM  --editor opts into Unreal Editor game mode (developer).
 REM ============================================================
 cd /d "%~dp0"
 
-set "PACKAGED=%~dp0Dist\Windows\SpikeElite.exe"
+set "PACKAGED=%~dp0Dist\M11g\Windows\SpikeElite.exe"
+if not exist "%PACKAGED%" set "PACKAGED=%~dp0Dist\Windows\SpikeElite.exe"
 set "UE=D:\Epic\UE_5.8\Engine\Binaries\Win64\UnrealEditor.exe"
 set "PROJ=%~dp0SpikeElite.uproject"
 

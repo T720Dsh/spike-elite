@@ -20,7 +20,9 @@ public class SpikeElite : ModuleRules
 			"Slate",
 			"SlateCore",
 			"ApplicationCore",
-			"RHI"
+			"RHI",
+			"MeshDescription",
+			"StaticMeshDescription"
 		});
 	}
 }

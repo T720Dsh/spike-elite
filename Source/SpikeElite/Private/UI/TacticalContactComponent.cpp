@@ -215,7 +215,12 @@ void UTacticalContactComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 		break;
 	case ETacticalState::TacticalArmed:
 	{
-		ArmedTimer -= DeltaTime;
+		ArmedTimer -= RealDt;
+		if (TacticalUI) { TacticalUI->ShowTiming(ArmedTimer / ArmedWindowSeconds, TEXT("左键击球 · 绿色窗口最佳 · 右键取消")); }
+		if (OwnerPC->WasInputKeyJustPressed(EKeys::RightMouseButton) || OwnerPC->WasInputKeyJustPressed(EKeys::Escape))
+		{
+			CancelShot(); break;
+		}
 		// LMB executes with timing quality; timeout fires a conservative shot.
 		if (OwnerPC->WasInputKeyJustPressed(EKeys::LeftMouseButton))
 		{
@@ -470,6 +475,8 @@ void UTacticalContactComponent::EnterArmed()
 	if (TacticalUI)
 	{
 		TacticalUI->ShowAttackPanel();
+		TacticalUI->UpdateAttackInfo(Intent, SEVolleyballTrajectory::BuildShotSolution(
+			GM->GetBall()->GetActorLocation(), Intent, 0.f));
 		TacticalUI->ShowTiming(1.f, TEXT(""));
 	}
 }

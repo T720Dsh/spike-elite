@@ -27,6 +27,7 @@ class SPIKEELITE_API AMatchOfficialManager : public AActor
 
 public:
 	AMatchOfficialManager();
+	virtual void BeginPlay() override;
 
 	/** Play the program-generated referee whistle (own sound, no external asset). */
 	void Whistle();
@@ -67,6 +68,8 @@ protected:
 	UPROPERTY(VisibleAnywhere) TArray<TObjectPtr<UStaticMeshComponent>> Substitutes;
 
 	UPROPERTY() TObjectPtr<USoundWaveProcedural> WhistleSound;
+	UPROPERTY() TArray<TObjectPtr<UStaticMeshComponent>> DetailMeshes;
+	void BuildDetailPeople();
 
 	UStaticMeshComponent* MakeBlock(const TCHAR* Name, const FVector& Loc, const FVector& Scale,
 		const FLinearColor& Color, ECollisionEnabled::Type Collision = ECollisionEnabled::NoCollision);

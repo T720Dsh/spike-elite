@@ -22,7 +22,7 @@ AVolleyballCourt::AVolleyballCourt()
 
 	Root = CreateDefaultSubobject<UBoxComponent>(TEXT("Root"));
 	Root->SetBoxExtent(FVector(GetFreeZoneHalfLength(), GetFreeZoneHalfWidth(), 10.f));
-	Root->SetCollisionProfileName(TEXT("BlockAll"));
+	Root->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	RootComponent = Root;
 
 	LinesRoot = CreateDefaultSubobject<USceneComponent>(TEXT("LinesRoot"));
@@ -85,6 +85,7 @@ void AVolleyballCourt::BuildFloor(UStaticMesh* Cube)
 		GetFreeZoneHalfLength()*2/100.f,
 		GetFreeZoneHalfWidth()*2/100.f, 0.1f));
 	FreeZoneFloor->SetRelativeLocation(FVector(0, 0, -5.5f));
+	FreeZoneFloor->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 	ApplyFloorMaterial(FreeZoneFloor, FLinearColor(0.16f, 0.35f, 0.42f)); // blue sport surround
 
 	// Court wood (warm maple), 18m x 9m, top surface at Z = 0.
@@ -93,6 +94,7 @@ void AVolleyballCourt::BuildFloor(UStaticMesh* Cube)
 	CourtFloor->SetStaticMesh(Cube);
 	CourtFloor->SetRelativeScale3D(FVector(HalfCourtLength*2/100.f, HalfCourtWidth*2/100.f, 0.1f));
 	CourtFloor->SetRelativeLocation(FVector(0, 0, -5.f));
+	CourtFloor->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 	ApplyFloorMaterial(CourtFloor, FLinearColor(0.78f, 0.60f, 0.40f));
 }
 
@@ -152,6 +154,23 @@ void AVolleyballCourt::BuildNet(UStaticMesh* Cube, UStaticMesh* Cyl)
 	};
 	PostLeft  = MakePost(TEXT("PostL"),  HalfCourtWidth + NetOverhang + 20.f);
 	PostRight = MakePost(TEXT("PostR"), -(HalfCourtWidth + NetOverhang + 20.f));
+	auto Hardware = [&](FString Name,FVector Position,FVector Size,FLinearColor Color,UStaticMesh* Mesh)
+	{
+		auto* C=CreateDefaultSubobject<UStaticMeshComponent>(*Name);
+		C->SetupAttachment(Root); C->SetStaticMesh(Mesh); C->SetRelativeLocation(Position);
+		C->SetRelativeScale3D(Size/100.f); C->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		C->SetMaterial(0,CourtMakeMID(C,Color));
+	};
+	for(int32 Side : {-1,1})
+	{
+		const float Y=Side*(HalfCourtWidth+NetOverhang+20.f);
+		Hardware(FString::Printf(TEXT("PostPadding_%d"),Side),FVector(0,Y,90),FVector(30,30,175),FLinearColor(.04f,.23f,.43f),Cyl);
+		Hardware(FString::Printf(TEXT("PostBase_%d"),Side),FVector(0,Y,4),FVector(42,42,8),FLinearColor(.07f,.08f,.1f),Cyl);
+		for(float Z : {NetHeight-4.f,NetHeight-NetBandHeight+3.f})
+			Hardware(FString::Printf(TEXT("Cable_%d_%d"),Side,int32(Z)),FVector(0,Side*(HalfCourtWidth+NetOverhang),Z),FVector(1.8f,40,1.8f),FLinearColor(.7f,.72f,.75f),Cube);
+		for(int32 Band=0; Band<18; ++Band)
+			Hardware(FString::Printf(TEXT("Antenna_%d_%d"),Side,Band),FVector(0,Side*HalfCourtWidth,NetHeight-100.f+Band*10.f+5.f),FVector(1.4f,1.4f,10.f),Band%2?FLinearColor(.84f,.055f,.045f):FLinearColor(.94f,.94f,.9f),Cyl);
+	}
 }
 
 void AVolleyballCourt::BuildServeShortLines(UStaticMesh* Cube)
@@ -183,19 +202,19 @@ void AVolleyballCourt::PopulateNetGrid()
 	const float NetW = HalfCourtWidth*2 + NetOverhang*2;
 	const float HalfNetW = NetW / 2.f;
 	const float NetBottom = NetHeight - NetBandHeight;
-	const float Spacing = 8.f;
+	const float Spacing = 10.f;
 
 	const int32 HCount = FMath::Max(2, FMath::RoundToInt(NetBandHeight / Spacing));
 	for (int32 i = 0; i <= HCount; ++i)
 	{
 		const float Z = NetBottom + (NetBandHeight * i / HCount);
-		FTransform T(FRotator::ZeroRotator, FVector(0, 0, Z), FVector(0.009f, NetW/100.f, 0.009f));
+		FTransform T(FRotator::ZeroRotator, FVector(0, 0, Z), FVector(0.003f, NetW/100.f, 0.003f));
 		NetGrid->AddInstance(T);
 	}
 	for (float Y = -HalfNetW; Y <= HalfNetW + 0.1f; Y += Spacing)
 	{
 		FTransform T(FRotator::ZeroRotator, FVector(0, Y, (NetBottom+NetHeight)/2.f),
-			FVector(0.012f, 0.012f, NetBandHeight/100.f));
+			FVector(0.003f, 0.003f, NetBandHeight/100.f));
 		NetGrid->AddInstance(T);
 	}
 }

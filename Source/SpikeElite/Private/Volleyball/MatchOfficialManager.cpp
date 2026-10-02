@@ -8,10 +8,11 @@
 #include "Sound/SoundWaveProcedural.h"
 #include "Kismet/GameplayStatics.h"
 #include "SEMaterials.h"
+#include "SEArtGeometry.h"
 
 static UMaterialInstanceDynamic* MOMakeMID(UObject* Owner, const FLinearColor& Color)
 {
-	return SEMaterials::MakeTint(Owner, Color);
+	return SEMaterials::MakeSurface(Owner, Color, .78f);
 }
 
 /**
@@ -64,34 +65,50 @@ AMatchOfficialManager::AMatchOfficialManager()
 
 	Root = CreateDefaultSubobject<UBoxComponent>(TEXT("Root"));
 	Root->SetBoxExtent(FVector(100.f, 100.f, 10.f));
-	Root->SetCollisionProfileName(TEXT("BlockAll"));
+	Root->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	RootComponent = Root;
 
 	BuildStand();
 	BuildScorer();
 	BuildBenches();
+	BuildDetailPeople();
 }
 
 void AMatchOfficialManager::BuildStand()
 {
-	// 1st referee stand at the +Y net end. Platform top ~245 cm so the
-	// referee's eye line sits ~50 cm above the net top (243).
+	// Platform top 126 cm + standing eye height ~170 cm = ~296 cm.
 	const FVector StandLoc(0.f, 720.f, 0.f);
 
-	StandPlatform = MakeBlock(TEXT("StandPlatform"), StandLoc + FVector(0, 0, 240.f),
+	StandPlatform = MakeBlock(TEXT("StandPlatform"), StandLoc + FVector(0, 0, 120.f),
 		FVector(1.6f, 1.6f, 0.12f), FLinearColor(0.35f, 0.36f, 0.40f), ECollisionEnabled::QueryOnly);
-	StandLadder = MakeBlock(TEXT("StandLadder"), StandLoc + FVector(120.f, 0, 110.f),
-		FVector(0.9f, 0.9f, 2.2f), FLinearColor(0.30f, 0.31f, 0.35f));
+	StandLadder = MakeBlock(TEXT("StandLadder"), StandLoc + FVector(115.f, -45.f, 62.f),
+		FVector(0.045f, 0.045f, 1.35f), FLinearColor(0.30f, 0.31f, 0.35f));
+	StandLadder->SetRelativeRotation(FRotator(14,0,0));
+	UStaticMeshComponent* OtherRail = MakeBlock(TEXT("LadderOtherRail"), StandLoc + FVector(115,-0.f+45.f,62),
+		FVector(.045f,.045f,1.35f),FLinearColor(.30f,.31f,.35f));
+	OtherRail->SetRelativeRotation(FRotator(14,0,0));
+	for (int32 Rung = 0; Rung < 6; ++Rung)
+	{
+		MakeBlock(*FString::Printf(TEXT("LadderRung%d"),Rung), StandLoc+FVector(130.f-Rung*4.f,0,12.f+Rung*20.f),
+			FVector(.08f,.94f,.045f),FLinearColor(.5f,.55f,.6f));
+	}
+	for (int32 X : {-1,1}) for (int32 Y : {-1,1})
+	{
+		MakeBlock(*FString::Printf(TEXT("TowerLeg%d%d"),X,Y), StandLoc+FVector(X*65,Y*65,58),
+			FVector(.06f,.06f,1.16f),FLinearColor(.25f,.3f,.36f));
+		MakeBlock(*FString::Printf(TEXT("TowerFoot%d%d"),X,Y), StandLoc+FVector(X*65,Y*65,3),
+			FVector(.22f,.22f,.06f),FLinearColor(.05f,.06f,.07f));
+	}
 	// Guard rails: two upright posts plus the cross bar so the platform reads
 	// as a real referee tower rather than a floating slab.
-	StandRailing = MakeBlock(TEXT("StandRailing"), StandLoc + FVector(0, 0, 300.f),
-		FVector(1.6f, 0.10f, 0.5f), FLinearColor(0.45f, 0.47f, 0.52f));
-	StandRailingPostA = MakeBlock(TEXT("StandRailingPostA"), StandLoc + FVector(-80.f, 0, 280.f),
-		FVector(0.12f, 0.12f, 1.6f), FLinearColor(0.45f, 0.47f, 0.52f));
-	StandRailingPostB = MakeBlock(TEXT("StandRailingPostB"), StandLoc + FVector(80.f, 0, 280.f),
-		FVector(0.12f, 0.12f, 1.6f), FLinearColor(0.45f, 0.47f, 0.52f));
-	StandPadding = MakeBlock(TEXT("StandPadding"), StandLoc + FVector(0, 0, 220.f),
-		FVector(1.7f, 0.3f, 0.5f), FLinearColor(0.60f, 0.30f, 0.25f));
+	StandRailing = MakeBlock(TEXT("StandRailing"), StandLoc + FVector(0,65,212),
+		FVector(1.4f,.045f,.045f),FLinearColor(.45f,.47f,.52f));
+	StandRailingPostA = MakeBlock(TEXT("StandRailingPostA"), StandLoc+FVector(-70,65,166),
+		FVector(.045f,.045f,.92f),FLinearColor(.45f,.47f,.52f));
+	StandRailingPostB = MakeBlock(TEXT("StandRailingPostB"), StandLoc+FVector(70,65,166),
+		FVector(.045f,.045f,.92f),FLinearColor(.45f,.47f,.52f));
+	StandPadding = MakeBlock(TEXT("StandPadding"), StandLoc+FVector(0,-70,67),
+		FVector(1.45f,.16f,.96f),FLinearColor(.035f,.20f,.35f));
 
 	// 1st referee (standing on the platform, facing the court = -X).
 	Ref1Body = MakeBlock(TEXT("Ref1Body"), StandLoc + FVector(0, 0, 300.f),
@@ -104,6 +121,8 @@ void AMatchOfficialManager::BuildStand()
 		FVector(0.42f, 0.30f, 0.95f), FLinearColor(0.90f, 0.55f, 0.15f));
 	Ref2Head = MakeBlock(TEXT("Ref2Head"), FVector(0.f, -720.f, 123.f),
 		FVector(0.30f, 0.30f, 0.30f), FLinearColor(0.72f, 0.55f, 0.42f));
+	Ref1Body->SetVisibility(false); Ref1Head->SetVisibility(false);
+	Ref2Body->SetVisibility(false); Ref2Head->SetVisibility(false);
 }
 
 void AMatchOfficialManager::BuildScorer()
@@ -115,43 +134,31 @@ void AMatchOfficialManager::BuildScorer()
 	// mixed into the stands.
 	const FVector TableLoc(0.f, -1200.f, 0.f);
 	ScorerTable = MakeBlock(TEXT("ScorerTable"), TableLoc + FVector(0, 0, 75.f),
-		FVector(1.8f, 2.4f, 0.10f), FLinearColor(0.45f, 0.40f, 0.32f), ECollisionEnabled::QueryOnly);
-	ScorerChair = MakeBlock(TEXT("ScorerChair"), TableLoc + FVector(130.f, 0, 30.f),
-		FVector(0.5f, 0.5f, 0.6f), FLinearColor(0.35f, 0.36f, 0.40f));
-	// Scorer sits behind the table facing the court / 1st referee (+X direction
-	// from the -Y aisle, i.e. towards the net). Body below the scoreboard device.
+		FVector(2.4f, .8f, 0.10f), FLinearColor(0.24f, 0.29f, 0.34f), ECollisionEnabled::QueryOnly);
+	ScorerChair = MakeBlock(TEXT("ScorerChair"), TableLoc + FVector(0, -110.f, 40.f),
+		FVector(0.5f, 0.5f, .08f), FLinearColor(0.35f, 0.36f, 0.40f));
+	// Legacy component references are retained but hidden in BuildDetailPeople;
+	// the detailed seated scorer faces +Y from the -Y competition work aisle.
 	ScorerBody = MakeBlock(TEXT("ScorerBody"), TableLoc + FVector(70.f, 0, 105.f),
 		FVector(0.40f, 0.30f, 0.90f), FLinearColor(0.25f, 0.30f, 0.45f));
 	ScorerHead = MakeBlock(TEXT("ScorerHead"), TableLoc + FVector(70.f, 0, 168.f),
 		FVector(0.28f, 0.28f, 0.28f), FLinearColor(0.72f, 0.55f, 0.42f));
 
-	// Physical scoreboard device on the table: a wide pedestal plus a tall panel
-	// whose FRONT FACE is -X (towards the court, the stands and the broadcast
-	// camera). The panel is thin along X (0.06), wide along Y (2.2 m) and the
-	// text sits just outside that -X face so glyphs are readable front-on and
-	// from a 45-degree angle with no mirrored or board-external text.
+	// Board is wide along X, thin along Y and faces the court (+Y).
 	ScoreboardDevice = MakeBlock(TEXT("ScoreboardDevice"), TableLoc + FVector(0, 0, 108.f),
-		FVector(0.9f, 2.4f, 0.12f), FLinearColor(0.18f, 0.19f, 0.24f), ECollisionEnabled::QueryOnly);
-	ScoreboardPanel = MakeBlock(TEXT("ScoreboardPanel"), TableLoc + FVector(0, 0, 155.f),
-		FVector(0.06f, 2.2f, 0.85f), FLinearColor(0.05f, 0.06f, 0.11f), ECollisionEnabled::QueryOnly);
+		FVector(1.95f, .35f, 0.08f), FLinearColor(0.18f, 0.19f, 0.24f), ECollisionEnabled::QueryOnly);
+	ScoreboardPanel = MakeBlock(TEXT("ScoreboardPanel"), TableLoc + FVector(0, 15.f, 142.f),
+		FVector(2.2f, .08f, .64f), FLinearColor(0.05f, 0.06f, 0.11f), ECollisionEnabled::QueryOnly);
 
-	// Live text: same -X face normal as the panel, offset 5 cm in front to avoid
-	// z-fighting; centred horizontally, 4 lines at a readable size that never
-	// overflows the 220 cm wide panel (two-digit scores like 26:24 fit).
+	// Four centred lines, outside the panel surface, including two-digit scores.
 	ScoreboardText = CreateDefaultSubobject<UTextRenderComponent>(TEXT("ScoreboardText"));
 	ScoreboardText->SetupAttachment(Root);
-	// Text centred vertically on the panel (panel centre Z=155) via the
-	// TextCenter vertical alignment, offset -18 X in front of the -X face.
-	ScoreboardText->SetRelativeLocation(TableLoc + FVector(-18.f, 0, 155.f));
-	// TextRender's glyph plane faces -Y by default (the readable side points
-	// -Y); Yaw +90 turns the readable face to -X, matching the panel's front
-	// face, so text reads correctly (not mirrored) from the -X / court side
-	// where the acceptance camera stands. Verified on-shot: Yaw -90 produced
-	// mirrored glyphs from the -X viewpoint.
+	// Glyph plane is YZ (local normal +X); yaw 90 faces the court (+Y).
+	ScoreboardText->SetRelativeLocation(TableLoc + FVector(0, 21.f, 142.f));
 	ScoreboardText->SetRelativeRotation(FRotator(0.f, 90.f, 0.f));
 	ScoreboardText->SetHorizontalAlignment(EHorizTextAligment::EHTA_Center);
 	ScoreboardText->SetVerticalAlignment(EVerticalTextAligment::EVRTA_TextCenter);
-	ScoreboardText->SetWorldSize(16.f);
+	ScoreboardText->SetWorldSize(14.f);
 	ScoreboardText->SetTextRenderColor(FColor(255, 214, 64));
 	// English only: UTextRenderComponent uses the engine default font (Roboto)
 	// which has no CJK glyphs; the four-line format is SET / A:B / sets / serve.
@@ -185,13 +192,84 @@ void AMatchOfficialManager::BuildBenches()
 		Substitutes.Add(Leg);
 		UStaticMeshComponent* H = MakeBlock(*FString::Printf(TEXT("SubHead%d"), SubIdx), Loc + FVector(0, 0, 72.f),
 			FVector(0.24f, 0.24f, 0.24f), FLinearColor(0.72f, 0.55f, 0.42f));
-		Substitutes.Add(H);
+	Substitutes.Add(H);
 		++SubIdx;
 	};
 	for (int32 i = -2; i <= 2; ++i)
 	{
 		AddSub(BenchALoc + FVector(60.f * i, -80.f, 0.f), FLinearColor(0.15f, 0.40f, 0.75f));
 		AddSub(BenchBLoc + FVector(60.f * i, -80.f, 0.f), FLinearColor(0.75f, 0.25f, 0.20f));
+	}
+	// Detailed seated athletes below supersede the old three-block placeholders.
+	for (UStaticMeshComponent* C : Substitutes) { if(C) C->SetVisibility(false); }
+}
+
+void AMatchOfficialManager::BuildDetailPeople()
+{
+	UStaticMesh* Sphere = LoadObject<UStaticMesh>(nullptr,TEXT("/Engine/BasicShapes/Sphere.Sphere"));
+	auto Person = [this,Sphere](FString Prefix,FVector Base,float Yaw,FLinearColor Shirt,bool bSeated)
+	{
+		const FRotator Rotation(0,Yaw,0);
+		const FLinearColor Skin(.66f,.43f,.29f), Dark(.035f,.045f,.065f), White(.91f,.94f,.97f);
+		auto P = [&](FString Name,FVector Local,FVector Size,FLinearColor Color,const TCHAR* Profile,FRotator Extra=FRotator::ZeroRotator)
+		{
+			UStaticMeshComponent* C = MakeBlock(*(Prefix+Name), Base+Rotation.RotateVector(Local),Size/100.f,Color);
+			C->SetRelativeRotation(Rotation+Extra); C->ComponentTags.Add(Profile); DetailMeshes.Add(C);
+			return C;
+		};
+		const float Hip = bSeated ? 45.f : 92.f;
+		P(TEXT("Torso"),FVector(0,0,Hip+27),FVector(26,42,55),Shirt,TEXT("Torso"));
+		P(TEXT("Neck"),FVector(0,0,Hip+59),FVector(10,11,12),Skin,TEXT("Round"))->SetStaticMesh(Sphere);
+		P(TEXT("Head"),FVector(0,0,Hip+74),FVector(18,17,25),Skin,TEXT("Head"));
+		P(TEXT("Hair"),FVector(-1,0,Hip+82),FVector(18.5,17.5,12),Dark,TEXT("Round"))->SetStaticMesh(Sphere);
+		P(TEXT("Collar"),FVector(0,0,Hip+52),FVector(13,18,4),White,TEXT("Round"))->SetStaticMesh(Sphere);
+		for (int32 Side : {-1,1})
+		{
+			const FString S = Side < 0 ? TEXT("L") : TEXT("R");
+			P(TEXT("Eye")+S,FVector(8.8,Side*4,Hip+76),FVector(1.2,2,2),Dark,TEXT("Round"))->SetStaticMesh(Sphere);
+			P(TEXT("Arm")+S,FVector(0,Side*24,Hip+27),FVector(11,11,43),Shirt,TEXT("Forearm"));
+			P(TEXT("Hand")+S,FVector(bSeated?8:0,Side*24,Hip+2),FVector(7,8,11),Skin,TEXT("Palm"));
+			P(TEXT("Thigh")+S,FVector(bSeated?17:0,Side*10,bSeated?Hip:Hip-22),FVector(17,17,44),Dark,TEXT("Thigh"),bSeated?FRotator(90,0,0):FRotator::ZeroRotator);
+			P(TEXT("Calf")+S,FVector(bSeated?38:0,Side*10,24),FVector(11,11,43),bSeated?Skin:Dark,TEXT("Calf"));
+			P(TEXT("Shoe")+S,FVector(bSeated?44:6,Side*10,5),FVector(27,14,10),Dark,TEXT("Shoe"));
+		}
+	};
+	Person(TEXT("Official1"),FVector(0,720,127),-90,FLinearColor(.78f,.84f,.91f),false);
+	Person(TEXT("Official2"),FVector(0,-720,0),90,FLinearColor(.78f,.84f,.91f),false);
+	ScorerBody->SetVisibility(false); ScorerHead->SetVisibility(false);
+	Person(TEXT("RecordOfficial"),FVector(0,-1310,0),90,FLinearColor(.12f,.19f,.27f),true);
+	for (int32 Team : {-1,1}) for(int32 I=-2;I<=2;++I)
+	{
+		Person(FString::Printf(TEXT("BenchAthlete%d_%d"),Team,I),FVector(Team*420+I*60,-1330,0),90,
+			Team>0?FLinearColor(.10f,.42f,.8f):FLinearColor(.8f,.22f,.12f),true);
+	}
+	// Table legs, writing equipment and proper chairs are purely visual, clear of the free zone.
+	for(int32 X : {-1,1}) for(int32 Y : {-1,1})
+		MakeBlock(*FString::Printf(TEXT("TableLeg%d%d"),X,Y),FVector(X*100,-1200+Y*30,35),FVector(.055f,.055f,.7f),FLinearColor(.1f,.12f,.15f));
+	MakeBlock(TEXT("ScorePad"),FVector(50,-1270,82),FVector(.35f,.45f,.025f),FLinearColor(.9f,.92f,.85f));
+	MakeBlock(TEXT("ScorerBackrest"),FVector(0,-1340,65),FVector(.52f,.055f,.58f),FLinearColor(.1f,.14f,.20f));
+	for(int32 Team : {-1,1}) for(int32 I=-2;I<=2;++I)
+	{
+		MakeBlock(*FString::Printf(TEXT("BenchSeat%d_%d"),Team,I),FVector(Team*420+I*60,-1330,43),FVector(.5f,.45f,.06f),FLinearColor(.08f,.12f,.19f));
+		MakeBlock(*FString::Printf(TEXT("BenchBack%d_%d"),Team,I),FVector(Team*420+I*60,-1350,65),FVector(.5f,.055f,.46f),FLinearColor(.08f,.12f,.19f));
+	}
+}
+
+void AMatchOfficialManager::BeginPlay()
+{
+	Super::BeginPlay();
+	using namespace SEArtGeometry;
+	for (UStaticMeshComponent* C : DetailMeshes)
+	{
+		EProfile Profile = EProfile::Torso;
+		if(C->ComponentHasTag(TEXT("Round"))) continue;
+		if(C->ComponentHasTag(TEXT("Head"))) Profile=EProfile::Head;
+		if(C->ComponentHasTag(TEXT("Forearm"))) Profile=EProfile::Forearm;
+		if(C->ComponentHasTag(TEXT("Palm"))) Profile=EProfile::Palm;
+		if(C->ComponentHasTag(TEXT("Thigh"))) Profile=EProfile::Thigh;
+		if(C->ComponentHasTag(TEXT("Calf"))) Profile=EProfile::Calf;
+		if(C->ComponentHasTag(TEXT("Shoe"))) Profile=EProfile::Shoe;
+		if(UStaticMesh* M=Get(Profile)) C->SetStaticMesh(M);
 	}
 }
 

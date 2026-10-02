@@ -135,6 +135,11 @@ void ASpikeElitePlayerController::DevViewPlayer()
 
 void ASpikeElitePlayerController::DevAutoStart()
 {
+	if (FParse::Param(FCommandLine::Get(), TEXT("ArtSuite")))
+	{
+		DevArtSuite();
+		return;
+	}
 	// -ShotSuite: capture the M11c acceptance screenshot set from a real running
 	// match (server behind end line, first receive, dive active/save, defense
 	// panel, attacker run-up, ball close-up, officials, MatchOver).
@@ -369,6 +374,51 @@ void ASpikeElitePlayerController::DevRematchStress()
 }
 
 
+void ASpikeElitePlayerController::DevArtSuite()
+{
+	bShouldPerformFullTickWhenPaused = true; // update camera POV, not match simulation
+	PrimaryActorTick.bTickEvenWhenPaused = true;
+	// Deterministic inspection cameras. These are visual fixtures, NOT rally
+	// evidence: never teleport the ball or manufacture an official point.
+	struct FShot { const TCHAR* Name; FVector Camera; FVector Target; };
+	const TArray<FShot> Shots = {
+		{TEXT("art_01_arena"), FVector(1900,1250,800), FVector(0,0,250)},
+		{TEXT("art_02_referee_tower"), FVector(270,420,260), FVector(0,720,180)},
+		{TEXT("art_03_score_table"), FVector(280,-830,190), FVector(0,-1200,125)},
+		{TEXT("art_04_bench"), FVector(620,-1050,130), FVector(420,-1330,90)},
+		{TEXT("art_05_seated_crowd"), FVector(850,1230,240), FVector(900,1740,145)},
+		{TEXT("art_06_net_hardware"), FVector(220,380,250), FVector(0,520,235)}
+	};
+	TWeakObjectPtr<ASpikeElitePlayerController> Weak(this);
+	const double Begin=FPlatformTime::Seconds();
+	FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda(
+		[Weak,Begin,Shots,Step=0](float) mutable
+	{
+		auto* PC=Weak.Get(); if(!PC) return false;
+		const double Elapsed=FPlatformTime::Seconds()-Begin;
+		if(Step==0 && Elapsed>1.) { PC->StartMatch(); ++Step; }
+		if(Step==1 && Elapsed>3.) { PC->DevShot(TEXT("art_00_actual_player_view")); PC->SetPause(true); ++Step; }
+		if(Step>=2 && Step<2+Shots.Num()*2)
+		{
+			const int32 Index=(Step-2)/2;
+			const double Due=4.+Index*2.+((Step-2)%2)*.8;
+			if(Elapsed>Due)
+			{
+				const FShot& Shot=Shots[Index];
+				if((Step-2)%2==0) PC->DevView(Shot.Camera,(Shot.Target-Shot.Camera).Rotation());
+				else PC->ConsoleCommand(FString::Printf(TEXT("Screenshot filename=%s"),Shot.Name),true);
+				++Step;
+			}
+		}
+		if(Step==2+Shots.Num()*2 && Elapsed>5.+Shots.Num()*2.)
+		{
+			UE_LOG(LogSEMenu,Log,TEXT("DEV ART SUITE: completed %d inspection views + actual player camera"),Shots.Num());
+			PC->ConsoleCommand(TEXT("quit")); return false;
+		}
+		return true;
+	}));
+}
+
 void ASpikeElitePlayerController::DevPoseSuite()
 {
 	// -PoseSuite: pin each procedural pose and capture front/side/back plus a
@@ -408,9 +458,9 @@ void ASpikeElitePlayerController::DevPoseSuite()
 		{
 			// Aim at the torso (head-height base), keep the camera slightly above
 			// and ~3.3m out so the whole body, from feet to raised hands, fits.
-			const FVector Torso = C->GetActorLocation() + FVector(0.f, 0.f, 100.f);
+			const FVector Torso = C->GetActorLocation() + FVector(0.f, 0.f, 15.f);
 			const FVector Dir = FRotator(0.f, Yaw, 0.f).Vector();
-			const FVector CamPos = Torso + Dir * 330.f + FVector(0.f, 0.f, 25.f);
+			const FVector CamPos = Torso + Dir * 410.f + FVector(0.f, 0.f, 30.f);
 			DevView(CamPos, (Torso - CamPos).Rotation());
 		}
 	};
@@ -420,7 +470,7 @@ void ASpikeElitePlayerController::DevPoseSuite()
 		{
 			// Park the subject at a fixed court spot with zero velocity so the
 			// pinned pose is framed cleanly and nothing walks it around.
-			C->SetActorLocation(FVector(450.f, 0.f, C->GetActorLocation().Z));
+			C->SetActorLocation(FVector(450.f, 800.f, C->GetActorLocation().Z));
 			// M11f-2: face +X so the yaw-0 camera sees the FRONT. The pawn rotates
 			// via bUseControllerRotationYaw, so the controller yaw must be reset
 			// too — Actor-only rotation is overwritten on the next frame.
@@ -860,12 +910,9 @@ void ASpikeElitePlayerController::DevShotSuite()
 			const FVector CourtY = FVector(0.f, 0.f, 0.f);
 			if ((Shot8Mask & 1) == 0)
 			{
-				// M11f-4: scorer table + physical scoreboard sit at (0,-1200) on
-				// the -Y work side. The panel and its text face -X (towards the
-				// court), so the camera stands on the -X side of the device and
-				// looks back at the front face — readable, not mirrored.
-				const FVector Cam(-260.f, -1150.f, 150.f);
-				const FRotator R = UKismetMathLibrary::FindLookAtRotation(Cam, FVector(0.f, -1200.f, 155.f));
+				// M11g: the new panel faces the court (+Y); inspect from that side.
+				const FVector Cam(280.f, -830.f, 190.f);
+				const FRotator R = UKismetMathLibrary::FindLookAtRotation(Cam, FVector(0.f, -1200.f, 142.f));
 				PC->DevView(Cam, R);
 				PC->DevShot(TEXT("shot_ss_08_scorer"));
 				Shot8Mask |= 1;
@@ -876,7 +923,7 @@ void ASpikeElitePlayerController::DevShotSuite()
 				// Side approach from the +X/+Y corner, head-level, so the net post
 				// does not occlude the referee standing on the platform.
 				const FVector Cam(-300.f, 860.f, 210.f);
-				const FRotator R = UKismetMathLibrary::FindLookAtRotation(Cam, FVector(0.f, 720.f, 320.f));
+				const FRotator R = UKismetMathLibrary::FindLookAtRotation(Cam, FVector(0.f, 720.f, 200.f));
 				PC->DevView(Cam, R);
 				PC->DevShot(TEXT("shot_ss_08_ref1"));
 				Shot8Mask |= 2;
@@ -1237,10 +1284,20 @@ void ASpikeElitePlayerController::DevTacticalTest()
 				St.T3 = Elapsed; // reset the steering timeout
 			}
 			break;
-		case 3: // armed -> screenshot -> execute perfect-timing shot
-			if (PC->Tactical && PC->Tactical->State == ETacticalState::TacticalArmed && (Elapsed - St.T4) > 0.4)
+		case 3: // capture Armed while its panel is STILL visible
+			if (PC->Tactical && PC->Tactical->State == ETacticalState::TacticalArmed && (Elapsed - St.T4) > 0.35)
 			{
 				PC->DevShot(TEXT("shot_tac_05_armed"));
+				St.Stage = 31;
+			}
+			else if (Elapsed - St.T4 > 5.0)
+			{
+				PC->DevVerify(false, TEXT("TacticalTest armed screenshot timeout")); St.Stage = 9;
+			}
+			break;
+		case 31: // asynchronous capture needs a rendered frame before hiding UI
+			if (PC->Tactical && PC->Tactical->State == ETacticalState::TacticalArmed && (Elapsed - St.T4) > 0.58)
+			{
 				int32 Phase = -1;
 				PC->Tactical->DevTacticalStep(Phase, 0, FVector::ZeroVector, 0.f, 0.f, false, false, true);
 				UE_LOG(LogSEMenu, Log, TEXT("DEV TACTICAL TEST: perfect-timing shot #1 executed"));
@@ -1248,7 +1305,7 @@ void ASpikeElitePlayerController::DevTacticalTest()
 				St.BallPos = GM->GetBall() ? GM->GetBall()->GetActorLocation() : FVector::ZeroVector;
 				St.Stage = 4;
 			}
-			else if (Elapsed - St.T4 > 60.0)
+			else if (Elapsed - St.T4 > 5.0)
 			{
 				PC->DevVerify(false, TEXT("TacticalTest armed-phase timeout"));
 				St.Stage = 9;
@@ -1322,17 +1379,27 @@ void ASpikeElitePlayerController::DevTacticalTest()
 				St.Stage = 6;
 			}
 			break;
-		case 6: // armed -> execute shot #2 -> verify
-			if (PC->Tactical && PC->Tactical->State == ETacticalState::TacticalArmed && (Elapsed - St.T6) > 0.4)
+		case 6: // armed screenshot, then execute on a later frame
+			if (PC->Tactical && PC->Tactical->State == ETacticalState::TacticalArmed && (Elapsed - St.T6) > 0.35)
 			{
 				PC->DevShot(TEXT("shot_tac_08_armed2"));
+				St.Stage = 61;
+			}
+			else if (Elapsed - St.T6 > 5.0)
+			{
+				PC->DevVerify(false, TEXT("TacticalTest armed screenshot #2 timeout")); St.Stage = 9;
+			}
+			break;
+		case 61:
+			if (PC->Tactical && PC->Tactical->State == ETacticalState::TacticalArmed && (Elapsed - St.T6) > 0.58)
+			{
 				int32 Phase = -1;
 				PC->Tactical->DevTacticalStep(Phase, 0, FVector::ZeroVector, 0.f, 0.f, false, false, true);
 				St.T6 = Elapsed;
 				St.BallPos = GM->GetBall() ? GM->GetBall()->GetActorLocation() : FVector::ZeroVector;
 				St.Stage = 7;
 			}
-			else if (Elapsed - St.T6 > 60.0)
+			else if (Elapsed - St.T6 > 5.0)
 			{
 				PC->DevVerify(false, TEXT("TacticalTest armed-phase #2 timeout"));
 				St.Stage = 9;
@@ -1523,6 +1590,13 @@ void ASpikeElitePlayerController::StartMatch()
 void ASpikeElitePlayerController::OnMatchStarted(UScoreboardWidget* InScoreboard)
 {
 	Scoreboard = InScoreboard;
+	// The map's PlayerStart can carry a top-down rotation from the menu scene.
+	// Reset the actual controller (not just the spring arm) on EVERY new match.
+	if (ASpikeEliteCharacter* C = Cast<ASpikeEliteCharacter>(GetPawn()))
+	{
+		SetViewTarget(C);
+		SetControlRotation(FRotator(-12.f, C->TeamSide > 0 ? 180.f : 0.f, 0.f));
+	}
 }
 
 void ASpikeElitePlayerController::BuildPauseMenu()
@@ -1574,11 +1648,16 @@ void ASpikeElitePlayerController::OnMatchOver(const TArray<int32>& ScoresA, cons
 	// M11f-2: stable broadcast end-of-match view. Point the player camera at the
 	// court centre from a slight elevation instead of leaving the last rally's
 	// tight framing (player back or scorer text filling the result background).
-	if (APawn* P = GetPawn())
+	if (!DevCam)
 	{
-		const FVector Me = P->GetActorLocation();
-		const FRotator Look = (FVector(0.f, 0.f, 120.f) - Me).Rotation();
-		SetControlRotation(FRotator(-14.f, Look.Yaw, 0.f));
+		DevCam = GetWorld()->SpawnActor<ACameraActor>();
+	}
+	if (ACameraActor* ResultCamera = Cast<ACameraActor>(DevCam))
+	{
+		const FVector Location(1500.f,900.f,650.f);
+		ResultCamera->SetActorLocationAndRotation(Location,(FVector(0,0,120)-Location).Rotation());
+		ResultCamera->GetCameraComponent()->SetFieldOfView(70.f);
+		SetViewTarget(ResultCamera);
 	}
 	// M11 input gate: FREEZE the world. Without this, character input, bot Tick
 	// directives and the ball's projectile all kept running behind the result

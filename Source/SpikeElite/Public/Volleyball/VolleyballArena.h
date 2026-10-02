@@ -22,7 +22,7 @@ class USkyLightComponent;
  * reset between matches.
  *
  * Playing area: 18 x 9 m. Free zone: 5 m from sidelines, 6.5 m from end lines
- * (full play+free zone 31 x 19 m). Hall interior ~60 x 44 m, roof 15 m high.
+ * (full play+free zone 31 x 19 m). Hall interior 64 x 56 m, roof 15 m high.
  */
 UCLASS()
 class SPIKEELITE_API AVolleyballArena : public AActor
@@ -35,9 +35,9 @@ public:
 
 	/** Hall interior half extents (cm). Walls sit at +/- these values. */
 	UPROPERTY(EditAnywhere, Category = "Arena|Hall")
-	float HallHalfLength = 3000.0f;
+	float HallHalfLength = 3200.0f;
 	UPROPERTY(EditAnywhere, Category = "Arena|Hall")
-	float HallHalfWidth = 2200.0f;
+	float HallHalfWidth = 2800.0f;
 	UPROPERTY(EditAnywhere, Category = "Arena|Hall")
 	float HallHeight = 1500.0f;
 
@@ -51,9 +51,9 @@ public:
 
 	/** Free-zone clearance so no stand/board intrudes into the play+free zone. */
 	UPROPERTY(EditAnywhere, Category = "Arena|Clearance")
-	float StandClearanceX = 1750.0f; // beyond end-line free zone (1550) + buffer
+	float StandClearanceX = 1800.0f; // free-zone plus circulation aisle
 	UPROPERTY(EditAnywhere, Category = "Arena|Clearance")
-	float StandClearanceY = 1150.0f; // beyond sideline free zone (950) + buffer
+	float StandClearanceY = 1550.0f; // officials/benches occupy a separate work aisle
 
 protected:
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UBoxComponent> Root;
@@ -70,6 +70,14 @@ protected:
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UInstancedStaticMeshComponent> CrowdHeads;
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UInstancedStaticMeshComponent> CrowdLegs;
 	UPROPERTY(VisibleAnywhere) TArray<TObjectPtr<UInstancedStaticMeshComponent>> CrowdBodies;
+	UPROPERTY() TObjectPtr<UInstancedStaticMeshComponent> Seats;
+	UPROPERTY() TObjectPtr<UInstancedStaticMeshComponent> SeatBacks;
+	UPROPERTY() TObjectPtr<UInstancedStaticMeshComponent> CrowdArms;
+	UPROPERTY() TObjectPtr<UInstancedStaticMeshComponent> CrowdThighs;
+	UPROPERTY() TObjectPtr<UInstancedStaticMeshComponent> CrowdShoes;
+	UPROPERTY() TObjectPtr<UInstancedStaticMeshComponent> CrowdHair;
+	UPROPERTY() TObjectPtr<UInstancedStaticMeshComponent> Structure;
+	UPROPERTY() TObjectPtr<UInstancedStaticMeshComponent> LightFixtures;
 
 	// Railings + LED boards (instanced thin slabs)
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UInstancedStaticMeshComponent> Railings;
