@@ -80,8 +80,13 @@
 - [x] M11d-5/6 场馆双色吸音板与无品牌赛事文字标识、角色胸背球衣号码、比赛用球黄蓝白多面板（授权插槽 fallback 保留）
 - [x] M11e-1 打包版有画面启动闭环：M11e-0 修正后全新 Win64 包在 D3D12（3 次冷启动）/D3D11 真实渲染下完整跑通 QuickMatch+Rematch 流程，TacticalTest PASS，主菜单/比赛/战术/结果截图逐张验收，启动器默认指向验收包（M11d 挂起重打包后不再复现，根因边界见 docs/M11e-report.md）
 - [x] M11e-3 角色姿态验收序列：`-PoseSuite` 11 姿态 × 正/侧/背 + Run 相位帧，纯 3D 截图逐张验收（Idle/Block/Dive 构图合格）
-- [x] M11e-4 场馆构图美术：记录台实体记分牌正向可读、裁判台护栏、坐姿观众（ISM）、替补坐姿、球网细网格
-- [x] M11e-5 确定性验收与最终图形包：ShotSuite fallback 修复、57/57 测试、三组 Seed + RematchStress 5 次 PASS、新 Win64 包（905MB）固化 Dist 且打包版 seed 42 冒烟 PASS
+- [x] M11e-4 场馆构图美术：记录台实体记分牌、裁判台护栏、坐姿观众（ISM）、替补坐姿、球网细网格
+- [x] M11e-5 确定性验收与图形包：57/57 测试、三组 Seed + RematchStress、新 Win64 包与打包冒烟（部分验收点被 M11f 复核纠正，见下）
+- [x] M11f-1 战术输入闭环：防守慢动作成对恢复（不再卡 0.3）、半场语义单一化、面板防穿透与滚轮隔离、自由轨迹可调、60/60 自动化测试
+- [x] M11f-2 姿态/镜头：举臂姿态符号翻正（UE 左手系 pitch）、Dive/Recover 视觉根贴地、Block 双手高举、第三人称比赛机位（SpringArm 430/俯角 -8°）、MatchOver 场馆机位
+- [x] M11f-3 菜单/设置：排球图标 1×1 根因修复（Brush.ImageSize）、金分隔线 180×3、SEFocusableButton 真实键盘焦点金框、设置页 ScrollBox、-UIScale 0.8/1.0/1.4 矩阵
+- [x] M11f-4 球与记录台：原创黄蓝白多面板球（运行时面板纹理、无品牌、授权插槽回退）、记录台同侧工作区、实体记分牌文字正向可读（Yaw+90、WorldSize16、TextCenter）、观众朝场心
+- [x] M11f-5 可信验收：ShotSuite 首触必须真实接发（删除摆拍）、超时明确缺项并非零退出、-FiveSetTest 生产五局三胜加速验收（26:24/24:26/26:24/24:26/16:14 → 3:2 PASS）
 - [ ] 战术 AI 完整化（后排进攻细化、自由人）、外部角色动画模型、网络同步
 
 下一步具体行动见 [docs/05-roadmap.md](docs/05-roadmap.md)。
@@ -93,9 +98,11 @@
 - 发布页：**<https://github.com/T720Dsh/spike-elite/releases>**
 - 直链：<https://github.com/T720Dsh/spike-elite/releases/download/v1.0.0/SpikeElite-v1.0.0-win64.zip>（约 283MB）
 
-> 当前 GitHub Release v1.0.0 为 M11b 里程碑构建（约 283MB）。M11c 规则/战术/场馆收口后的新构建位于仓库
-> `Dist\Windows\SpikeElite.exe`（本地打包产物，不入 Git）。如需面向玩家的新版"解压即玩"包，请在
-> [Releases](https://github.com/T720Dsh/spike-elite/releases) 发布新版本——M11c/M11d 均未自动推送远程。
+> 当前 GitHub Release v1.0.0 为早期 M11b 里程碑构建（约 283MB）。**未包含 M11c/M11d/M11e/M11f 的规则、
+> 战术、UI 与场馆收口内容**。M11f 轮按仓库约定不自动 push、不发布；最新的本地打包产物位于
+> `Dist\Windows\SpikeElite.exe`（约 905MB，不入 Git）。如需面向玩家的新版"解压即玩"包，请在
+> [Releases](https://github.com/T720Dsh/spike-elite/releases) 从最新 Dist 产物发布新版本。
+> **不要**下载旧的 v1.0.0 283MB 包——它缺少当前已验收的比赛规则、战术系统和美术内容。
 
 > **M11e-1 打包版渲染已通过验收**：M11e-0 现场修正后的全新 Win64 Development 包（`Dist\Windows\SpikeElite.exe`，
 > exe 332MB，包总量约 939MB）在真实图形 RHI 下正常启动：D3D12 冷启动 3 次 + D3D11 对照，每次均完成
@@ -165,9 +172,9 @@ D:\Epic\UE_5.8\Engine\Build\BatchFiles\RunUAT.bat BuildCookRun `
 ## 规则自动化测试
 
 ```powershell
-# 无地图纯逻辑测试（18 项）：
+# 无地图纯逻辑 + 集成自动化测试（当前 60/60）：
 D:\Epic\UE_5.8\Engine\Binaries\Win64\UnrealEditor.exe .\SpikeElite.uproject `
-  -ExecCmds="Automation RunTests SpikeElite.Tests; Quit" -unattended -nosplash -nopause -log
+  -ExecCmds="Automation RunTests SpikeElite.Tests; Quit" -unattended -nosplash -nopause -NullRHI -log
 ```
 
 ```powershell

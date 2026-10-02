@@ -8,6 +8,52 @@ for milestone tags once a first playable is tagged.
 
 ## [Unreleased]
 
+### M11f 补齐真实交互、人物落地与美术验收（2026-10-02）
+
+M11f-1 战术输入闭环：
+- 防守慢动作成对恢复：EnterDefensePlanning 保存原 TimeDilation，所有退出路径
+  （确认/取消/超时/暂停/回合结束/MatchOver/Rematch/组件退出）都恢复进入前值，
+  不再因 `bWorldFrozen` 未置位而永久停在 0.3。
+- 半场语义单一化：`bBallOnTheirSide` 与 GameMode TeamSide(+1/-1)/发球点一致，
+  建立球队局部坐标辅助，不再散落硬编码符号。
+- 面板防穿透与滚轮隔离：指针坐标统一到 Slate 绝对坐标；指针在二传列表/滚动条上
+  滚轮只滚动列表，在世界瞄准区才改力度；卡片点击仅选中不确认。
+- 自由轨迹真正可调：Q/E 在自由轨迹下调弧线，方向键始终切卡片；进入面板即应用
+  默认战术到 Intent，鼠标/键盘/Intent/预览/执行索引一致。
+- 自动化测试 60/60。
+
+M11f-2 镜头与贴地动作：
+- 姿态符号按 UE 左手系修正（正 pitch=前上/负=后上）；举臂、拦网双手高举、
+  Dive/Recover 视觉根贴地（新增未缩放 VisualRoot，躯干/骨盆随动作下沉扑伸）。
+- 默认第三人称比赛机位（SpringArm 430cm/俯角 -8°）可同时看到受控角色、球、球网
+  与对侧；MatchOver 独立稳定场馆机位。
+
+M11f-3 菜单/设置：
+- 主菜单排球图标根因修复（UMG SetDesiredSizeOverride 在 MyImage 未构建时 no-op，
+  改 Brush.ImageSize 持久化）；金分隔线 180×3 设计单位。
+- SEFocusableButton 真实键盘焦点金框与 Tab/方向键导航；设置页 ScrollBox 受视口
+  约束，UI 0.8/1.0/1.4 均不裁切。
+
+M11f-4 球与记录台：
+- 原创黄蓝白多面板比赛球：运行时 512×256 面板纹理（黄底/白缝/蓝象限/极区），
+  M_TintBall 材质默认纹理 T_VolleyballIcon（TextureObjectParameter 默认 NULL 会
+  导致编译失败回退灰球）；纹理在 BeginPlay 应用；无品牌、授权插槽回退保留。
+- 记录台/两队替补席组织到同一侧边线外工作区；实体记分牌文字正向可读
+  （TextRender Yaw+90、WorldSize16、TextCenter），与 HUD 比分逐次同步。
+- 观众 ISM 按 FacingYaw 朝向球场中心。
+
+M11f-5 可信验收：
+- ShotSuite 首触必须真实接发（合法发球→过网→生产 TryTouchBall/DoTouch），删除
+  20s 强制摆 Receive 的摆拍 fallback；超时列出缺项、Error+DevVerify FAIL、
+  非零退出码。
+- -FiveSetTest：Development-only 加速五局三胜验收，全部沿生产 AwardPoint→
+  CheckSetWin（IsSetWon/IsMatchWon）与 SetOver→StartNextSet 链路推进，不拼结果
+  数组。实测 26:24 / 24:26 / 26:24 / 24:26 / 16:14 → 3:2 RESULT=PASS。
+
+> 复核纠正：M11e-5 曾以"20s fallback 摆拍"通过 first-receive 截图、曾把
+> 1920×1080 请求实际 1423×889 视为通过、记录台文字曾板外/镜像——均已在本轮
+> 修复并逐张 Read 最新截图复验；历史报告保留但以本轮为准。
+
 ### M11e-1 打包版有画面启动闭环（2026-10-02）
 
 M11e-0 现场修正后的全新 Win64 Development 包（`Dist\Windows\SpikeElite.exe`，exe 332MB / 包 939MB）
@@ -50,12 +96,16 @@ M11e-0 现场修正后的全新 Win64 Development 包（`Dist\Windows\SpikeElite
 
 - ShotSuite 偶发停滞修复：`first_receive` 增加 20s 确定性 fallback（防方第一球员固定 Receive
   姿态摆拍），日志口径改为 "shot groups"。
+  > **已被 M11f-5 复核纠正**：该 20s fallback 属于"摆拍伪装真实事件"，已在 M11f-5 删除；
+  > 首触截图现在必须来自真实发球→过网→生产 TryTouchBall/DoTouch 路径。
 - 验收：自动化测试 57/57（0 fail）；三组 Seed（1/42/4242）QuickMatch 各完成 MatchOver→
   Rematch→第二场 MatchOver→退出，DevVerifyFailures=0；RematchStress 5 次审计 PASS
   （court/arena/ball/officials/rotwidget/scoreboard 各 1、chars=12、validActors=33 稳定）。
 - 分辨率：`-ResX/-ResY/-ForceRes/r.SetRes` 在本机 unattended 环境下均被桌面分辨率覆盖，
   UI 使用 UMG 锚点/DPI 自适应，1707×1067 运行 DevVerifyFailures=0（1280×720 布局已在
   M11d/M11e-1 打包版截图验收）。
+  > **复核纠正**：1920×1080 请求在本机实际输出为 1423×889（桌面可用区限制），只记
+  > NOT RUN，不得标 1080p PASS；完整分辨率/UI 缩放矩阵在 M11f-3 逐项验收。
 - 最终包：`BuildCookRun -skipcook -build -stage -pak -archive` 生成新 Win64 Development 包
   （`Saved\Archive\Windows`，48 文件 / 905MB），固化 `Dist\Windows`；打包版 seed 42 冒烟 PASS
   （50s、MatchOver→Confirm-cancel→第二场→退出、DevVerifyFailures=0），日志仅引擎环境噪声
