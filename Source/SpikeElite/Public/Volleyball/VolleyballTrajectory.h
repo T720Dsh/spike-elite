@@ -138,12 +138,19 @@ namespace SEVolleyballTrajectory
 	 * with the player's actual timing error (0 = perfect => identical velocity).
 	 *
 	 * Parameter contract (one consistent scheme, no UI/exec split):
-	 *  - TargetLocation + DesiredFlightTime solve the base velocity
-	 *    (SolveVelocity), then Power scales that velocity — so changing Power
-	 *    immediately changes the dotted line and PredictedLanding.
+	 *  - ApexHeight <= 0 : TargetLocation + DesiredFlightTime solve the base
+	 *    velocity (SolveVelocity), then Power scales that velocity — so changing
+	 *    Power immediately changes the dotted line and PredictedLanding.
+	 *  - ApexHeight > 0  : the apex height ABOVE the contact point constrains the
+	 *    trajectory (rise = sqrt(2H/g), fall = apex->target); Target is still the
+	 *    landing spot and the resulting flight time is reported through
+	 *    FlightTime. Power scales the solved velocity exactly like the other
+	 *    scheme. The set-play table's arc values therefore really shape the shot.
 	 *  - TimingError (±1) rotates the solved velocity (yaw/pitch) and scales
 	 *    power slightly; it is applied INSIDE this function, so the recorded
 	 *    trajectory always matches the executed strike.
+	 *  - ApexAboveContact is clamped at 0 (a downward strike never reports a
+	 *    negative arc).
 	 */
 	struct SPIKEELITE_API FShotSolution
 	{

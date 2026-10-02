@@ -2,6 +2,7 @@
 #include "UI/TacticalHUDWidget.h"
 #include "UI/SEUiStyle.h"
 #include "SpikeEliteCharacter.h"
+#include "Framework/Application/SlateApplication.h"
 #include "Components/TextBlock.h"
 #include "Components/Button.h"
 #include "Components/Border.h"
@@ -259,19 +260,20 @@ void UTacticalHUDWidget::HideAll()
 
 bool UTacticalHUDWidget::IsPointerOverPanel() const
 {
-	float MX = 0.f, MY = 0.f;
-	if (!GetOwningPlayer() || !GetOwningPlayer()->GetMousePosition(MX, MY))
-	{
-		return false;
-	}
-	const FVector2D Pos(MX, MY);
+	// M11f-1: viewport-pixel mouse coordinates cannot be compared against the
+	// cached Slate ABSOLUTE geometry (which includes the window position and DPI
+	// scale) — the old code mixed both spaces and broke when the game ran
+	// windowed or the OS scaled the UI. The cursor's absolute screen position is
+	// the same space IsUnderLocation expects, so window placement, system DPI and
+	// the UMG ApplicationScale all behave correctly.
+	const FVector2D CursorPos = FSlateApplication::Get().GetCursorPos();
 	const UBorder* Borders[3] = { AttackBorder, SetBorder, DefenseBorder };
 	for (const UBorder* Border : Borders)
 	{
 		if (Border && Border->GetVisibility() == ESlateVisibility::Visible)
 		{
 			const FGeometry& G = Border->GetCachedGeometry();
-			if (G.IsUnderLocation(Pos)) { return true; }
+			if (G.IsUnderLocation(CursorPos)) { return true; }
 		}
 	}
 	return false;

@@ -11,6 +11,9 @@
 #include "Volleyball/VolleyballRules.h"
 #include "Volleyball/VolleyballTrajectory.h"
 #include "Volleyball/SetPlay.h"
+#include "UI/TacticalContactComponent.h"
+#include "Engine/World.h"
+#include "GameFramework/WorldSettings.h"
 
 
 #if WITH_DEV_AUTOMATION_TESTS
@@ -1212,6 +1215,116 @@ bool FSEMatchFlowFiveSets::RunTest(const FString& Parameters)
 	BeginRally(S, EVolleyballTeam::TeamB);
 	TestTrue(TEXT("rematch settle works"), SettleRally(S));
 	TestFalse(TEXT("rematch rally settled once"), S.bBallInPlay);
+	return true;
+}
+
+// ================================================================ M11f-1: 半场语义 / 弧高契约 / 防守恢复
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSEDefenseHalfSideSemantics, "SpikeElite.Tests.DefenseHalfSideSemantics",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FSEDefenseHalfSideSemantics::RunTest(const FString& Parameters)
+{
+	// M11f-1: A plays +X (TeamSide=+1, serve point +1200), B plays -X
+	// (TeamSide=-1, serve point -1200) — matching GameMode::OnBallCrossedNet
+	// (X<0 hands possession to B). The tactical component's "ball on THEIR side"
+	// check must use THIS semantic, not the old mirrored A:X<0 / B:X>0.
+	TestTrue(TEXT("A's own half is +X"), SEVolleyballRules::IsOnTeamHalf(500.f, EVolleyballTeam::TeamA));
+	TestFalse(TEXT("-X is not A's half"), SEVolleyballRules::IsOnTeamHalf(-500.f, EVolleyballTeam::TeamA));
+	TestTrue(TEXT("B's own half is -X"), SEVolleyballRules::IsOnTeamHalf(-500.f, EVolleyballTeam::TeamB));
+	TestFalse(TEXT("+X is not B's half"), SEVolleyballRules::IsOnTeamHalf(500.f, EVolleyballTeam::TeamB));
+	// Sanity on the sign helper itself.
+	TestEqual(TEXT("TeamA side sign +1"), SEVolleyballRules::TeamSideSign(EVolleyballTeam::TeamA), 1.f);
+	TestEqual(TEXT("TeamB side sign -1"), SEVolleyballRules::TeamSideSign(EVolleyballTeam::TeamB), -1.f);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSETacticalApexHeightShapesTrajectory, "SpikeElite.Tests.TacticalApexHeightShapesTrajectory",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FSETacticalApexHeightShapesTrajectory::RunTest(const FString& Parameters)
+{
+	// M11f-1: ApexHeight must really participate in the shared solver — the
+	// set-play table's arc values are not display-only. Same start/target/power,
+	// different ApexHeight => a genuinely different solved trajectory, and the
+	// apex-constrained shot actually apexes near the requested height.
+	const FVector Start(150.f, 0.f, 240.f);
+	FShotIntent I;
+	I.TouchType = EBallTouchType::Set;
+	I.TargetLocation = FVector(350.f, 120.f, 0.f);
+	I.DesiredFlightTime = 0.9f;
+	I.Power = 1.f;
+
+	I.ApexHeight = 0.f;   // flight-time scheme (historical contract)
+	const auto S0 = SEVolleyballTrajectory::BuildShotSolution(Start, I, 0.f);
+	I.ApexHeight = 400.f; // apex-constrained scheme
+	const auto SH = SEVolleyballTrajectory::BuildShotSolution(Start, I, 0.f);
+
+	TestTrue(TEXT("both schemes produce valid solutions"), S0.bValid && SH.bValid);
+	TestFalse(TEXT("apex height changes the solved trajectory"),
+		S0.InitialVelocity.Equals(SH.InitialVelocity, 0.5f));
+	TestTrue(TEXT("apex-constrained shot apexes near the request"),
+		FMath::Abs(SH.ApexAboveContact - 400.f) < 60.f);
+	TestTrue(TEXT("target still reached (in bounds)"), SH.bInBounds);
+
+	// A downward strike's apex is at/below the contact point: the reported arc
+	// must never be negative, and the plan stays valid.
+	FShotIntent Down;
+	Down.TouchType = EBallTouchType::Attack;
+	Down.TargetLocation = FVector(-520.f, 0.f, 0.f);
+	Down.DesiredFlightTime = 0.6f;
+	Down.Power = 1.f;
+	const auto SD = SEVolleyballTrajectory::BuildShotSolution(FVector(150.f, 0.f, 320.f), Down, 0.f);
+	TestTrue(TEXT("downward strike stays valid"), SD.bValid);
+	TestTrue(TEXT("downward strike arc never negative"), SD.ApexAboveContact >= 0.f);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSETacticalDefenseRestoresDilation, "SpikeElite.Tests.TacticalDefenseRestoresDilation",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FSETacticalDefenseRestoresDilation::RunTest(const FString& Parameters)
+{
+	// M11f-1 component-level regression (not a bare bool): EnterDefensePlanning
+	// slows the world to 0.3; EVERY exit path (here RestoreWorldState, which
+	// ConfirmDefensePlan/Cancel/timeout all funnel through) must restore the
+	// exact pre-entry dilation. A second entry while the panel is open must not
+	// clobber the saved value, and a non-1 external dilation must survive.
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false, TEXT("SE_TacticalDefenseTest"));
+	if (!TestNotNull(TEXT("test world"), World)) { return false; }
+	UTacticalContactComponent* Comp = NewObject<UTacticalContactComponent>(World);
+	if (!TestNotNull(TEXT("tactical component"), Comp)) { World->DestroyWorld(false); return false; }
+	Comp->RegisterComponentWithWorld(World);
+	TestTrue(TEXT("component begins in Normal state"), Comp->State == ETacticalState::Normal);
+
+	// Case 1: dilation 1.0 -> defense 0.3 -> restore back to 1.0.
+	// (Production exits — ConfirmDefensePlan / Cancel / timeout — call
+	// RestoreWorldState and THEN set State=Normal; the test mirrors that pair.)
+	World->GetWorldSettings()->TimeDilation = 1.f;
+	Comp->EnterDefensePlanningForTest();
+	TestEqual(TEXT("defense planning slows world to 0.3"), World->GetWorldSettings()->TimeDilation, 0.3f);
+	TestTrue(TEXT("defense panel is open"), Comp->IsDefensePlanning());
+	Comp->RestoreWorldStateForTest();
+	Comp->State = ETacticalState::Normal;
+	TestEqual(TEXT("exit restores the original dilation"), World->GetWorldSettings()->TimeDilation, 1.f);
+	TestFalse(TEXT("component leaves defense planning"), Comp->IsDefensePlanning());
+
+	// Case 2: re-entry while already open must not clobber the saved value.
+	World->GetWorldSettings()->TimeDilation = 1.f;
+	Comp->EnterDefensePlanningForTest();
+	Comp->EnterDefensePlanningForTest();   // no-op re-entry (state already DefensePlanning)
+	TestEqual(TEXT("still slowed to 0.3"), World->GetWorldSettings()->TimeDilation, 0.3f);
+	Comp->RestoreWorldStateForTest();
+	Comp->State = ETacticalState::Normal;
+	TestEqual(TEXT("restore still returns to 1.0 after re-entry"), World->GetWorldSettings()->TimeDilation, 1.f);
+
+	// Case 3: an external non-1 dilation (e.g. a cinematic slow-mo) must survive.
+	World->GetWorldSettings()->TimeDilation = 0.5f;
+	Comp->EnterDefensePlanningForTest();
+	TestEqual(TEXT("defense overrides 0.5 -> 0.3"), World->GetWorldSettings()->TimeDilation, 0.3f);
+	Comp->RestoreWorldStateForTest();
+	Comp->State = ETacticalState::Normal;
+	TestEqual(TEXT("external 0.5 dilation restored, not forced to 1.0"),
+		World->GetWorldSettings()->TimeDilation, 0.5f);
+
+	World->DestroyWorld(false);
 	return true;
 }
 

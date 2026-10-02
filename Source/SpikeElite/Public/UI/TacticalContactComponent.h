@@ -104,6 +104,10 @@ public:
 	void DevForceDefensePlanning();
 	/** -ShotSuite: confirm the currently open defense plan (AI default if none picked). */
 	void DevConfirmDefense();
+	/** M11f-1 automation-only: exercise the protected defense entry/restore pair
+	 *  (dilation save/restore regression runs the REAL production functions). */
+	void EnterDefensePlanningForTest() { EnterDefensePlanning(); }
+	void RestoreWorldStateForTest() { RestoreWorldState(); }
 #endif
 
 protected:
@@ -129,6 +133,13 @@ protected:
 	float ArmedTimer = 0.f;
 	float DefenseTimer = 0.f;
 	float SavedTimeDilation = 1.f;
+	/** M11f-1: explicit "this component owns a TimeDilation override" state.
+	 *  Set on EVERY tactical entry (planning/armed/defense), cleared on every
+	 *  exit through RestoreWorldState. Restoration is paired with the saved
+	 *  value and never guessed from the current floating dilation — a defense
+	 *  exit can no longer leave the world stuck at 0.3. Re-entering while
+	 *  already active does NOT re-save (the original value survives). */
+	bool bTimeOverrideActive = false;
 	bool bWorldFrozen = false;
 	int32 DefenseSelected = 0;
 

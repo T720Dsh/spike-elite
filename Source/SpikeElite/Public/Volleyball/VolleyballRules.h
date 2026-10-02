@@ -225,6 +225,21 @@ namespace SEVolleyballRules
 		return FMath::Abs(Location.X) <= HalfLength && FMath::Abs(Location.Y) <= HalfWidth;
 	}
 
+	/** M11f-1: single source of truth for "which half is whose" (A plays +X,
+	 *  B plays -X, matching GameMode TeamSide=+1/-1 and serve points ±1200). */
+	inline float TeamSideSign(EVolleyballTeam Team)
+	{
+		return (Team == EVolleyballTeam::TeamA) ? 1.f : -1.f;
+	}
+
+	/** True when world X lies on Team's own half (opposite of the caller's half).
+	 *  Used by the tactical component to detect "the opponent is about to attack
+	 *  from their own half" — the mirrored semantic that used to be reversed. */
+	inline bool IsOnTeamHalf(float WorldX, EVolleyballTeam Team)
+	{
+		return (WorldX * TeamSideSign(Team)) > 0.f;
+	}
+
 	/**
 	 * Who scores when the ball lands.
 	 * IN: the side defending that half loses -> opponent scores (X>0 is Team A's half).

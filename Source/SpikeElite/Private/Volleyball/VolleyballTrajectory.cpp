@@ -104,28 +104,69 @@ SEVolleyballTrajectory::FShotSolution SEVolleyballTrajectory::BuildShotSolution(
 	FShotSolution S;
 	const float FlightTime = FMath::Clamp(Intent.DesiredFlightTime, 0.3f, 3.0f);
 
-	// Target + flight time solve the base velocity; Power scales it so the
-	// dotted preview and PredictedLanding react to power changes immediately.
-	const FVector Base = SolveVelocity(Start, Intent.TargetLocation, FlightTime);
-	FVector Vel = Base * FMath::Clamp(Intent.Power, 0.1f, 1.0f);
+	// M11f-1: TWO consistent schemes, chosen by ApexHeight, both shared by the
+	// dotted preview and the GameMode's final strike (no UI/exec split):
+	//  - ApexHeight <= 0 : Target + DesiredFlightTime solve the base velocity
+	//    (the historical contract — power scales it, timing rotates it).
+	//  - ApexHeight > 0  : the apex height ABOVE the contact point really shapes
+	//    the trajectory. Rise time = sqrt(2H/g); the fall time = apex->target.
+	//    The set-play table's arc values are therefore NOT display-only: they
+	//    are part of the solved initial velocity. Target stays the landing spot,
+	//    DesiredFlightTime remains the UI reference and the resulting flight
+	//    time is reported back. Power scales the whole vector exactly like the
+	//    flight-time scheme, so power still re-shapes the dotted line instantly.
+	FVector Vel;
+	if (Intent.ApexHeight > 0.5f)
+	{
+		const float H = FMath::Max(Intent.ApexHeight, 10.f);
+		const float RiseTime = FMath::Sqrt(2.f * H / BallGravity);
+		const float FallH = Start.Z + H - Intent.TargetLocation.Z;
+		if (FallH >= 0.f)
+		{
+			const float FallTime = FMath::Sqrt(2.f * FallH / BallGravity);
+			const float TotalT = RiseTime + FallTime;
+			if (TotalT > 0.001f)
+			{
+				const FVector Delta = Intent.TargetLocation - Start;
+				Vel.X = Delta.X / TotalT;
+				Vel.Y = Delta.Y / TotalT;
+				Vel.Z = BallGravity * RiseTime;
+			}
+		}
+		if (Vel.IsNearlyZero())
+		{
+			// Target above the requested apex (or degenerate input): fall back to
+			// the flight-time solve so the plan stays valid and predictable.
+			Vel = SolveVelocity(Start, Intent.TargetLocation, FlightTime);
+		}
+	}
+	else
+	{
+		// Target + flight time solve the base velocity; Power scales it so the
+		// dotted preview and PredictedLanding react to power changes immediately.
+		Vel = SolveVelocity(Start, Intent.TargetLocation, FlightTime);
+	}
+	FVector VelScaled = Vel * FMath::Clamp(Intent.Power, 0.1f, 1.0f);
 
 	// Timing error is applied INSIDE the shared solver: early = negative,
 	// late = positive, symmetric around 0, and Perfect = exactly 0.
 	const float Err = FMath::Clamp(TimingError, -1.f, 1.f);
 	if (FMath::Abs(Err) > 0.0001f)
 	{
-		FRotator Rot = Vel.Rotation();
+		FRotator Rot = VelScaled.Rotation();
 		Rot.Yaw += Err * 14.f;   // early/late -> lateral bias
 		Rot.Pitch -= Err * 6.f;  // early/late -> flatter/lofted
-		Vel = Rot.Vector() * Vel.Size();
+		VelScaled = Rot.Vector() * VelScaled.Size();
 	}
 
-	S.InitialVelocity = Vel;
-	S.Trajectory = Predict(Start, Vel);
+	S.InitialVelocity = VelScaled;
+	S.Trajectory = Predict(Start, VelScaled);
 	S.Landing = S.Trajectory.Landing;
 	S.FlightTime = S.Trajectory.FlightTime;
 	S.Apex = S.Trajectory.Apex;
-	S.ApexAboveContact = S.Trajectory.Apex.Z - Start.Z;
+	// M11f-1: a downward strike's apex is at (or below) the contact point — the
+	// reported arc-above-contact must never go negative for a legal shot.
+	S.ApexAboveContact = FMath::Max(S.Trajectory.Apex.Z - Start.Z, 0.f);
 	S.bCrossedNet = S.Trajectory.bCrossedNet;
 	S.bInBounds = S.Trajectory.bInBounds;
 	S.bValid = S.Trajectory.bValid;
