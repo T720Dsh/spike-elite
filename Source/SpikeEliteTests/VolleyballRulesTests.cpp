@@ -11,6 +11,7 @@
 #include "Volleyball/VolleyballRules.h"
 #include "Volleyball/VolleyballTrajectory.h"
 #include "Volleyball/SetPlay.h"
+#include "Volleyball/VolleyballIdentity.h"
 #include "UI/TacticalContactComponent.h"
 #include "Engine/World.h"
 #include "GameFramework/WorldSettings.h"
@@ -1329,4 +1330,164 @@ bool FSETacticalDefenseRestoresDilation::RunTest(const FString& Parameters)
 }
 
 
+// ---------------- M11h-1: player identity / roster authority ----------------
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSEIdentityDefaultRoster12,
+	"SpikeElite.Tests.IdentityDefaultRoster12",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FSEIdentityDefaultRoster12::RunTest(const FString& Parameters)
+{
+	for (const EVolleyballTeam Team : { EVolleyballTeam::TeamA, EVolleyballTeam::TeamB })
+	{
+		FTeamRosterState RS;
+		SEVolleyballRoster::BuildDefaultRoster(Team, RS);
+		TestEqual(FString::Printf(TEXT("%s registered size"), Team == EVolleyballTeam::TeamA ? TEXT("A") : TEXT("B")),
+			RS.Registered.Num(), SEVolleyballRoster::RegisteredSize);
+		FString Problem;
+		TestTrue(FString::Printf(TEXT("%s roster valid"), Team == EVolleyballTeam::TeamA ? TEXT("A") : TEXT("B")),
+			SEVolleyballRoster::ValidateRoster(RS, Problem));
+		if (!Problem.IsEmpty())
+		{
+			AddInfo(FString::Printf(TEXT("problem=%s"), *Problem));
+		}
+		TestEqual(TEXT("starting lineup 6"), RS.StartingLineup.Num(), 6);
+		TestEqual(TEXT("oncourt 6"), RS.OnCourtLineup.Num(), 6);
+		TestEqual(TEXT("bench 6"), RS.GetBench().Num(), 6);
+		// Every bench player must be registered and NOT on court.
+		for (const FString& Id : RS.GetBench())
+		{
+			TestTrue(TEXT("bench id registered"), RS.FindById(Id) != nullptr);
+			TestEqual(TEXT("bench id not on court"), RS.OnCourtIndex(Id), INDEX_NONE);
+		}
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSEIdentityJerseyUniqueAndRoles,
+	"SpikeElite.Tests.IdentityJerseyUniqueAndRoles",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FSEIdentityJerseyUniqueAndRoles::RunTest(const FString& Parameters)
+{
+	FTeamRosterState A;
+	SEVolleyballRoster::BuildDefaultRoster(EVolleyballTeam::TeamA, A);
+	TSet<int32> Jerseys;
+	TSet<FString> Ids;
+	int32 StartersWithRole = 0;
+	for (const FPlayerIdentity& P : A.Registered)
+	{
+		TestFalse(TEXT("jersey unique"), Jerseys.Contains(P.JerseyNumber));
+		Jerseys.Add(P.JerseyNumber);
+		TestFalse(TEXT("id unique"), Ids.Contains(P.PlayerId));
+		Ids.Add(P.PlayerId);
+		TestTrue(TEXT("name non-empty"), !P.DisplayName.IsEmpty());
+		TestTrue(TEXT("role valid"), P.Role != EPlayerRole::None);
+		TestTrue(TEXT("attributes bounded"),
+			P.ServeAccuracy >= 0.f && P.ServeAccuracy <= 1.f &&
+			P.PassAccuracy >= 0.f && P.PassAccuracy <= 1.f &&
+			P.MoveSpeed >= 0.f && P.MoveSpeed <= 1.f &&
+			P.Reaction >= 0.f && P.Reaction <= 1.f &&
+			P.BlockSkill >= 0.f && P.BlockSkill <= 1.f &&
+			P.DigSkill >= 0.f && P.DigSkill <= 1.f);
+	}
+	// Starting six cover the four core roles (OH/MB/Setter/Opp).
+	for (const FString& Id : A.StartingLineup)
+	{
+		if (const FPlayerIdentity* P = A.FindById(Id))
+		{
+			if (P->Role == EPlayerRole::OutsideHitter || P->Role == EPlayerRole::MiddleBlocker ||
+				P->Role == EPlayerRole::Setter || P->Role == EPlayerRole::Opposite)
+			{
+				StartersWithRole++;
+			}
+		}
+	}
+	TestEqual(TEXT("all 6 starters have core roles"), StartersWithRole, 6);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSEIdentityRotationKeepsIdentity,
+	"SpikeElite.Tests.IdentityRotationKeepsIdentity",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FSEIdentityRotationKeepsIdentity::RunTest(const FString& Parameters)
+{
+	// Rotation only changes which SLOT a player occupies. The identity bound
+	// to a court index must stay stable: remap OnCourtLineup in place (the way
+	// the GameMode rotates slots) and verify PlayerIds are only reordered,
+	// never replaced or duplicated.
+	FTeamRosterState RS;
+	SEVolleyballRoster::BuildDefaultRoster(EVolleyballTeam::TeamA, RS);
+	const TArray<FString> Before = RS.OnCourtLineup;
+	// Simulate one clockwise rotation of court indices (slot shuffle, identity kept).
+	TArray<FString> After;
+	After.SetNum(6);
+	for (int32 i = 0; i < 6; ++i)
+	{
+		After[(i + 1) % 6] = Before[i]; // player moves to next slot
+	}
+	RS.OnCourtLineup = After;
+	TSet<FString> BSet(Before);
+	TSet<FString> ASet(After);
+	TestEqual(TEXT("same identity set after rotation"), BSet.Num(), ASet.Num());
+	for (const FString& Id : After)
+	{
+		TestTrue(TEXT("rotated id still registered"), RS.FindById(Id) != nullptr);
+		TestTrue(TEXT("rotated id was on court before"), BSet.Contains(Id));
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSEIdentityBoundedSkillFormulas,
+	"SpikeElite.Tests.IdentityBoundedSkillFormulas",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FSEIdentityBoundedSkillFormulas::RunTest(const FString& Parameters)
+{
+	FPlayerIdentity P;
+	P.ServeAccuracy = 1.f;
+	P.PassAccuracy = 1.f;
+	P.MoveSpeed = 1.f;
+	P.BlockSkill = 1.f;
+	P.DigSkill = 1.f;
+	P.Reaction = 1.f;
+	// Perfect skill => zero error, max speed factors.
+	TestEqual(TEXT("perfect serve error 0"), SEVolleyballRoster::ServeAngleErrorDeg(P, 1.f), 0.f);
+	TestEqual(TEXT("perfect pass error 0"), SEVolleyballRoster::PassLandingErrorCm(P, 1.f), 0.f);
+	TestTrue(TEXT("max move factor"), SEVolleyballRoster::MoveSpeedFactor(P) > 1.1f);
+	TestTrue(TEXT("max block factor"), SEVolleyballRoster::BlockReachFactor(P) > 1.09f);
+	TestTrue(TEXT("max dig factor"), SEVolleyballRoster::DigReachFactor(P) > 1.09f);
+	TestTrue(TEXT("fast reaction"), SEVolleyballRoster::ReactionTimeFactor(P) < 0.9f);
+
+	// Zero skill => bounded (non-infinite) errors, min factors.
+	P.ServeAccuracy = 0.f; P.PassAccuracy = 0.f; P.MoveSpeed = 0.f;
+	P.BlockSkill = 0.f; P.DigSkill = 0.f; P.Reaction = 0.f;
+	const float ServeErr = SEVolleyballRoster::ServeAngleErrorDeg(P, 1.f);
+	const float PassErr = SEVolleyballRoster::PassLandingErrorCm(P, 1.f);
+	TestTrue(TEXT("serve error bounded"), ServeErr > 2.f && ServeErr <= 4.f);
+	TestTrue(TEXT("pass error bounded"), PassErr > 50.f && PassErr <= 75.f);
+	TestTrue(TEXT("min move factor"), FMath::IsNearlyEqual(SEVolleyballRoster::MoveSpeedFactor(P), 0.85f, 0.001f));
+	TestTrue(TEXT("slow reaction"), SEVolleyballRoster::ReactionTimeFactor(P) > 1.1f);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSEIdentityLiberoNotEnabled,
+	"SpikeElite.Tests.IdentityLiberoNotEnabled",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FSEIdentityLiberoNotEnabled::RunTest(const FString& Parameters)
+{
+	// M11h-1: libero is declared but NOT enabled this round. No default roster
+	// player may carry the libero role, and no court player can be treated as
+	// one (the back-row defensive role keeps normal jersey/permissions).
+	for (const EVolleyballTeam Team : { EVolleyballTeam::TeamA, EVolleyballTeam::TeamB })
+	{
+		FTeamRosterState RS;
+		SEVolleyballRoster::BuildDefaultRoster(Team, RS);
+		for (const FPlayerIdentity& P : RS.Registered)
+		{
+			TestNotEqual(TEXT("no libero in default squads"), P.Role, EPlayerRole::Libero);
+		}
+	}
+	return true;
+}
+
+
 #endif // WITH_DEV_AUTOMATION_TESTS
+

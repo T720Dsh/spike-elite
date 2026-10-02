@@ -4,6 +4,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/GameModeBase.h"
 #include "Volleyball/VolleyballEnums.h"
+#include "Volleyball/VolleyballIdentity.h"
 #include "Volleyball/VolleyballRules.h"
 #include "Volleyball/VolleyballTrajectory.h"
 #include "SpikeEliteGameMode.generated.h"
@@ -54,6 +55,15 @@ public:
 	 *  so a side-out only advances the receiving team that gained the serve. */
 	int32 TeamARotation = 1;
 	int32 TeamBRotation = 1;
+
+	/** M11h-1: authoritative rosters (12 registered, 6 starting / on court).
+	 *  Rotation/substitution change slots, never PlayerId/identity/stats owner. */
+	FTeamRosterState RosterA;
+	FTeamRosterState RosterB;
+
+	/** M11h-1: identity of the character's court player (or nullptr for bench/
+	 *  non-roster actors). Team decided from the character's TeamSide. */
+	const FPlayerIdentity* FindIdentity(EVolleyballTeam Team, const ASpikeEliteCharacter* C) const;
 
 	/** M11d-3: previous serving team, so the rotation HUD can flag side-out 轮转. */
 	EVolleyballTeam LastRotationServeTeam = EVolleyballTeam::None;

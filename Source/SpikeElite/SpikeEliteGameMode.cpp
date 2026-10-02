@@ -178,6 +178,16 @@ void ASpikeEliteGameMode::StartMatch()
 	TeamAPlayers.Reset();
 	TeamBPlayers.Reset();
 	SetScoresA.Reset();
+
+	// M11h-1: authoritative 12-player rosters + starting lineups (original
+	// identities only; rotation later changes slots, never PlayerId).
+	SEVolleyballRoster::BuildDefaultRoster(EVolleyballTeam::TeamA, RosterA);
+	SEVolleyballRoster::BuildDefaultRoster(EVolleyballTeam::TeamB, RosterB);
+	{
+		FString ProblemA, ProblemB;
+		if (!SEVolleyballRoster::ValidateRoster(RosterA, ProblemA)) { UE_LOG(LogVolleyballRules, Warning, TEXT("RosterA invalid: %s"), *ProblemA); }
+		if (!SEVolleyballRoster::ValidateRoster(RosterB, ProblemB)) { UE_LOG(LogVolleyballRules, Warning, TEXT("RosterB invalid: %s"), *ProblemB); }
+	}
 	SetScoresB.Reset();
 	SetScoresA.Add(0);
 	SetScoresB.Add(0);
@@ -1065,6 +1075,21 @@ bool ASpikeEliteGameMode::RequestServe(ASpikeEliteCharacter* Server)
 	// Legal: enter the toss.
 	TossDir = (Team == EVolleyballTeam::TeamA) ? FVector(-0.878f, 0.f, 0.479f) : FVector(0.878f, 0.f, 0.479f);
 	TossPower = 1300.f;
+	// M11h-1: bounded serve-placement error from the server's identity. Skill
+	// never decides a hit; it only adds a seeded angle error (0 at 1.0 accuracy).
+	if (const FPlayerIdentity* Id = FindIdentity(Team, Server))
+	{
+		const float Err01 = AIStream.GetFraction() * 2.f - 1.f; // -1..1, seeded
+		const float ErrDeg = SEVolleyballRoster::ServeAngleErrorDeg(*Id, Err01);
+		if (!FMath::IsNearlyZero(ErrDeg))
+		{
+			// Lateral error only (rotate about Z); vertical (power) untouched here.
+			const float Dir = AIStream.GetFraction() >= 0.5f ? 1.f : -1.f;
+			TossDir = TossDir.RotateAngleAxis(Dir * ErrDeg, FVector::UpVector);
+		}
+		UE_LOG(LogVolleyballRules, Log, TEXT("Serve by %s (accuracy=%.2f, err=%.1f deg)"),
+			*Id->PlayerId, Id->ServeAccuracy, ErrDeg);
+	}
 	TossTimer = 0.6f;
 	bInToss = true;
 	ServerPlayerIndex = GetPlayerIndex(Team, Server);
@@ -1421,6 +1446,15 @@ EVolleyballTeam ASpikeEliteGameMode::TeamOf(const ASpikeEliteCharacter* Player) 
 {
 	if (!Player) return EVolleyballTeam::None;
 	return (Player->TeamSide > 0) ? EVolleyballTeam::TeamA : EVolleyballTeam::TeamB;
+}
+
+const FPlayerIdentity* ASpikeEliteGameMode::FindIdentity(EVolleyballTeam Team, const ASpikeEliteCharacter* C) const
+{
+	if (!C || Team == EVolleyballTeam::None) { return nullptr; }
+	const FTeamRosterState& RS = (Team == EVolleyballTeam::TeamA) ? RosterA : RosterB;
+	const int32 CourtIndex = C->PlayerId; // court array index (0..5), stable per actor
+	if (!RS.OnCourtLineup.IsValidIndex(CourtIndex)) { return nullptr; }
+	return RS.FindById(RS.OnCourtLineup[CourtIndex]);
 }
 
 #if !UE_BUILD_SHIPPING
