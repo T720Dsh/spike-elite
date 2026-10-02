@@ -31,6 +31,7 @@ public:
 	void Refresh(const FRotationViewState& State);
 	void ToggleVisible();
 	virtual void NativeConstruct() override;
+	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
 
 protected:
 	virtual TSharedRef<SWidget> RebuildWidget() override;
@@ -45,6 +46,9 @@ protected:
 	/** 12 slot cells: 0..5 Team A (P1..P6), 6..11 Team B (P1..P6). */
 	UPROPERTY() TArray<TObjectPtr<UImage>> SlotDots;
 	UPROPERTY() TArray<TObjectPtr<UTextBlock>> SlotTexts;
+	UPROPERTY() TArray<TObjectPtr<UImage>> ServeMarkers;
 
 	FString LastSignature;
+	FString BaseTitle;
+	float RotationNoticeSeconds = 0.f;
 };

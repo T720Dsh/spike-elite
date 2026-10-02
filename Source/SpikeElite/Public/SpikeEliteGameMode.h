@@ -56,7 +56,7 @@ public:
 	int32 TeamBRotation = 1;
 
 	/** M11d-3: previous serving team, so the rotation HUD can flag side-out 轮转. */
-	mutable EVolleyballTeam LastRotationServeTeam = EVolleyballTeam::None;
+	EVolleyballTeam LastRotationServeTeam = EVolleyballTeam::None;
 
 	/** Current serving team's rotation index (what the HUD shows). */
 	int32 GetServingRotation() const { return (ServingTeam == EVolleyballTeam::TeamA) ? TeamARotation : TeamBRotation; }

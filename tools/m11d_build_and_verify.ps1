@@ -1,90 +1,82 @@
 # SPDX-License-Identifier: MIT
-# M11d — 编译 + 自动化测试 + 冒烟 + 打包 一键脚本
-# 用法: powershell -ExecutionPolicy Bypass -File tools\m11d_build_and_verify.ps1
-# 说明: 每步输出 PASS/FAIL 与判据；任一步 FAIL 时停止，避免堆叠。
+param([switch]$SkipPackage)
+$ErrorActionPreference = 'Stop'
+$Repo = Split-Path -Parent $PSScriptRoot
+$Proj = Join-Path $Repo 'SpikeElite.uproject'
+$Engine = 'D:\Epic\UE_5.8\Engine'
+$DotNet = Join-Path $Engine 'Binaries\ThirdParty\DotNet\10.0\win-x64\dotnet.exe'
+$UBT = Join-Path $Engine 'Binaries\DotNet\UnrealBuildTool\UnrealBuildTool.dll'
+$Editor = Join-Path $Engine 'Binaries\Win64\UnrealEditor.exe'
+$RunUAT = Join-Path $Engine 'Build\BatchFiles\RunUAT.bat'
+$LogDir = Join-Path $Repo ('Saved\Logs\M11d_verify_' + (Get-Date -Format 'yyyyMMdd_HHmmss_fff'))
+New-Item -ItemType Directory -Path $LogDir | Out-Null
+Set-Location $Repo
 
-$ErrorActionPreference = "Continue"
-$Proj   = "D:\projects\spike-elite\SpikeElite.uproject"
-$UE     = "D:\Epic\UE_5.8\Engine\Binaries\ThirdParty\DotNet\10.0\win-x64\dotnet.exe"
-$UBT    = "D:\Epic\UE_5.8\Engine\Binaries\DotNet\UnrealBuildTool\UnrealBuildTool.dll"
-$Editor = "D:\Epic\UE_5.8\Engine\Binaries\Win64\UnrealEditor.exe"
-$RunUAT = "D:\Epic\UE_5.8\Engine\Build\BatchFiles\RunUAT.bat"
-$LogDir = "D:\projects\spike-elite\Saved\Logs"
-Set-Location "D:\projects\spike-elite"
-
-function Check-Log([string]$Log, [string[]]$BadPatterns, [string]$Step) {
-    if (-not (Test-Path $Log)) { Write-Host "FAIL [$Step]: log missing $Log"; exit 1 }
-    $text = Get-Content -Raw -Encoding utf8 $Log
-    foreach ($p in $BadPatterns) {
-        if ($text -match $p) { Write-Host "FAIL [$Step]: found '$p' in $Log"; exit 1 }
+function Assert-Log([string]$Path, [string]$Required) {
+    if (!(Test-Path -LiteralPath $Path)) { throw "Missing log: $Path" }
+    $Content = Get-Content -LiteralPath $Path -Raw -Encoding utf8
+    if ($Content -notmatch $Required) { throw "Completion marker missing: $Required in $Path" }
+    if ($Content -match '(?im)Fatal error:|Ensure condition failed:|Missing Package|DEV VERIFY:.*-> FAIL|DevVerifyFailures=[1-9]|DEV SHOT SUITE: timeout|Test Completed\. Result=\{Fail') {
+        throw "Failure in $Path"
     }
-    Write-Host "PASS [$Step]: $Log clean"
+    return $Content
 }
 
-# 1. Editor build --------------------------------------------------------------
-Write-Host "=== 1. Editor build ==="
-& $UE $UBT SpikeEliteEditor Win64 Development -Project=$Proj -WaitMutex -log="$LogDir\ubt_m11d_editor.log"
-Check-Log "$LogDir\ubt_m11d_editor.log" @("error C", "error LNK", "Error:") "Editor build"
-
-# 2. Game build ----------------------------------------------------------------
-Write-Host "=== 2. Game build (no Unreal5_6 include-order warning) ==="
-& $UE $UBT SpikeElite Win64 Development -Project=$Proj -WaitMutex -log="$LogDir\ubt_m11d_game.log"
-Check-Log "$LogDir\ubt_m11d_game.log" @("error C", "error LNK", "Error:", "Unreal5_6") "Game build"
-
-# 3. Automation tests (55/55) --------------------------------------------------
-Write-Host "=== 3. Automation tests SpikeElite.Tests ==="
-& $Editor $Proj -ExecCmds="Automation RunTests SpikeElite.Tests; Quit" -unattended -nopause -nosplash -log -abslog="$LogDir\Automation_M11d.log"
-$test = Get-Content -Raw -Encoding utf8 "$LogDir\Automation_M11d.log"
-$succ = ([regex]::Matches($test, "Test Completed\. Result=\{Success\}")).Count
-$fail = ([regex]::Matches($test, "Test Completed\. Result=\{Fail")).Count
-Write-Host "Success=$succ Fail=$fail"
-if ($succ -lt 55 -or $fail -gt 0) { Write-Host "FAIL [Automation]: expected 55/55"; exit 1 }
-Write-Host "PASS [Automation]: $succ/$succ 0 failed"
-
-# 4. TacticalTest --------------------------------------------------------------
-Write-Host "=== 4. TacticalTest ==="
-& $Editor $Proj -game -windowed -ResX=1280 -ResY=720 -QuickMatch -ShotSuite -devauto -FastFlow -SEED=1 -TacticalTest -unattended -nopause -nosplash -log
-Copy-Item "$LogDir\SpikeElite.log" "$LogDir\M11d_tactical.log" -Force
-$tac = Get-Content -Raw -Encoding utf8 "$LogDir\M11d_tactical.log"
-if ($tac -notmatch "DEV TACTICAL TEST: PASS") { Write-Host "FAIL [TacticalTest]"; exit 1 }
-Write-Host "PASS [TacticalTest]"
-
-# 5. ShotSuite screenshots -----------------------------------------------------
-Write-Host "=== 5. ShotSuite ==="
-& $Editor $Proj -game -windowed -ResX=1280 -ResY=720 -QuickMatch -ShotSuite -devauto -FastFlow -SEED=1 -unattended -nopause -nosplash -log
-Copy-Item "$LogDir\SpikeElite.log" "$LogDir\M11d_shotsuite.log" -Force
-$ss = Get-Content -Raw -Encoding utf8 "$LogDir\M11d_shotsuite.log"
-if ($ss -notmatch "DEV SHOT SUITE: all") { Write-Host "FAIL [ShotSuite]"; exit 1 }
-Write-Host "PASS [ShotSuite]"
-
-# 6. Seed smoke (1 / 42 / 4242) ------------------------------------------------
-Write-Host "=== 6. Seed smoke ==="
-foreach ($seed in @("1","42","4242")) {
-    & $Editor $Proj -game -windowed -ResX=1280 -ResY=720 -QuickMatch -devauto -FastFlow -SEED=$seed -unattended -nopause -nosplash -log
-    Copy-Item "$LogDir\SpikeElite.log" "$LogDir\M11d_seed${seed}.log" -Force
-    $s = Get-Content -Raw -Encoding utf8 "$LogDir\M11d_seed${seed}.log"
-    $quit = ([regex]::Matches($s, "DEV QUIT")).Count
-    $fatal = ([regex]::Matches($s, "Fatal")).Count
-    Write-Host "Seed $seed quit=$quit fatal=$fatal"
-    if ($quit -lt 1 -or $fatal -gt 0) { Write-Host "FAIL [Seed $seed]"; exit 1 }
+function Invoke-Game([string]$Exe, [string]$Name, [string[]]$Flags, [int]$Timeout = 180) {
+    $LogPath = Join-Path $LogDir ($Name + '.log')
+    $Args = @()
+    if ($Exe -eq $Editor) { $Args += $Proj }
+    $Args += $Flags
+    $Args += @('-unattended', '-nopause', '-nosplash', "-ABSLOG=$LogPath")
+    $Quoted = ($Args | ForEach-Object { '"' + $_ + '"' }) -join ' '
+    $Proc = Start-Process -FilePath $Exe -ArgumentList $Quoted -PassThru -WindowStyle Hidden
+    if (!$Proc.WaitForExit($Timeout * 1000)) {
+        Stop-Process -Id $Proc.Id -ErrorAction SilentlyContinue
+        throw "$Name timed out after ${Timeout}s; log: $LogPath"
+    }
+    $Proc.Refresh()
+    if ($Proc.ExitCode -ne 0) { throw "$Name exit code $($Proc.ExitCode); log: $LogPath" }
+    return $LogPath
 }
-Write-Host "PASS [Seeds 1/42/4242]"
 
-# 7. BuildCookRun Win64 Development --------------------------------------------
-Write-Host "=== 7. BuildCookRun ==="
-& $RunUAT BuildCookRun -project=$Proj -noP4 -platform=Win64 -clientconfig=Development -cook -allmaps -build -stage -pak -archive -archivedirectory="D:\projects\spike-elite\Dist"
-$exe = "D:\projects\spike-elite\Dist\Windows\SpikeElite\Binaries\Win64\SpikeElite.exe"
-if (-not (Test-Path $exe)) { Write-Host "FAIL [Package]: exe missing"; exit 1 }
-$size = (Get-Item $exe).Length / 1MB
-$dirSize = (Get-ChildItem "D:\projects\spike-elite\Dist\Windows\SpikeElite" -Recurse -File | Measure-Object Length -Sum).Sum / 1MB
-Write-Host "PASS [Package]: exe=$([math]::Round($size,1))MB total=$([math]::Round($dirSize,0))MB"
+foreach ($Target in @('SpikeEliteEditor', 'SpikeElite')) {
+    $LogPath = Join-Path $LogDir ($Target + '_build.log')
+    & $DotNet $UBT $Target Win64 Development "-Project=$Proj" -WaitMutex -NoUBA "-log=$LogPath"
+    if ($LASTEXITCODE -ne 0) { throw "$Target build failed: $LASTEXITCODE" }
+    $null = Assert-Log $LogPath 'Result: Succeeded'
+}
 
-# 8. Packaged smoke (Seed 42) ---------------------------------------------------
-Write-Host "=== 8. Packaged smoke Seed 42 ==="
-& $exe -game -windowed -ResX=1280 -ResY=720 -QuickMatch -devauto -FastFlow -SEED=42 -unattended -nopause -nosplash -log
-Copy-Item "D:\projects\spike-elite\Dist\Windows\SpikeElite\Saved\Logs\SpikeElite.log" "$LogDir\M11d_pkg_seed42.log" -Force
-$p = Get-Content -Raw -Encoding utf8 "$LogDir\M11d_pkg_seed42.log"
-if (($p -match "Fatal") -or ($p -match "Missing Package")) { Write-Host "FAIL [Packaged smoke]"; exit 1 }
-Write-Host "PASS [Packaged smoke]"
+$Path = Invoke-Game $Editor 'automation' @('-NullRHI', '-ExecCmds=Automation RunTests SpikeElite.Tests; Quit')
+$Text = Assert-Log $Path 'Test Completed\. Result=\{Success\}'
+$Count = [regex]::Matches($Text, 'Test Completed\. Result=\{Success\}').Count
+if ($Count -lt 57) { throw "Expected at least 57 successful tests, got $Count" }
+Write-Host "PASS Automation: $Count tests"
 
-Write-Host "`n=== ALL M11d VERIFICATION STEPS DONE ==="
+$Common = @('-game', '-windowed', '-ResX=1280', '-ResY=720', '-QuickMatch', '-devauto', '-FastFlow')
+# DevAutoStart checks ShotSuite BEFORE TacticalTest: never combine the flags.
+$Path = Invoke-Game $Editor 'tactical' ($Common + @('-SEED=1', '-TacticalTest'))
+$null = Assert-Log $Path 'DEV TACTICAL TEST: PASS'
+$Path = Invoke-Game $Editor 'shotsuite' ($Common + @('-SEED=1', '-ShotSuite')) 450
+$null = Assert-Log $Path 'DEV SHOT SUITE: all \d+ shots captured, quitting'
+foreach ($Seed in @(1,42,4242)) {
+    $Path = Invoke-Game $Editor "seed$Seed" ($Common + @("-SEED=$Seed"))
+    $Text = Assert-Log $Path 'DEV QUICK MATCH: quitting \(DevVerifyFailures=0\)'
+    if ($Text -notmatch 'Rematch requested') { throw "Seed $Seed never rematched" }
+}
+
+if (!$SkipPackage) {
+    # Unique output prevents an executable from an older package counting as success.
+    $Archive = Join-Path $Repo ('Dist\verify_' + (Get-Date -Format 'yyyyMMdd_HHmmss'))
+    & $RunUAT BuildCookRun "-project=$Proj" -noP4 -platform=Win64 -clientconfig=Development -cook -allmaps -build -stage -pak -archive "-archivedirectory=$Archive"
+    if ($LASTEXITCODE -ne 0) { throw "BuildCookRun failed: $LASTEXITCODE" }
+    $Exe = Join-Path $Archive 'Windows\SpikeElite.exe'
+    if (!(Test-Path -LiteralPath $Exe)) { throw "New package missing: $Exe" }
+    # Rendered startup is mandatory. NullRHI is a separate logic diagnostic.
+    $Path = Invoke-Game $Exe 'packaged_seed42' ($Common + @('-SEED=42'))
+    $Text = Assert-Log $Path 'DEV QUICK MATCH: quitting \(DevVerifyFailures=0\)'
+    if ($Text -notmatch 'Game Engine Initialized' -or $Text -notmatch 'Rematch requested') {
+        throw 'Packaged rendering/match lifecycle did not complete'
+    }
+    Write-Host "PASS rendered package: $Exe"
+}
+Write-Host "PASS requested verification steps. Logs: $LogDir"

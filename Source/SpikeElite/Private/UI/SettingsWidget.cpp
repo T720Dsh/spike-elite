@@ -20,8 +20,7 @@
 #include "Engine/Texture2D.h"
 #include "Engine/Engine.h"
 #include "RHI.h"
-#include "Framework/Application/SlateApplication.h"
-#include "UI/SEUiStyle.h"
+#include "Engine/UserInterfaceSettings.h"
 
 USettingsWidget::USettingsWidget(const FObjectInitializer& OI) : Super(OI) {}
 
@@ -108,6 +107,8 @@ void USettingsWidget::PopulateResolutions()
 
 void USettingsWidget::InitFromCurrentSettings()
 {
+	PendingUIScale = FMath::Clamp(GetDefault<UUserInterfaceSettings>()->ApplicationScale, 0.8f, 1.4f);
+	bReducedMotion = SEUiStyle::IsReducedMotion();
 	UGameUserSettings* S = GEngine ? GEngine->GetGameUserSettings() : nullptr;
 	if (!S) return;
 
@@ -140,6 +141,8 @@ void USettingsWidget::InitFromCurrentSettings()
 		const int32 Q = S->GetOverallScalabilityLevel();
 		Quality->SetSelectedIndex((Q >= 0 && Q <= 3) ? Q : 4);
 	}
+	if (UIScaleSlider) { UIScaleSlider->SetValue(PendingUIScale); }
+	if (ReducedMotionLabel) { ReducedMotionLabel->SetText(FText::FromString(bReducedMotion ? TEXT("开") : TEXT("关"))); }
 }
 
 TSharedRef<SWidget> USettingsWidget::RebuildWidget()
@@ -346,7 +349,6 @@ void USettingsWidget::OnUIScaleChanged(float V)
 void USettingsWidget::ToggleReducedMotion()
 {
 	bReducedMotion = !bReducedMotion;
-	SEUiStyle::SetReducedMotion(bReducedMotion);
 	if (ReducedMotionLabel)
 	{
 		ReducedMotionLabel->SetText(FText::FromString(bReducedMotion ? TEXT("开") : TEXT("关")));
@@ -383,8 +385,15 @@ void USettingsWidget::ApplySettings()
 
 	// M11d-2: accessibility — global UI scale (Slate application scale) and
 	// reduced-motion flag are applied immediately and persisted by the owner.
-	FSlateApplication::Get().SetApplicationScale(PendingUIScale);
+	// Scale game UMG, without scaling the surrounding editor's Slate UI.
+	GetMutableDefault<UUserInterfaceSettings>()->ApplicationScale = PendingUIScale;
 	SEUiStyle::SetReducedMotion(bReducedMotion);
+	if (GConfig)
+	{
+		GConfig->SetFloat(TEXT("/Script/SpikeElite.SpikeEliteSettings"), TEXT("UIScale"), PendingUIScale, GGameUserSettingsIni);
+		GConfig->SetBool(TEXT("/Script/SpikeElite.SpikeEliteSettings"), TEXT("ReducedMotion"), bReducedMotion, GGameUserSettingsIni);
+		GConfig->Flush(false, GGameUserSettingsIni);
+	}
 
 	// Sensitivity is committed only on Apply (Back discards the pending value).
 	OnSensitivityChanged.ExecuteIfBound(PendingSensitivity);

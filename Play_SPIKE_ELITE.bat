@@ -1,8 +1,8 @@
 @echo off
 REM ============================================================
 REM  SPIKE ELITE - launcher
-REM  Priority 1: the packaged Win64 build (no editor required).
-REM  Priority 2: Unreal Editor game mode (developer fallback).
+REM  M11d: packaged rendering has an unresolved startup hang.
+REM  Default to verified Editor game mode. --packaged opts into diagnosis.
 REM ============================================================
 cd /d "%~dp0"
 
@@ -10,6 +10,10 @@ set "PACKAGED=%~dp0Dist\Windows\SpikeElite.exe"
 set "UE=D:\Epic\UE_5.8\Engine\Binaries\Win64\UnrealEditor.exe"
 set "PROJ=%~dp0SpikeElite.uproject"
 
+if /i "%~1"=="--packaged" goto packaged
+if exist "%UE%" goto editor
+
+:packaged
 if exist "%PACKAGED%" (
   echo Starting packaged SPIKE ELITE ...
   "%PACKAGED%"
@@ -23,6 +27,7 @@ echo To create it once, open a terminal in this folder and run:
 echo   "D:\Epic\UE_5.8\Engine\Build\BatchFiles\RunUAT.bat" BuildCookRun -project="%~dp0SpikeElite.uproject" -noP4 -platform=Win64 -clientconfig=Development -cook -allmaps -build -stage -pak -archive -archivedirectory="%~dp0Dist"
 echo.
 echo Falling back to Unreal Editor game mode (editor required) ...
+:editor
 if not exist "%UE%" (
   echo [ERROR] Unreal Engine 5.8 not found at %UE%
   pause

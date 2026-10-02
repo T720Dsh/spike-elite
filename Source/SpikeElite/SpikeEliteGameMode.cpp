@@ -156,6 +156,7 @@ void ASpikeEliteGameMode::StartMatch()
 	LogActorCounts(TEXT("BeforeStart"));
 
 	// Reset scores/state.
+	LastRotationServeTeam = EVolleyballTeam::None;
 	TeamAScore = TeamBScore = 0;
 	TeamASetsWon = TeamBSetsWon = 0;
 	CurrentSet = 1;
@@ -1881,7 +1882,6 @@ void ASpikeEliteGameMode::BuildRotationView(FRotationViewState& Out) const
 	Out.ServingTeam = ServingTeam;
 	Out.bJustRotated = (LastRotationServeTeam != EVolleyballTeam::None)
 		&& (LastRotationServeTeam != ServingTeam);
-	if (ServingTeam != EVolleyballTeam::None) { LastRotationServeTeam = ServingTeam; }
 
 	// Roster order IS the authoritative rotation: index 0 = P1 (back-right,
 	// the server), then P2/P3/P4 (front row), P5/P6.
@@ -1897,7 +1897,7 @@ void ASpikeEliteGameMode::BuildRotationView(FRotationViewState& Out) const
 				V.PlayerId = Roster[i]->PlayerId;
 				V.Jersey = FString::Printf(TEXT("#%d"), Roster[i]->JerseyNumber);
 				V.bControlled = !Roster[i]->bIsBot;
-				V.bServer = (i == 0);
+				V.bServer = (i == 0 && Roster[i]->GetTeam() == ServingTeam);
 			}
 			V.bFrontRow = (i == 1 || i == 2 || i == 3);
 			OutArr.Add(V);
@@ -1913,4 +1913,5 @@ void ASpikeEliteGameMode::RefreshRotationView()
 	FRotationViewState State;
 	BuildRotationView(State);
 	RotationWidget->Refresh(State);
+	if (ServingTeam != EVolleyballTeam::None) { LastRotationServeTeam = ServingTeam; }
 }

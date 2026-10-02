@@ -12,10 +12,7 @@ namespace
 {
 	FString SlotLabel(const FRotationSlotView& V)
 	{
-		FString Label = V.Jersey;
-		if (V.bServer)    { Label += TEXT("●"); }
-		if (V.bControlled) { Label += TEXT("★"); }
-		return Label;
+		return V.Jersey.Replace(TEXT("#"), TEXT(""));
 	}
 }
 
@@ -50,7 +47,7 @@ void URotationWidget::BuildWidgetTree()
 	UCanvasPanelSlot* TitleSlot = Panel->AddChildToCanvas(TitleText);
 	TitleSlot->SetAnchors(FAnchors(1.f, 0.f, 1.f, 0.f));
 	TitleSlot->SetAlignment(FVector2D(1.f, 0.f));
-	TitleSlot->SetPosition(FVector2D(-220.f, 72.f));
+	TitleSlot->SetPosition(FVector2D(-22.f, 72.f));
 	TitleSlot->SetSize(FVector2D(204.f, 24.f));
 
 	// ---- mini court (right-anchored, inner box from x=-204..-36) ------------------
@@ -89,8 +86,8 @@ void URotationWidget::BuildWidgetTree()
 	static const int32 RowMap[6] = { 1, 0, 0, 0, 1, 1 };  // 0=front, 1=back
 	static const int32 ColMap[6] = { 2, 2, 1, 0, 0, 1 };  // 0=left, 1=mid, 2=right
 	const float ColX[3] = { -186.f, -140.f, -94.f };
-	const float FrontY[2] = { 140.f, 308.f };  // [teamB, teamA]
-	const float BackY[2]  = { 192.f, 256.f };  // [teamB, teamA]
+	const float FrontY[2] = { 192.f, 256.f };  // both front rows adjacent to net
+	const float BackY[2]  = { 140.f, 308.f };  // back rows adjacent to end lines
 
 	for (int32 i = 0; i < 12; ++i)
 	{
@@ -108,11 +105,14 @@ void URotationWidget::BuildWidgetTree()
 		DS->SetAnchors(FAnchors(1.f, 0.f, 1.f, 0.f));
 		DS->SetAlignment(FVector2D(0.f, 0.f));
 		DS->SetPosition(FVector2D(X, Y));
-		DS->SetSize(FVector2D(20.f, 20.f));
+		DS->SetSize(FVector2D(36.f, 26.f));
 		SlotDots.Add(Dot);
+		UImage* ServeMarker = MakeLine(WidgetTree, SEUiStyle::Colors::Gold, 36.f, 3.f, X, Y + 27.f);
+		ServeMarker->SetVisibility(ESlateVisibility::Collapsed);
+		ServeMarkers.Add(ServeMarker);
 
 		UTextBlock* T = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
-		T->SetColorAndOpacity(FSlateColor(SEUiStyle::Colors::White));
+		T->SetColorAndOpacity(FSlateColor(SEUiStyle::Colors::Navy));
 		T->SetFont(SEUiStyle::Font(13));
 		T->SetJustification(ETextJustify::Center);
 		T->SetText(FText::FromString(TEXT("-")));
@@ -120,7 +120,7 @@ void URotationWidget::BuildWidgetTree()
 		TS->SetAnchors(FAnchors(1.f, 0.f, 1.f, 0.f));
 		TS->SetAlignment(FVector2D(0.f, 0.f));
 		TS->SetPosition(FVector2D(X + 2.f, Y + 2.f));
-		TS->SetSize(FVector2D(16.f, 16.f));
+		TS->SetSize(FVector2D(32.f, 22.f));
 		SlotTexts.Add(T);
 	}
 }
@@ -134,7 +134,8 @@ void URotationWidget::Refresh(const FRotationViewState& State)
 {
 	if (!TitleText || SlotTexts.Num() != 12 || SlotDots.Num() != 12) { return; }
 
-	const FString Rotating = State.bJustRotated ? TEXT(" · 轮转") : TEXT("");
+	if (State.bJustRotated) { RotationNoticeSeconds = 2.f; }
+	const FString Rotating = RotationNoticeSeconds > 0.f ? TEXT(" · 轮转") : TEXT("");
 	FString Sig = FString::Printf(TEXT("%d|%d|%d"), State.RotationIndex,
 		(int32)State.ServingTeam, State.bJustRotated ? 1 : 0);
 	for (const FRotationSlotView& V : State.TeamA)
@@ -149,8 +150,8 @@ void URotationWidget::Refresh(const FRotationViewState& State)
 	LastSignature = Sig;
 
 	const FString ServeName = (State.ServingTeam == EVolleyballTeam::TeamA) ? TEXT("A") : TEXT("B");
-	TitleText->SetText(FText::FromString(
-		FString::Printf(TEXT("轮次 %d/6  发球 %s%s"), State.RotationIndex, *ServeName, *Rotating)));
+	BaseTitle = FString::Printf(TEXT("轮次 %d/6  发球 %s"), State.RotationIndex, *ServeName);
+	TitleText->SetText(FText::FromString(BaseTitle + Rotating));
 
 	for (int32 i = 0; i < 6; ++i)
 	{
@@ -158,6 +159,7 @@ void URotationWidget::Refresh(const FRotationViewState& State)
 		{
 			const FRotationSlotView& V = State.TeamA[i];
 			SlotTexts[i]->SetText(FText::FromString(SlotLabel(V)));
+			ServeMarkers[i]->SetVisibility(V.bServer ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
 			SlotDots[i]->SetBrush(SEUiStyle::SolidBrush(
 				V.bControlled ? SEUiStyle::Colors::White :
 				(V.bServer ? SEUiStyle::Colors::Gold : SEUiStyle::Colors::TeamA)));
@@ -166,10 +168,21 @@ void URotationWidget::Refresh(const FRotationViewState& State)
 		{
 			const FRotationSlotView& V = State.TeamB[i];
 			SlotTexts[i + 6]->SetText(FText::FromString(SlotLabel(V)));
+			ServeMarkers[i + 6]->SetVisibility(V.bServer ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
 			SlotDots[i + 6]->SetBrush(SEUiStyle::SolidBrush(
 				V.bControlled ? SEUiStyle::Colors::White :
 				(V.bServer ? SEUiStyle::Colors::Gold : SEUiStyle::Colors::TeamB)));
 		}
+	}
+}
+
+void URotationWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
+{
+	Super::NativeTick(MyGeometry, InDeltaTime);
+	if (RotationNoticeSeconds > 0.f)
+	{
+		RotationNoticeSeconds -= InDeltaTime;
+		if (RotationNoticeSeconds <= 0.f && TitleText) { TitleText->SetText(FText::FromString(BaseTitle)); }
 	}
 }
 

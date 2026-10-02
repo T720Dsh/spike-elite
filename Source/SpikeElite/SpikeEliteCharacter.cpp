@@ -70,27 +70,31 @@ ASpikeEliteCharacter::ASpikeEliteCharacter()
 	auto BuildLimb = [&](const TCHAR* Base, USceneComponent* Root, float YSide, bool bArm)
 	{
 		FProceduralLimb L;
-		const FVector JointLoc(0.f, YSide, bArm ? 62.f : -38.f);
+		const FVector JointLoc(0.f, YSide, bArm ? 62.f : -3.f);
 		L.Joint = MakeJoint(*FString::Printf(TEXT("%sJoint"), Base), Root, JointLoc);
-		const float UpLen = bArm ? 27.f : 24.f;
-		const float LoLen = bArm ? 24.f : 23.f;
+		const float UpLen = bArm ? 27.f : 48.f;
+		const float LoLen = bArm ? 24.f : 46.f;
 		L.Upper = MakeMesh(*FString::Printf(TEXT("%sUpper"), Base), L.Joint,
 			bArm ? FVector(0.10f, 0.10f, UpLen * 0.01f) : FVector(0.14f, 0.14f, UpLen * 0.01f),
 			FVector(0.f, 0.f, -UpLen * 0.5f));
-		L.BendJoint = MakeJoint(*FString::Printf(TEXT("%sBend"), Base), L.Upper, FVector(0.f, 0.f, -UpLen * 0.5f));
+		// Joints inherit rotation, never the mesh's non-uniform scale. Otherwise
+		// forearms/shins and their offsets are multiplied by the upper mesh scale.
+		L.BendJoint = MakeJoint(*FString::Printf(TEXT("%sBend"), Base), L.Joint, FVector(0.f, 0.f, -UpLen));
 		L.Lower = MakeMesh(*FString::Printf(TEXT("%sLower"), Base), L.BendJoint,
 			bArm ? FVector(0.08f, 0.08f, LoLen * 0.01f) : FVector(0.11f, 0.11f, LoLen * 0.01f),
 			FVector(0.f, 0.f, -LoLen * 0.5f));
-		L.Tip = MakeMesh(*FString::Printf(TEXT("%sTip"), Base), L.Lower,
+		L.Tip = MakeMesh(*FString::Printf(TEXT("%sTip"), Base), L.BendJoint,
 			bArm ? FVector(0.10f, 0.12f, 0.05f) : FVector(0.14f, 0.20f, 0.07f),
-			FVector(0.f, bArm ? 0.f : 2.f, -LoLen - (bArm ? 2.f : 3.f)));
+			FVector(bArm ? 0.f : 3.f, 0.f, -LoLen - (bArm ? 2.f : 3.f)));
 		return L;
 	};
 
 	ArmL = BuildLimb(TEXT("ArmL"), TorsoJoint, -24.f, true);
 	ArmR = BuildLimb(TEXT("ArmR"), TorsoJoint,  24.f, true);
-	LegL = BuildLimb(TEXT("LegL"), RootComponent, -10.f, false);
-	LegR = BuildLimb(TEXT("LegR"), RootComponent,  10.f, false);
+	// Torso bottom is local Z=-3 (centre 30, half-height 33). Attach hips
+	// there, so leaning/dive poses cannot tear the torso away from the legs.
+	LegL = BuildLimb(TEXT("LegL"), TorsoJoint, -10.f, false);
+	LegR = BuildLimb(TEXT("LegR"), TorsoJoint,  10.f, false);
 
 	// M11d-6: jersey number on chest and back (engine default font, no external
 	// assets). The capsule is the only collider and is hidden, so the text

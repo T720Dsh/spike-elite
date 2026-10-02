@@ -78,7 +78,7 @@
 - [x] M11d-3 比赛 HUD 重构：左右对称比分板、阶段徽章、触球圆点、中央回合横幅、帮助条分离；右上角小球场站位图（队色圆点/金色发球/白色受控/轮转提示）
 - [x] M11d-4 战术 UI 重排：攻击卡片化（目标区/力度条/弧线档位/绿黄红）、二传 13+1 ScrollBox 分组列表、防守双列（拦网策略/后排防守）
 - [x] M11d-5/6 场馆双色吸音板与无品牌赛事文字标识、角色胸背球衣号码、比赛用球黄蓝白多面板（授权插槽 fallback 保留）
-- [x] M11d-7 视觉验收截图套件（720p/1080p devauto + ShotSuite + TacticalTest）、三分辨率 UI 检查、55/55 测试回归、Win64 打包（打包版 D3D 渲染初始化存在引擎级挂起，见下方"已知问题"）
+- [ ] M11d-7 完整交付验收：已有 720p/1080p 截图、测试与包产物，但打包渲染、三分辨率/缩放边界及部分视觉项目尚未闭环。见 docs/M11d-Codex-Review.md。
 - [ ] 战术 AI 完整化（后排进攻细化、自由人）、外部角色动画模型、网络同步
 
 下一步具体行动见 [docs/05-roadmap.md](docs/05-roadmap.md)。
@@ -96,10 +96,12 @@
 
 > **M11d 打包版已知问题**：全新 Win64 Development 包（`Dist\Windows\SpikeElite.exe`，约 839MB）
 > 在本机 D3D12/D3D11 渲染初始化阶段稳定挂起（卡在 Slate 字体懒加载后的 `Texture streaming: Enabled`，
-> 位于 `LogInit: Game Engine Initialized` 之前）。已排除项目代码、PSO 预缓存、纹理流送、内存/磁盘空间、
-> 重新打包等因素；`-NullRHI` 下打包版可完整启动并运行 QuickMatch 逻辑（启动→主菜单→MatchOver→Rematch），
-> 说明是打包版 D3D 渲染设备初始化的引擎/驱动级问题（UE 5.8）。开发/验收环境下请用
+> 位于 `LogInit: Game Engine Initialized` 之前）。根因尚未定位，不能据此排除项目构造函数、资源同步加载、
+> cook 依赖或插件。`-NullRHI` 下打包版可运行 QuickMatch 逻辑，但不验证图形、字体或 UMG 渲染，
+> 因此打包版图形验收尚未通过。开发/验收环境下请用
 > `UnrealEditor.exe SpikeElite.uproject -game ...`（渲染与逻辑完全正常）代替打包版。
+
+`Play_SPIKE_ELITE.bat` 在安装了引擎时默认启动 Editor 游戏模式；显式传入 `--packaged` 可诊断当前包。
 
 **运行步骤：**
 1. 解压 `SpikeElite-v1.0.0-win64.zip` 到任意目录（绿色版，免安装）。
@@ -113,11 +115,13 @@
 引擎版本：**Unreal Engine 5.8**（`.uproject` 的 `EngineAssociation` 为 `5.8`）。
 
 ```powershell
-# 0) （推荐）把 UE 共享缓存（DDC/Zen）放到 D 盘，避免编译/打包占用 C 盘空间
+# 0) 可选：配置共享文件缓存。共享 DDC 与本地 Zen 数据是两个不同节点。
 [Environment]::SetEnvironmentVariable("UE-SharedDataCachePath", "D:\UE_DDC", "User")
 [Environment]::SetEnvironmentVariable("UE_SharedDataCachePath", "D:\UE_DDC", "User")
-# D:\UE_DDC 目录需存在（可手工创建）。旧缓存可整体从
-# C:\Users\<you>\AppData\Local\UnrealEngine 迁移过去。
+# D:\UE_DDC 目录需存在。实际生效路径须看 LogDerivedDataCache / LogZenServiceInstance。
+# 现有 Automation_M11d.log 的本地 Zen data-dir 为 D:\ZenData；配置共享变量
+# 不能证明本地 Zen 已迁移到 D:\UE_DDC，也不能保证 UE 不再写 C 盘。
+# 不要整体搬移或删除 AppData\Local\UnrealEngine，其中还可能有引擎配置和安装文件。
 
 # 1) 用 UE 5.8 打开工程（首次打开会提示编译 C++，点 Yes）
 D:\Epic\UE_5.8\Engine\Binaries\Win64\UnrealEditor.exe .\SpikeElite.uproject

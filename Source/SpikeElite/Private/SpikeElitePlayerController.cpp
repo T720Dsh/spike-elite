@@ -8,6 +8,8 @@
 #include "UI/MatchEndWidget.h"
 #include "UI/ConfirmWidget.h"
 #include "UI/RotationWidget.h"
+#include "UI/SEUiStyle.h"
+#include "Engine/UserInterfaceSettings.h"
 #include "UI/TacticalContactComponent.h"
 #include "SpikeEliteGameMode.h"
 #include "SpikeEliteCharacter.h"
@@ -51,6 +53,15 @@ void ASpikeElitePlayerController::BeginPlay()
 		GConfig->GetFloat(TEXT("/Script/SpikeElite.SpikeEliteSettings"), TEXT("MouseSensitivity"), Saved, GGameUserSettingsIni);
 	}
 	MouseSensitivity = FMath::Clamp(Saved, MinSensitivity(), MaxSensitivity());
+	float SavedUIScale = 1.f;
+	bool bSavedReducedMotion = false;
+	if (GConfig)
+	{
+		GConfig->GetFloat(TEXT("/Script/SpikeElite.SpikeEliteSettings"), TEXT("UIScale"), SavedUIScale, GGameUserSettingsIni);
+		GConfig->GetBool(TEXT("/Script/SpikeElite.SpikeEliteSettings"), TEXT("ReducedMotion"), bSavedReducedMotion, GGameUserSettingsIni);
+	}
+	GetMutableDefault<UUserInterfaceSettings>()->ApplicationScale = FMath::Clamp(SavedUIScale, 0.8f, 1.4f);
+	SEUiStyle::SetReducedMotion(bSavedReducedMotion);
 	UE_LOG(LogSEMenu, Log, TEXT("PC BeginPlay, sensitivity=%.2f, showing main menu"), MouseSensitivity);
 	ShowMainMenu();
 

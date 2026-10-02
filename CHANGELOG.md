@@ -8,6 +8,19 @@ for milestone tags once a first playable is tagged.
 
 ## [Unreleased]
 
+### M11d 现场复核修正（2026-10-02）
+
+修复分段肢体的缩放继承与髋/躯干连接，恢复正常尺寸的前臂、手、大腿、小腿；
+修正轮转小球场前后排、标题、号码对比度、实际发球方标记和短时轮转提示。
+二传/防守卡片绑定实际点击事件，二传列表约束高度并跟随键盘选择滚动；
+目标区按球场纵横轴及球队朝向解释。UI 缩放改用游戏 UMG 缩放，并保存/恢复辅助设置，
+未应用的减少动态效果随返回丢弃。验证脚本修正场景参数互斥、进程等待、独立日志、
+退出码/完成标记以及新包验证；启动器暂用可运行的 Editor 游戏模式。
+
+Editor/Game 编译通过，57/57 自动化回归（新增肢体层级和索引按钮测试），TacticalTest
+PASS（failures=0），新 720p ShotSuite 完整退出。完整视觉/图形包仍未验收通过；
+详情见 docs/M11d-Codex-Review.md，后续要求见 docs/M11e-Doubao-Prompt.md。
+
 ### Milestone M11d — 美术统一与 UI/UX 重构（风格化低多边形室内排球转播）
 
 M11d-1 统一设计令牌（`SEUiStyle`）：深海军蓝/冷灰蓝/电光蓝(TeamA)/暖橙红(TeamB)/排球金
@@ -35,16 +48,16 @@ M11d-6 角色与球：分段程序化运动员胸/背新增球衣号码 TextRend
 升级为原创黄蓝白多面板（蓝色赤道带 + 白色经线带），授权 Mesh/Material 插槽仍可用且缺失
 时自动回退无品牌占位球。
 
-> M11d 视觉验收结果（提交后执行）：720p/1080p `-devauto` 各跑一遍（DevVerifyFailures=0），
+> 原 M11d 交付报告自报结果（下述视觉通过项不等于现场复核通过）：720p/1080p `-devauto` 各跑一遍（DevVerifyFailures=0），
 > ShotSuite + TacticalTest 截图逐张读取通过（主菜单 720p/1080p、设置、暂停、确认、左右对称比分板、
 > 发球阶段、回合结果横幅、轮次小球场 HUD、战术瞄准卡片、二传 13+1 ScrollBox、防守 2×4、DiveActive、
 > DiveSave、记录台记分牌、比赛球多面板、MatchOver、Rematch）；55/55 自动化测试回归通过；
-> Win64 打包完成（约 839MB）。**已知问题**：打包版 D3D 渲染初始化引擎级挂起（卡在 Slate 字体懒加载
+> Win64 打包完成（约 839MB）。**未通过图形交付验收**：打包版 D3D 启动挂起（卡在 Slate 字体懒加载
 > 后的 Texture streaming 初始化，早于 Game Engine Initialized；`-NullRHI` 下打包版逻辑可完整运行），
-> 已排除项目代码/PSO/纹理流送/内存/重打包，判断为 UE 5.8 打包版渲染设备初始化问题，验收请用
-> `UnrealEditor.exe ... -game` 等价路径；ShotSuite 偶发在 first_receive 后无进展（随机流程，重跑即可）。
-> 另：UE 共享缓存（DDC/Zen）已迁移至 D:\UE_DDC 并通过用户环境变量 `UE-SharedDataCachePath` 固定，
-> 避免编译/打包占用 C 盘。
+> 根因待定位，NullRHI 通过不排除资源/cook/同步加载问题，也不能替代图形验收。
+> `UnrealEditor.exe ... -game` 可用作开发运行路径；ShotSuite 偶发无进展仍需修复。
+> 用户配置了共享 DDC 为 D:\UE_DDC；Automation_M11d.log 的本地 Zen 数据实际位于 D:\ZenData，
+> 两者不可混为一谈，不能据此保证引擎完全不写 C 盘。
 
 ### Milestone M11c — 发球球权纠错 · 权威轮转 · 真实救球生命周期 · 战术同源求解 · 屏幕 UMG 战术 · 打包收口
 

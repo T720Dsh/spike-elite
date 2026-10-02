@@ -3,6 +3,7 @@
 
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
+#include "Components/Button.h"
 #include "Volleyball/VolleyballTrajectory.h"
 #include "Volleyball/SetPlay.h"
 #include "TacticalHUDWidget.generated.h"
@@ -13,9 +14,27 @@ class UCanvasPanel;
 class UVerticalBox;
 class UBorder;
 class UButton;
+class UScrollBox;
 
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnSetPlaySelected, int32);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnDefensePlanSelected, int32);
+
+/** UMG's click event has no index; carry one with each tactical row. */
+UCLASS()
+class SPIKEELITE_API UTacticalChoiceButton : public UButton
+{
+	GENERATED_BODY()
+public:
+	void InitChoice(int32 InIndex)
+	{
+		ChoiceIndex = InIndex;
+		OnClicked.AddUniqueDynamic(this, &UTacticalChoiceButton::DispatchChoice);
+	}
+	FOnSetPlaySelected OnChoiceSelected;
+private:
+	int32 ChoiceIndex = INDEX_NONE;
+	UFUNCTION() void DispatchChoice() { OnChoiceSelected.Broadcast(ChoiceIndex); }
+};
 
 /**
  * M11c-5: the REAL screen UMG for tactical play — replaces the world-space
@@ -75,6 +94,7 @@ protected:
 	UPROPERTY() TObjectPtr<UTextBlock> SetTitle;
 	UPROPERTY() TObjectPtr<UTextBlock> SetCategory;
 	UPROPERTY() TObjectPtr<UVerticalBox> SetList;
+	UPROPERTY() TObjectPtr<UScrollBox> SetScroll;
 	UPROPERTY() TObjectPtr<UTextBlock> SetDetails;
 	UPROPERTY() TObjectPtr<UTextBlock> SetHelp;
 	TArray<TObjectPtr<UTextBlock>> SetRows;

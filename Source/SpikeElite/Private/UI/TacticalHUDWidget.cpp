@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include "UI/TacticalHUDWidget.h"
 #include "UI/SEUiStyle.h"
+#include "SpikeEliteCharacter.h"
 #include "Components/TextBlock.h"
 #include "Components/Button.h"
 #include "Components/Border.h"
@@ -129,8 +130,12 @@ void UTacticalHUDWidget::BuildSetPanel()
 	// M11d-4: the 13+1 list lives in a ScrollBox so all items stay reachable at
 	// 1280x720; the category line above names the currently selected play's group.
 	UScrollBox* Scroll = WidgetTree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass());
-	Scroll->SetScrollBarVisibility(ESlateVisibility::Collapsed);
-	V->AddChild(Scroll);
+	SetScroll = Scroll;
+	Scroll->SetScrollBarVisibility(ESlateVisibility::Visible);
+	if (UVerticalBoxSlot* ScrollSlot = V->AddChildToVerticalBox(Scroll))
+	{
+		ScrollSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+	}
 	SetList = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass());
 	if (UScrollBoxSlot* SS = Cast<UScrollBoxSlot>(Scroll->AddChild(SetList)))
 	{
@@ -140,7 +145,9 @@ void UTacticalHUDWidget::BuildSetPanel()
 	const TArray<FSetPlayDefinition>& Plays = SESetPlays::GetPlays();
 	for (int32 i = 0; i < Plays.Num(); i++)
 	{
-		UButton* Btn = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass());
+		UTacticalChoiceButton* Btn = WidgetTree->ConstructWidget<UTacticalChoiceButton>(UTacticalChoiceButton::StaticClass());
+		Btn->InitChoice(i);
+		Btn->OnChoiceSelected.AddUObject(this, &UTacticalHUDWidget::HandleSetRowClick);
 		Btn->SetStyle(SEUiStyle::ButtonStyle(
 			FLinearColor(0.1f, 0.1f, 0.15f, 0.9f),
 			FLinearColor(0.25f, 0.25f, 0.35f, 0.9f),
@@ -200,7 +207,9 @@ void UTacticalHUDWidget::BuildDefensePanel()
 	for (int32 i = 0; i < Labels.Num(); i++)
 	{
 		UVerticalBox* Parent = (i < 4) ? DefenseListBlock : DefenseListDig;
-		UButton* Btn = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass());
+		UTacticalChoiceButton* Btn = WidgetTree->ConstructWidget<UTacticalChoiceButton>(UTacticalChoiceButton::StaticClass());
+		Btn->InitChoice(i);
+		Btn->OnChoiceSelected.AddUObject(this, &UTacticalHUDWidget::HandleDefenseRowClick);
 		Btn->SetStyle(SEUiStyle::ButtonStyle(
 			FLinearColor(0.1f, 0.1f, 0.15f, 0.9f),
 			FLinearColor(0.25f, 0.25f, 0.35f, 0.9f),
@@ -250,10 +259,13 @@ void UTacticalHUDWidget::HideAll()
 namespace
 {
 	/** Friendly landing-zone name instead of raw cm coordinates. */
-	FString ZoneFromTarget(const FVector& T)
+	FString ZoneFromTarget(const FVector& T, int32 TeamSide)
 	{
-		const FString LR = (T.X < -300.f) ? TEXT("左") : (T.X > 300.f) ? TEXT("右") : TEXT("中");
-		const FString FB = (T.Y < -200.f) ? TEXT("后场") : TEXT("前场");
+		// X is distance from the net; Y is lateral. Left/right is relative to
+		// the attacker facing the net, and mirrors for the opposite team.
+		const float Lateral = T.Y * TeamSide;
+		const FString LR = (Lateral > 150.f) ? TEXT("左") : (Lateral < -150.f) ? TEXT("右") : TEXT("中");
+		const FString FB = (FMath::Abs(T.X) > 300.f) ? TEXT("后场") : TEXT("前场");
 		return FB + LR;
 	}
 
@@ -267,6 +279,8 @@ namespace
 
 void UTacticalHUDWidget::UpdateAttackInfo(const FShotIntent& Intent, const SEVolleyballTrajectory::FShotSolution& Sol)
 {
+	const ASpikeEliteCharacter* Player = Cast<ASpikeEliteCharacter>(GetOwningPlayerPawn());
+	const int32 TeamSide = Player ? Player->TeamSide : 1;
 	FString Verdict;
 	FLinearColor VerdictColor = SEUiStyle::Colors::Error;
 	if (!Sol.bValid) { Verdict = TEXT("不可行"); }
@@ -283,7 +297,7 @@ void UTacticalHUDWidget::UpdateAttackInfo(const FShotIntent& Intent, const SEVol
 		: (Intent.TouchType == EBallTouchType::Receive) ? TEXT("接球") : TEXT("扣球/吊球");
 	AttackHeader->SetText(FText::FromString(FString::Printf(TEXT("战术瞄准 — %s"), *TypeLabel)));
 	AttackStage->SetText(FText::FromString(TEXT("选择落点")));
-	AttackTarget->SetText(FText::FromString(FString::Printf(TEXT("目标区：%s"), *ZoneFromTarget(Intent.TargetLocation))));
+	AttackTarget->SetText(FText::FromString(FString::Printf(TEXT("目标区：%s"), *ZoneFromTarget(Intent.TargetLocation, TeamSide))));
 	AttackPower->SetText(FText::FromString(FString::Printf(TEXT("力度 %d%%"), FMath::RoundToInt(Intent.Power * 100.f))));
 	if (PowerBar) { PowerBar->SetPercent(FMath::Clamp(Intent.Power, 0.f, 1.f)); }
 	AttackArc->SetText(FText::FromString(FString::Printf(TEXT("弧线 %s · 飞行 %.2f 秒"), *ArcLabel(Sol.Apex.Z), Sol.FlightTime)));
@@ -310,6 +324,10 @@ void UTacticalHUDWidget::UpdateSetList(int32 Selected)
 {
 	if (Selected == LastSetSelected) { return; }
 	LastSetSelected = Selected;
+	if (SetScroll && SetRowButtons.IsValidIndex(Selected))
+	{
+		SetScroll->ScrollWidgetIntoView(SetRowButtons[Selected], false);
+	}
 	const TArray<FSetPlayDefinition>& Plays = SESetPlays::GetPlays();
 	for (int32 i = 0; i < SetRows.Num() && i < Plays.Num(); i++)
 	{
