@@ -23,6 +23,10 @@ public:
 	FOnMenuAction OnMainMenu;
 	FOnMenuAction OnQuit;
 
+	/** M11f-3: give keyboard focus to the primary button AFTER the widget is in
+	 *  the viewport (NativeConstruct is too early for SetKeyboardFocus). */
+	void SetInitialFocus();
+
 protected:
 	UPROPERTY() TObjectPtr<UButton> BtnResume;
 	UPROPERTY() TObjectPtr<UButton> BtnSettings;

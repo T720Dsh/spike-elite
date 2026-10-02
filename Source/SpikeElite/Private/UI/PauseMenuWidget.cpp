@@ -1,6 +1,7 @@
-// SPDX-License-Identifier: MIT
+﻿// SPDX-License-Identifier: MIT
 #include "UI/PauseMenuWidget.h"
 #include "UI/SEUiStyle.h"
+#include "UI/FocusableButton.h"
 #include "Components/TextBlock.h"
 #include "Components/Button.h"
 #include "Components/VerticalBox.h"
@@ -49,8 +50,9 @@ void UPauseMenuWidget::BuildWidgetTree()
 
 	auto AddBtn = [&](const FString& Label, const FButtonStyle& Style) -> UButton*
 	{
-		UButton* B = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass());
+		UButton* B = WidgetTree->ConstructWidget<USEFocusableButton>(USEFocusableButton::StaticClass());
 		B->SetStyle(Style);
+		Cast<USEFocusableButton>(B)->SetFocusedStyle(Style);   // M11f-3: visible gold focus rim
 		UTextBlock* T = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
 		T->SetText(FText::FromString(Label));
 		T->SetFont(SEUiStyle::Font(22));
@@ -98,12 +100,23 @@ void UPauseMenuWidget::NativeConstruct()
 	if (BtnResume)
 	{
 		BtnResume->OnClicked.AddUniqueDynamic(this, &UPauseMenuWidget::HResume);
-		BtnResume->SetKeyboardFocus();
 	}
 	if (BtnSettings) BtnSettings->OnClicked.AddUniqueDynamic(this, &UPauseMenuWidget::HSettings);
 	if (BtnMainMenu) BtnMainMenu->OnClicked.AddUniqueDynamic(this, &UPauseMenuWidget::HMainMenu);
 	if (BtnQuit) BtnQuit->OnClicked.AddUniqueDynamic(this, &UPauseMenuWidget::HQuit);
 	if (BtnHelp) BtnHelp->OnClicked.AddUniqueDynamic(this, &UPauseMenuWidget::ToggleHelp);
+}
+
+// M11f-3: focus is NOT reliable inside NativeConstruct (the widget is not yet
+// in the viewport, so SetKeyboardFocus silently no-ops). The PlayerController
+// calls this AFTER SetUIInputMode so the gold focus rim is visible and Tab
+// navigation starts from a sane widget.
+void UPauseMenuWidget::SetInitialFocus()
+{
+	if (BtnResume)
+	{
+		BtnResume->SetKeyboardFocus();
+	}
 }
 
 void UPauseMenuWidget::ToggleHelp()

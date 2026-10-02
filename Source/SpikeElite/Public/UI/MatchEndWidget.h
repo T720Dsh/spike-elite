@@ -32,6 +32,9 @@ public:
 	FOnMenuAction OnMainMenu;
 	FOnMenuAction OnQuit;
 
+	/** M11f-3: focus 再来一场 AFTER the widget is in the viewport. */
+	void SetInitialFocus();
+
 	/** Populate the result screen. */
 	void SetResult(EVolleyballTeam Winner, const TArray<int32>& ScoresA, const TArray<int32>& ScoresB);
 

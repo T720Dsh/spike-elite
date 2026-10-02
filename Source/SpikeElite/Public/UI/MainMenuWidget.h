@@ -26,6 +26,9 @@ public:
 	FOnMenuAction OnSettings;
 	FOnMenuAction OnQuit;
 
+	/** M11f-3: focus the primary button AFTER the menu is in the viewport. */
+	void SetInitialFocus();
+
 	/** M11d-2: global "reduce dynamic effects" flag now lives in SEUiStyle
 	 *  (set from Settings); this widget only reads it in NativeTick. */
 	static bool bReducedMotion; // legacy alias kept for ABI safety
@@ -42,6 +45,7 @@ protected:
 	UPROPERTY() TObjectPtr<UButton> BtnQuit;
 	UPROPERTY() TObjectPtr<UImage> SpotL;
 	UPROPERTY() TObjectPtr<UImage> SpotR;
+	UPROPERTY() TObjectPtr<UImage> BG_Ball;  // M11f-3: translucent background volleyball
 
 	float AnimTime = 0.0f;
 	float LightPhase = 0.0f;

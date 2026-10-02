@@ -1,6 +1,7 @@
-// SPDX-License-Identifier: MIT
+﻿// SPDX-License-Identifier: MIT
 #include "UI/MainMenuWidget.h"
 #include "UI/SEUiStyle.h"
+#include "UI/FocusableButton.h"
 #include "Components/TextBlock.h"
 #include "Components/Button.h"
 #include "Components/Image.h"
@@ -32,8 +33,9 @@ UMainMenuWidget::UMainMenuWidget(const FObjectInitializer& OI) : Super(OI) {}
 static UButton* MakeBtn(UWidgetTree* Tree, UVerticalBox* Parent, const FString& Label,
 	const FButtonStyle& Style, int32 FontSize)
 {
-	UButton* B = Tree->ConstructWidget<UButton>(UButton::StaticClass());
+	UButton* B = Tree->ConstructWidget<USEFocusableButton>(USEFocusableButton::StaticClass());
 	B->SetStyle(Style);
+	Cast<USEFocusableButton>(B)->SetFocusedStyle(Style);   // M11f-3: visible gold focus rim
 
 	UTextBlock* T = Tree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
 	T->SetText(FText::FromString(Label));
@@ -102,6 +104,58 @@ void UMainMenuWidget::BuildWidgetTree()
 		S->SetOffsets(FMargin(0.f, 300.f, 0.f, 3.f));
 	}
 
+	// --- volleyball-themed court lines (M11f-3: restrained background, not
+	// isolated colour blocks) — centre line + attack lines + net mesh + a big
+	// translucent volleyball with a faint ball-arc, all behind the logo.
+	{
+		auto ThinLine = [this, &Root](float X, float Width, float Alpha)
+		{
+			UImage* L = MakeSolidImage(this->WidgetTree, FLinearColor(1.f, 1.f, 1.f, Alpha));
+			if (UCanvasPanelSlot* S = Root->AddChildToCanvas(L))
+			{
+				S->SetAnchors(FAnchors(0.5f, 0, 0.5f, 0));
+				S->SetAlignment(FVector2D(0.5f, 0.f));
+				S->SetPosition(FVector2D(X, 250.f));
+				S->SetSize(FVector2D(Width, 220.f));
+			}
+			return L;
+		};
+		ThinLine(0.f, 3.f, 0.10f);    // centre line
+		ThinLine(-300.f, 2.f, 0.07f); // Team A attack line
+		ThinLine(300.f, 2.f, 0.07f);  // Team B attack line
+		// net mesh posts (short verticals below the net line)
+		for (float NX : { -200.f, -67.f, 67.f, 200.f })
+		{
+			UImage* Post = MakeSolidImage(WidgetTree, FLinearColor(0.75f, 0.80f, 0.88f, 0.08f));
+			if (UCanvasPanelSlot* S = Root->AddChildToCanvas(Post))
+			{
+				S->SetAnchors(FAnchors(0.5f, 0, 0.5f, 0));
+				S->SetAlignment(FVector2D(0.5f, 0.f));
+				S->SetPosition(FVector2D(NX, 303.f));
+				S->SetSize(FVector2D(3.f, 34.f));
+			}
+		}
+	}
+
+	// Large translucent volleyball watermark, top-right, slowly rotating (frozen
+	// under reduced motion). Uses the same brush/path as the logo icon.
+	if (UTexture2D* BallTex = LoadObject<UTexture2D>(nullptr, TEXT("/Game/UI/T_VolleyballIcon.T_VolleyballIcon")))
+	{
+		BG_Ball = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass());
+		FSlateBrush Brush;
+		Brush.SetResourceObject(BallTex);
+		Brush.DrawAs = ESlateBrushDrawType::Image;
+		Brush.ImageSize = FVector2D(170.f, 170.f);
+		Brush.TintColor = FSlateColor(FLinearColor(1.f, 0.92f, 0.55f, 0.10f));
+		BG_Ball->SetBrush(Brush);
+		if (UCanvasPanelSlot* S = Root->AddChildToCanvas(BG_Ball))
+		{
+			S->SetAnchors(FAnchors(1.f, 0.f, 1.f, 0.f));
+			S->SetAlignment(FVector2D(0.5f, 0.5f));
+			S->SetPosition(FVector2D(-150.f, 170.f));
+		}
+	}
+
 	// --- sweeping spotlights (two thin beams, gently moving) ------------------
 	SpotL = MakeSolidImage(WidgetTree, FLinearColor(1.0f, 0.95f, 0.75f, 0.08f));
 	if (UCanvasPanelSlot* S = Root->AddChildToCanvas(SpotL))
@@ -131,27 +185,33 @@ void UMainMenuWidget::BuildWidgetTree()
 	LogoCluster->AddChildToVerticalBox(LogoRow);
 
 	// Volleyball icon (project texture, fallback disc), left of the wordmark.
+	// M11f-3: size is persisted on the BRUSH (Brush.ImageSize) instead of
+	// SetDesiredSizeOverride — that API only works once MyImage exists (i.e.
+	// AFTER RebuildWidget), and BuildWidgetTree runs before it, so the old call
+	// silently did nothing and the icon rendered at brush size 1x1.
 	BallIcon = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass());
 	bool bLoaded = false;
-	if (UTexture2D* BallTex = LoadObject<UTexture2D>(nullptr, TEXT("/Game/UI/T_VolleyballIcon.T_VolleyballIcon")))
 	{
 		FSlateBrush Brush;
-		Brush.SetResourceObject(BallTex);
-		Brush.DrawAs = ESlateBrushDrawType::Image;
+		if (UTexture2D* BallTex = LoadObject<UTexture2D>(nullptr, TEXT("/Game/UI/T_VolleyballIcon.T_VolleyballIcon")))
+		{
+			Brush.SetResourceObject(BallTex);
+			Brush.DrawAs = ESlateBrushDrawType::Image;
+			bLoaded = true;
+		}
+		else
+		{
+			UE_LOG(LogSEWidget, Warning, TEXT("Volleyball icon texture missing (/Game/UI/T_VolleyballIcon); using fallback"));
+			Brush = SEUiStyle::SolidBrush(SEUiStyle::Colors::Gold);
+		}
+		Brush.ImageSize = FVector2D(58.f, 58.f);   // persists with the brush
 		BallIcon->SetBrush(Brush);
-		bLoaded = true;
-	}
-	else
-	{
-		UE_LOG(LogSEWidget, Warning, TEXT("Volleyball icon texture missing (/Game/UI/T_VolleyballIcon); using fallback"));
-		BallIcon->SetBrush(SEUiStyle::SolidBrush(SEUiStyle::Colors::Gold));
 	}
 	if (UHorizontalBoxSlot* HSlot = LogoRow->AddChildToHorizontalBox(BallIcon))
 	{
 		HSlot->SetPadding(FMargin(0.f, 8.f, 18.f, 0.f));
 		HSlot->SetVerticalAlignment(VAlign_Center);
 	}
-	BallIcon->SetDesiredSizeOverride(FVector2D(58.f, 58.f));
 
 	Title = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
 	Title->SetText(FText::FromString(TEXT("SPIKE ELITE")));
@@ -168,9 +228,16 @@ void UMainMenuWidget::BuildWidgetTree()
 	UVerticalBoxSlot* SubSlot = LogoCluster->AddChildToVerticalBox(SubTitle);
 	SubSlot->SetPadding(FMargin(0.f, 4.f, 0.f, 0.f));
 
+	// Gold divider — M11f-3: wrapped in an explicit SizeBox because
+	// SetDesiredSizeOverride before MyImage exists is a no-op (same root cause
+	// as the ball icon); the divider previously rendered at brush default size
+	// (a square blob) instead of 180x3.
 	Divider = MakeSolidImage(WidgetTree, SEUiStyle::Colors::Gold);
-	Divider->SetDesiredSizeOverride(FVector2D(180.f, 3.f));
-	if (UVerticalBoxSlot* DSlot = LogoCluster->AddChildToVerticalBox(Divider))
+	USizeBox* DividerBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+	DividerBox->SetWidthOverride(180.f);
+	DividerBox->SetHeightOverride(3.f);
+	DividerBox->AddChild(Divider);
+	if (UVerticalBoxSlot* DSlot = LogoCluster->AddChildToVerticalBox(DividerBox))
 	{
 		DSlot->SetPadding(FMargin(0.f, 14.f, 0.f, 0.f));
 		DSlot->SetHorizontalAlignment(HAlign_Center);
@@ -192,7 +259,7 @@ void UMainMenuWidget::BuildWidgetTree()
 
 	// --- version / milestone (bottom-right corner, unobtrusive) ----------------
 	UTextBlock* Ver = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
-	Ver->SetText(FText::FromString(TEXT("M11d · 开发版 · 低多边形转播")));
+	Ver->SetText(FText::FromString(TEXT("M11f · 开发版 · 风格化转播")));
 	Ver->SetFont(SEUiStyle::Font(SEUiStyle::Type::Tiny()));
 	Ver->SetColorAndOpacity(FSlateColor(SEUiStyle::Colors::Grey));
 	if (UCanvasPanelSlot* S = Root->AddChildToCanvas(Ver))
@@ -222,10 +289,19 @@ void UMainMenuWidget::NativeConstruct()
 	if (BtnStart)
 	{
 		BtnStart->OnClicked.AddUniqueDynamic(this, &UMainMenuWidget::HandleStartClick);
-		BtnStart->SetKeyboardFocus();
 	}
 	if (BtnSettings) BtnSettings->OnClicked.AddUniqueDynamic(this, &UMainMenuWidget::HandleSettingsClick);
 	if (BtnQuit) BtnQuit->OnClicked.AddUniqueDynamic(this, &UMainMenuWidget::HandleQuitClick);
+}
+
+// M11f-3: focus is applied AFTER the menu is in the viewport (NativeConstruct
+// is too early for SetKeyboardFocus), so the gold focus rim is visible.
+void UMainMenuWidget::SetInitialFocus()
+{
+	if (BtnStart)
+	{
+		BtnStart->SetKeyboardFocus();
+	}
 }
 
 void UMainMenuWidget::NativeTick(const FGeometry& Geo, float DT)
@@ -298,6 +374,18 @@ void UMainMenuWidget::NativeTick(const FGeometry& Geo, float DT)
 		{
 			BallIcon->SetRenderTranslation(FVector2D(0.f, 0.f));
 			BallIcon->SetRenderTransformAngle(0.f);
+		}
+	}
+	// --- background volleyball watermark: slow spin (frozen when reduced) -------
+	if (BG_Ball)
+	{
+		if (!bFast)
+		{
+			BG_Ball->SetRenderTransformAngle(FMath::Fmod(AnimTime * 22.f, 360.f));
+		}
+		else
+		{
+			BG_Ball->SetRenderTransformAngle(0.f);
 		}
 	}
 }

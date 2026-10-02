@@ -119,8 +119,14 @@ namespace SEUiStyle
 	}
 
 	/**
-	 * Button style with distinct normal / hover / pressed / disabled tints AND a
-	 * visible keyboard-focus brush (gold rim) so Tab / arrow navigation is clear.
+	 * Button style with distinct normal / hover / pressed / disabled tints.
+	 * NOTE (M11f-3): FButtonStyle has NO focused brush and SButton paints only
+	 * Disabled/Pressed/Hovered/Normal — the previous comment claiming a gold
+	 * focus rim was fiction. Keyboard-focus visuals are implemented by
+	 * USEFocusableButton (UI/FocusableButton.h), which swaps to a gold-rimmed
+	 * variant of this style while focused. FocusedVariant() below builds that
+	 * variant (Normal brush becomes a gold border wash; everything else is
+	 * inherited from the base style).
 	 */
 	inline FButtonStyle ButtonStyle(const FLinearColor& Normal, const FLinearColor& Hover, const FLinearColor& Pressed,
 		bool bDanger = false)
@@ -133,6 +139,20 @@ namespace SEUiStyle
 
 		S.SetNormalPadding(FMargin(18.f, 10.f));
 		S.SetPressedPadding(FMargin(18.f, 12.f));
+		return S;
+	}
+
+	/** Focused variant: same hover/pressed/disabled, Normal replaced by a thick
+	 *  gold (or red, for danger) border wash — the visible keyboard-focus state. */
+	inline FButtonStyle FocusedVariant(const FButtonStyle& Base, bool bDanger = false)
+	{
+		FButtonStyle S = Base;
+		FSlateBrush Focus = SolidBrush(bDanger ? FLinearColor(0.95f, 0.25f, 0.22f, 0.85f) : Colors::Gold);
+		Focus.DrawAs = ESlateBrushDrawType::Border;
+		Focus.Margin = FMargin(0.22f);
+		Focus.TintColor = FSlateColor(bDanger ? FLinearColor(0.95f, 0.25f, 0.22f, 0.38f)
+		                                      : FLinearColor(1.f, 0.80f, 0.12f, 0.30f));
+		S.SetNormal(Focus);
 		return S;
 	}
 

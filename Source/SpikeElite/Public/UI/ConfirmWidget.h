@@ -29,6 +29,9 @@ public:
 
 	void SetMessage(const FString& Text);
 
+	/** M11f-3: focus the safe default (取消) AFTER the widget is in the viewport. */
+	void SetInitialFocus();
+
 protected:
 	UPROPERTY() TObjectPtr<UTextBlock> MessageText;
 	UPROPERTY() TObjectPtr<UButton> BtnConfirm;

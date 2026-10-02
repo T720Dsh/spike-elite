@@ -37,6 +37,9 @@ public:
 	/** Populate window mode / resolution / quality from the live user settings. */
 	void InitFromCurrentSettings();
 
+	/** M11f-3: focus the safe default (返回) AFTER the widget is in the viewport. */
+	void SetInitialFocus();
+
 protected:
 	UPROPERTY() TObjectPtr<UComboBoxString> WindowMode;
 	UPROPERTY() TObjectPtr<UComboBoxString> Resolution;

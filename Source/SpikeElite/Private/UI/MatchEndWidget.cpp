@@ -137,8 +137,12 @@ void UMatchEndWidget::NativeConstruct()
 	if (BtnRematch)  BtnRematch->OnClicked.AddUniqueDynamic(this, &UMatchEndWidget::HRematch);
 	if (BtnMainMenu) BtnMainMenu->OnClicked.AddUniqueDynamic(this, &UMatchEndWidget::HMainMenu);
 	if (BtnQuit)     BtnQuit->OnClicked.AddUniqueDynamic(this, &UMatchEndWidget::HQuit);
+}
 
-	// M11a: keyboard focus starts on 再来一场 (the safe, forward action).
+// M11f-3: focus is applied AFTER the widget is in the viewport (NativeConstruct
+// is too early for SetKeyboardFocus). Safe, forward action stays 再来一场.
+void UMatchEndWidget::SetInitialFocus()
+{
 	if (BtnRematch)
 	{
 		BtnRematch->SetKeyboardFocus();

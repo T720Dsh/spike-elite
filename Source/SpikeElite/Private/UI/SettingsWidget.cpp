@@ -1,6 +1,7 @@
-// SPDX-License-Identifier: MIT
+﻿// SPDX-License-Identifier: MIT
 #include "UI/SettingsWidget.h"
 #include "UI/SEUiStyle.h"
+#include "UI/FocusableButton.h"
 #include "Components/TextBlock.h"
 #include "Components/Button.h"
 #include "Components/Slider.h"
@@ -14,6 +15,8 @@
 #include "Components/SizeBox.h"
 #include "Components/SizeBoxSlot.h"
 #include "Components/VerticalBoxSlot.h"
+#include "Components/ScrollBox.h"
+#include "Components/ScrollBoxSlot.h"
 #include "Blueprint/WidgetTree.h"
 #include "GameFramework/GameUserSettings.h"
 #include "Styling/SlateBrush.h"
@@ -171,11 +174,24 @@ void USettingsWidget::BuildWidgetTree()
 	if (auto* S = Root->AddChildToCanvas(BG)) { S->SetAnchors(FAnchors(0,0,1,1)); S->SetOffsets(FMargin(0)); }
 
 	UVerticalBox* Col = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass());
-	if (auto* S = Root->AddChildToCanvas(Col))
+
+	// M11f-3: the old layout was a centred AutoSize VerticalBox — at 1280x720
+	// with UI scale 1.4 the lower controls (UI scale slider, reduced motion,
+	// buttons) were pushed past the bottom edge and unreachable. Replace with a
+	// viewport-constrained ScrollBox: everything stays reachable by scrolling,
+	// nothing is clipped, at any resolution x UI scale.
+	UScrollBox* Scroll = WidgetTree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass());
+	Scroll->SetScrollBarVisibility(ESlateVisibility::Visible);
+	if (auto* S = Root->AddChildToCanvas(Scroll))
 	{
-		S->SetAnchors(FAnchors(0.5f,0.5f,0.5f,0.5f));
-		S->SetAlignment(FVector2D(0.5f,0.5f));
-		S->SetAutoSize(true);
+		S->SetAnchors(FAnchors(0.06f, 0.05f, 0.94f, 0.97f));
+		S->SetOffsets(FMargin(0));
+	}
+	Scroll->AddChild(Col);
+
+	if (UScrollBoxSlot* ColSlot = Cast<UScrollBoxSlot>(Col->Slot))
+	{
+		ColSlot->SetHorizontalAlignment(HAlign_Fill);
 	}
 
 	auto Title = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
@@ -241,8 +257,9 @@ void USettingsWidget::BuildWidgetTree()
 	}
 
 	AddRow(WidgetTree, Col, TEXT("减少动态效果"));
-	ReducedMotionBtn = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass());
+	ReducedMotionBtn = WidgetTree->ConstructWidget<USEFocusableButton>(USEFocusableButton::StaticClass());
 	ReducedMotionBtn->SetStyle(SEUiStyle::ButtonStyle(SEUiStyle::Colors::Slate, FLinearColor(0.28f,0.34f,0.46f,1.f), FLinearColor(0.10f,0.13f,0.18f,1.f)));
+	Cast<USEFocusableButton>(ReducedMotionBtn)->SetFocusedStyle(ReducedMotionBtn->GetStyle());   // M11f-3: visible gold focus rim
 	ReducedMotionLabel = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
 	ReducedMotionLabel->SetText(FText::FromString(TEXT("关")));
 	ReducedMotionLabel->SetFont(SEUiStyle::Font(18));
@@ -257,8 +274,9 @@ void USettingsWidget::BuildWidgetTree()
 		ButtonsSlot->SetHorizontalAlignment(HAlign_Center);
 		ButtonsSlot->SetPadding(FMargin(0.f, 10.f, 0.f, 0.f));
 	}
-	BtnApply = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass());
+	BtnApply = WidgetTree->ConstructWidget<USEFocusableButton>(USEFocusableButton::StaticClass());
 	BtnApply->SetStyle(SEUiStyle::PrimaryButton());
+	Cast<USEFocusableButton>(BtnApply)->SetFocusedStyle(BtnApply->GetStyle());   // M11f-3: visible gold focus rim
 	{
 		UTextBlock* T = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
 		T->SetText(FText::FromString(TEXT("应用")));
@@ -267,8 +285,9 @@ void USettingsWidget::BuildWidgetTree()
 		BtnApply->AddChild(T);
 		if (UHorizontalBoxSlot* ButtonSlot = Btns->AddChildToHorizontalBox(BtnApply)) ButtonSlot->SetPadding(FMargin(6.f));
 	}
-	BtnBack = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass());
+	BtnBack = WidgetTree->ConstructWidget<USEFocusableButton>(USEFocusableButton::StaticClass());
 	BtnBack->SetStyle(SEUiStyle::SecondaryButton());
+	Cast<USEFocusableButton>(BtnBack)->SetFocusedStyle(BtnBack->GetStyle());   // M11f-3: visible gold focus rim
 	{
 		UTextBlock* T = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
 		T->SetText(FText::FromString(TEXT("返回")));
@@ -287,19 +306,27 @@ void USettingsWidget::BuildWidgetTree()
 void USettingsWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
+
+	// M11f-3: dev-only override for the resolution x UI-scale acceptance matrix
+	// (1280x720/1600x900/1920x1080 x 0.8/1.0/1.4). -UIScale=1.4 forces the
+	// pending value AND the live ApplicationScale so the settings page and the
+	// rest of the UMG render at that scale immediately. Gameplay code ignores it.
+	float DevScale = 0.f;
+	if (FParse::Value(FCommandLine::Get(), TEXT("UIScale="), DevScale) && DevScale >= 0.5f && DevScale <= 2.f)
+	{
+		PendingUIScale = DevScale;
+		GetMutableDefault<UUserInterfaceSettings>()->ApplicationScale = DevScale;
+	}
+
 	if (SensSlider) SensSlider->OnValueChanged.AddUniqueDynamic(this, &USettingsWidget::OnSensChanged);
 	if (UIScaleSlider) UIScaleSlider->OnValueChanged.AddUniqueDynamic(this, &USettingsWidget::OnUIScaleChanged);
 	if (ReducedMotionBtn) ReducedMotionBtn->OnClicked.AddUniqueDynamic(this, &USettingsWidget::ToggleReducedMotion);
 	if (BtnApply) BtnApply->OnClicked.AddUniqueDynamic(this, &USettingsWidget::ApplySettings);
 	if (BtnBack) BtnBack->OnClicked.AddUniqueDynamic(this, &USettingsWidget::Back);
 
-	// M11a: keyboard focus starts on 返回 (Esc-equivalent safe action); Tab /
-	// arrow keys move through the combo boxes and slider from there.
-	if (BtnBack)
-	{
-		BtnBack->SetKeyboardFocus();
-	}
-
+	// M11f-3: keyboard focus is applied AFTER the widget is in the viewport
+	// (NativeConstruct is too early for SetKeyboardFocus). Safe default stays
+	// 返回 (Esc-equivalent); Tab/arrow keys move through the controls from there.
 	// Reflect the live settings after the controls exist.
 	InitFromCurrentSettings();
 	SetCurrentSensitivity(PendingSensitivity);
@@ -410,4 +437,13 @@ void USettingsWidget::Back()
 {
 	// Discard unapplied sensitivity / display changes.
 	OnBack.ExecuteIfBound();
+}
+
+// M11f-3: safe default focus (返回) applied once the widget is in the viewport.
+void USettingsWidget::SetInitialFocus()
+{
+	if (BtnBack)
+	{
+		BtnBack->SetKeyboardFocus();
+	}
 }

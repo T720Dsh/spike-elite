@@ -1497,6 +1497,7 @@ void ASpikeElitePlayerController::ShowMainMenu()
 		MainMenu->OnQuit.BindUObject(this, &ASpikeElitePlayerController::AskQuitToDesktop);
 		MainMenu->AddToViewport(10);
 		SetUIInputMode(MainMenu);
+		MainMenu->SetInitialFocus();   // M11f-3: focus 开始比赛 after the menu is live
 		UE_LOG(LogSEMenu, Log, TEXT("MainMenu added. InViewport=%s"),
 			MainMenu->IsInViewport() ? TEXT("yes") : TEXT("no"));
 	}
@@ -1542,6 +1543,7 @@ void ASpikeElitePlayerController::PauseGame()
 	SetPause(true);
 	BuildPauseMenu();
 	SetUIInputMode(PauseMenu);
+	PauseMenu->SetInitialFocus();   // M11f-3: focus 继续游戏
 }
 
 void ASpikeElitePlayerController::ResumeGame()
@@ -1593,6 +1595,7 @@ void ASpikeElitePlayerController::OnMatchOver(const TArray<int32>& ScoresA, cons
 	BuildMatchEnd();
 	if (MatchEnd) { MatchEnd->SetResult(Winner, ScoresA, ScoresB); }
 	SetUIInputMode(MatchEnd);
+	MatchEnd->SetInitialFocus();   // M11f-3
 }
 
 void ASpikeElitePlayerController::Rematch()
@@ -1615,6 +1618,7 @@ void ASpikeElitePlayerController::ShowConfirm(const FString& Message, EMenuState
 	if (Confirm)
 	{
 		SetUIInputMode(Confirm);
+		Confirm->SetInitialFocus();   // M11f-3: duplicate press just refocuses 取消
 		return;
 	}
 
@@ -1633,6 +1637,7 @@ void ASpikeElitePlayerController::ShowConfirm(const FString& Message, EMenuState
 		// result screens underneath can never be operated behind the dialog.
 		MenuState = EMenuState::Confirm;
 		SetUIInputMode(Confirm);
+		Confirm->SetInitialFocus();   // M11f-3: safe default = 取消
 	}
 }
 
@@ -1657,12 +1662,14 @@ void ASpikeElitePlayerController::CancelConfirm()
 		MenuState = EMenuState::Paused;
 		SetPause(true);
 		SetUIInputMode(PauseMenu);
+		PauseMenu->SetInitialFocus();   // M11f-3
 	}
 	else if (StateBeforeConfirm == EMenuState::MatchOver && MatchEnd)
 	{
 		MenuState = EMenuState::MatchOver;
 		SetPause(true);
 		SetUIInputMode(MatchEnd);
+		MatchEnd->SetInitialFocus();   // M11f-3
 	}
 	else if (StateBeforeConfirm == EMenuState::Playing)
 	{
@@ -1674,7 +1681,7 @@ void ASpikeElitePlayerController::CancelConfirm()
 	{
 		MenuState = EMenuState::MainMenu;
 		SetPause(false);
-		if (MainMenu) { SetUIInputMode(MainMenu); }
+		if (MainMenu) { SetUIInputMode(MainMenu); MainMenu->SetInitialFocus(); }   // M11f-3
 		else { ShowMainMenu(); }
 	}
 }
@@ -1736,6 +1743,7 @@ void ASpikeElitePlayerController::OpenSettingsFromMenu()
 		SettingsMenu->OnSensitivityChanged.BindUObject(this, &ASpikeElitePlayerController::SetMouseSensitivity);
 		SettingsMenu->AddToViewport(30);
 		SetUIInputMode(SettingsMenu);
+		SettingsMenu->SetInitialFocus();   // M11f-3: safe default = 返回
 	}
 }
 
@@ -1755,6 +1763,7 @@ void ASpikeElitePlayerController::OpenSettingsFromPause()
 		SettingsMenu->OnSensitivityChanged.BindUObject(this, &ASpikeElitePlayerController::SetMouseSensitivity);
 		SettingsMenu->AddToViewport(30);
 		SetUIInputMode(SettingsMenu);
+		SettingsMenu->SetInitialFocus();   // M11f-3: safe default = 返回
 	}
 }
 
@@ -1772,6 +1781,7 @@ void ASpikeElitePlayerController::CloseSettings()
 		SetPause(true);
 		BuildPauseMenu();
 		SetUIInputMode(PauseMenu);
+		PauseMenu->SetInitialFocus();   // M11f-3
 	}
 }
 

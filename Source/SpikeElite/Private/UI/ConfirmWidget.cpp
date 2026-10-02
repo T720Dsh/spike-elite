@@ -1,6 +1,7 @@
-// SPDX-License-Identifier: MIT
+﻿// SPDX-License-Identifier: MIT
 #include "UI/ConfirmWidget.h"
 #include "UI/SEUiStyle.h"
+#include "UI/FocusableButton.h"
 #include "Components/TextBlock.h"
 #include "Components/Button.h"
 #include "Components/Image.h"
@@ -21,8 +22,9 @@ UConfirmWidget::UConfirmWidget(const FObjectInitializer& ObjectInitializer)
 static UButton* MakeConfirmBtn(UWidgetTree* Tree, UVerticalBox* Parent, const FString& Label,
 	const FButtonStyle& Style, int32 FontSize)
 {
-	UButton* B = Tree->ConstructWidget<UButton>(UButton::StaticClass());
+	UButton* B = Tree->ConstructWidget<USEFocusableButton>(USEFocusableButton::StaticClass());
 	B->SetStyle(Style);
+	Cast<USEFocusableButton>(B)->SetFocusedStyle(Style);   // M11f-3: visible gold focus rim
 
 	UTextBlock* T = Tree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
 	T->SetText(FText::FromString(Label));
@@ -93,9 +95,13 @@ void UConfirmWidget::NativeConstruct()
 	Super::NativeConstruct();
 	if (BtnConfirm) BtnConfirm->OnClicked.AddUniqueDynamic(this, &UConfirmWidget::HConfirm);
 	if (BtnCancel)  BtnCancel->OnClicked.AddUniqueDynamic(this, &UConfirmWidget::HCancel);
+}
 
-	// M11a: keyboard focus starts on 取消 so Enter/Space can never accidentally
-	// confirm a destructive action. Tab/arrow keys then navigate both buttons.
+// M11f-3: focus is set AFTER the widget is in the viewport (NativeConstruct is
+// too early). The safe default stays 取消 so Enter/Space can never accidentally
+// confirm a destructive action.
+void UConfirmWidget::SetInitialFocus()
+{
 	if (BtnCancel)
 	{
 		BtnCancel->SetKeyboardFocus();
