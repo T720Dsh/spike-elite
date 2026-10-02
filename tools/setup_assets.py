@@ -194,6 +194,50 @@ def build_crowd_material(full_path="/Game/Materials/M_Crowd"):
     log("built " + full_path)
 
 
+def build_ball_material(full_path="/Game/Materials/M_TintBall"):
+    """Match-ball material: a runtime texture (panel art, no trademarks) times a
+    'Color' vector. M11f-4: replaces the old sphere + cylinder-band look with a
+    genuine multi-panel volleyball surface driven by a UV texture, so the panel
+    seams rotate with the ball and nothing floats outside the sphere."""
+    mat = load_or_create_material(full_path)
+    try:
+        for expr in list(mat.get_editor_property("expression_collection").expressions):
+            unreal.MaterialEditingLibrary.delete_material_expression(mat, expr)
+    except Exception:
+        pass
+    ts = unreal.MaterialEditingLibrary.create_material_expression(
+        mat, unreal.MaterialExpressionTextureObjectParameter, -620, -80)
+    ts.set_editor_property("parameter_name", "BallTexture")
+    # A real default texture keeps the shader valid at compile time (a NULL
+    # TextureObjectParameter makes the material compile fail and fall back to
+    # the engine grid). The runtime MID replaces it with the panel texture.
+    icon = unreal.load_asset("/Game/UI/T_VolleyballIcon")
+    if icon:
+        ts.set_editor_property("texture", icon)
+    sample = unreal.MaterialEditingLibrary.create_material_expression(
+        mat, unreal.MaterialExpressionTextureSample, -420, -80)
+    uv = unreal.MaterialEditingLibrary.create_material_expression(
+        mat, unreal.MaterialExpressionTextureCoordinate, -620, 40)
+    unreal.MaterialEditingLibrary.connect_material_expressions(uv, "", sample, "UVs")
+    unreal.MaterialEditingLibrary.connect_material_expressions(ts, "", sample, "Tex")
+    color = unreal.MaterialEditingLibrary.create_material_expression(
+        mat, unreal.MaterialExpressionVectorParameter, -420, 120)
+    color.set_editor_property("parameter_name", "Color")
+    color.set_editor_property("default_value", unreal.LinearColor(1.0, 1.0, 1.0, 1.0))
+    mult = unreal.MaterialEditingLibrary.create_material_expression(
+        mat, unreal.MaterialExpressionMultiply, -120, 20)
+    unreal.MaterialEditingLibrary.connect_material_expressions(sample, "RGB", mult, "A")
+    unreal.MaterialEditingLibrary.connect_material_expressions(color, "", mult, "B")
+    unreal.MaterialEditingLibrary.connect_material_property(
+        mult, "", unreal.MaterialProperty.MP_BASE_COLOR)
+    rough = make_constant(mat, 0.45, -420, 300)
+    unreal.MaterialEditingLibrary.connect_material_property(
+        rough, "", unreal.MaterialProperty.MP_ROUGHNESS)
+    unreal.MaterialEditingLibrary.recompile_material(mat)
+    EAL.save_asset(full_path, only_if_is_dirty=False)
+    log("built " + full_path)
+
+
 def build_level():
     maps_dir = "/Game/Maps"
     if not unreal.EditorAssetLibrary.does_directory_exist(maps_dir):
@@ -246,15 +290,14 @@ def main():
     build_solid_material("/Game/Materials/M_SportFloor", (0.22, 0.14, 0.09), 0.7)
     build_tint_material("/Game/Materials/M_Tint")
     build_crowd_material("/Game/Materials/M_Crowd")
+    build_ball_material("/Game/Materials/M_TintBall")
 
     # 3. Chinese font face. The Slate-ready runtime UFont is assembled in C++
     #    (SEUiStyle::ChineseFont) because Python cannot write FCompositeFont's
     #    protected DefaultTypeface; we only need the UFontFace asset here.
-    try:
-        # UI uses Unreal's runtime composite font (including CJK fallback).
-        # Do not import proprietary fonts from a developer's Windows install.
-    except Exception as e:
-        warn("font face import failed: %r" % e)
+    #    UI uses Unreal's runtime composite font (including CJK fallback).
+    #    Do not import proprietary fonts from a developer's Windows install.
+    pass
 
     # 4. Indoor base level
     try:

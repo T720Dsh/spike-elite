@@ -108,46 +108,68 @@ void AMatchOfficialManager::BuildStand()
 
 void AMatchOfficialManager::BuildScorer()
 {
-	// Scorer table behind the A end line, outside the free zone (X=1750).
-	const FVector TableLoc(1750.f, 0.f, 0.f);
+	// M11f-4: scorer table, scoreboard and BOTH benches form one competition
+	// work area on the -Y sideline (outside the free zone, Y < -950), with the
+	// scorer table centred and the benches split by team; the 1st referee stays
+	// on the opposite (+Y) net end. No furniture sits inside the free zone or
+	// mixed into the stands.
+	const FVector TableLoc(0.f, -1200.f, 0.f);
 	ScorerTable = MakeBlock(TEXT("ScorerTable"), TableLoc + FVector(0, 0, 75.f),
-		FVector(1.8f, 0.9f, 0.1f), FLinearColor(0.45f, 0.40f, 0.32f), ECollisionEnabled::QueryOnly);
-	ScorerChair = MakeBlock(TEXT("ScorerChair"), TableLoc + FVector(80.f, 0, 30.f),
+		FVector(1.8f, 2.4f, 0.10f), FLinearColor(0.45f, 0.40f, 0.32f), ECollisionEnabled::QueryOnly);
+	ScorerChair = MakeBlock(TEXT("ScorerChair"), TableLoc + FVector(130.f, 0, 30.f),
 		FVector(0.5f, 0.5f, 0.6f), FLinearColor(0.35f, 0.36f, 0.40f));
-	// Scorer sits behind the table, facing the court / 1st referee (-X direction).
+	// Scorer sits behind the table facing the court / 1st referee (+X direction
+	// from the -Y aisle, i.e. towards the net). Body below the scoreboard device.
 	ScorerBody = MakeBlock(TEXT("ScorerBody"), TableLoc + FVector(70.f, 0, 105.f),
 		FVector(0.40f, 0.30f, 0.90f), FLinearColor(0.25f, 0.30f, 0.45f));
 	ScorerHead = MakeBlock(TEXT("ScorerHead"), TableLoc + FVector(70.f, 0, 168.f),
 		FVector(0.28f, 0.28f, 0.28f), FLinearColor(0.72f, 0.55f, 0.42f));
 
-	// Physical scorer's scoreboard device on the table: a pedestal plus a
-	// tall panel whose front face (-X, toward the court and the broadcast
-	// camera) carries the live text, so it reads from the stands and the
-	// scorer never blocks it.
-	ScoreboardDevice = MakeBlock(TEXT("ScoreboardDevice"), TableLoc + FVector(-10.f, 0, 108.f),
-		FVector(1.1f, 0.6f, 0.10f), FLinearColor(0.18f, 0.19f, 0.24f), ECollisionEnabled::QueryOnly);
-	ScoreboardPanel = MakeBlock(TEXT("ScoreboardPanel"), TableLoc + FVector(-10.f, 0, 150.f),
-		FVector(1.05f, 0.05f, 0.85f), FLinearColor(0.08f, 0.09f, 0.14f), ECollisionEnabled::QueryOnly);
+	// Physical scoreboard device on the table: a wide pedestal plus a tall panel
+	// whose FRONT FACE is -X (towards the court, the stands and the broadcast
+	// camera). The panel is thin along X (0.06), wide along Y (2.2 m) and the
+	// text sits just outside that -X face so glyphs are readable front-on and
+	// from a 45-degree angle with no mirrored or board-external text.
+	ScoreboardDevice = MakeBlock(TEXT("ScoreboardDevice"), TableLoc + FVector(0, 0, 108.f),
+		FVector(0.9f, 2.4f, 0.12f), FLinearColor(0.18f, 0.19f, 0.24f), ECollisionEnabled::QueryOnly);
+	ScoreboardPanel = MakeBlock(TEXT("ScoreboardPanel"), TableLoc + FVector(0, 0, 155.f),
+		FVector(0.06f, 2.2f, 0.85f), FLinearColor(0.05f, 0.06f, 0.11f), ECollisionEnabled::QueryOnly);
 
-	// Live text on the panel's -X face. Yaw 180 faces the text toward the
-	// court so it reads correctly from the stands / broadcast camera.
+	// Live text: same -X face normal as the panel, offset 5 cm in front to avoid
+	// z-fighting; centred horizontally, 4 lines at a readable size that never
+	// overflows the 220 cm wide panel (two-digit scores like 26:24 fit).
 	ScoreboardText = CreateDefaultSubobject<UTextRenderComponent>(TEXT("ScoreboardText"));
 	ScoreboardText->SetupAttachment(Root);
-	ScoreboardText->SetRelativeLocation(TableLoc + FVector(-10.f, 0, 150.f));
-	ScoreboardText->SetRelativeRotation(FRotator(0.f, 180.f, 0.f));
+	// Text centred vertically on the panel (panel centre Z=155) via the
+	// TextCenter vertical alignment, offset -18 X in front of the -X face.
+	ScoreboardText->SetRelativeLocation(TableLoc + FVector(-18.f, 0, 155.f));
+	// TextRender's glyph plane faces -Y by default (the readable side points
+	// -Y); Yaw +90 turns the readable face to -X, matching the panel's front
+	// face, so text reads correctly (not mirrored) from the -X / court side
+	// where the acceptance camera stands. Verified on-shot: Yaw -90 produced
+	// mirrored glyphs from the -X viewpoint.
+	ScoreboardText->SetRelativeRotation(FRotator(0.f, 90.f, 0.f));
 	ScoreboardText->SetHorizontalAlignment(EHorizTextAligment::EHTA_Center);
-	ScoreboardText->SetWorldSize(22.f);
+	ScoreboardText->SetVerticalAlignment(EVerticalTextAligment::EVRTA_TextCenter);
+	ScoreboardText->SetWorldSize(16.f);
 	ScoreboardText->SetTextRenderColor(FColor(255, 214, 64));
-	ScoreboardText->SetText(FText::FromString(TEXT("SPIKE ELITE\nSET 1\n0 : 0")));
+	// English only: UTextRenderComponent uses the engine default font (Roboto)
+	// which has no CJK glyphs; the four-line format is SET / A:B / sets / serve.
+	ScoreboardText->SetText(FText::FromString(TEXT("SET 1\nA 0 : 0 B\nSETS A 0 : 0 B\nSERVE A")));
 }
 
 void AMatchOfficialManager::BuildBenches()
 {
-	// Team benches outside the free zone (Y = ±1150), along X.
+	// M11f-4: both benches sit on the SAME (-Y) sideline as the scorer table,
+	// outside the free zone, split by team (A on +X, B on -X), so the whole
+	// competition work area reads as one side and no bench intrudes into the
+	// free zone or the stands.
+	const FVector BenchALoc(420.f, -1300.f, 0.f);
+	const FVector BenchBLoc(-420.f, -1300.f, 0.f);
 	const FLinearColor BenchColor(0.25f, 0.40f, 0.55f);
-	BenchA = MakeBlock(TEXT("BenchA"), FVector(200.f, 1150.f, 30.f),
+	BenchA = MakeBlock(TEXT("BenchA"), BenchALoc + FVector(0, 0, 30.f),
 		FVector(5.f, 0.4f, 0.35f), BenchColor, ECollisionEnabled::QueryOnly);
-	BenchB = MakeBlock(TEXT("BenchB"), FVector(200.f, -1150.f, 30.f),
+	BenchB = MakeBlock(TEXT("BenchB"), BenchBLoc + FVector(0, 0, 30.f),
 		FVector(5.f, 0.4f, 0.35f), FLinearColor(0.55f, 0.30f, 0.25f), ECollisionEnabled::QueryOnly);
 
 	// Lightweight substitutes (visual only, no collision) on both benches,
@@ -168,8 +190,8 @@ void AMatchOfficialManager::BuildBenches()
 	};
 	for (int32 i = -2; i <= 2; ++i)
 	{
-		AddSub(FVector(200.f + i * 60.f, 1150.f - 80.f, 0.f), FLinearColor(0.15f, 0.40f, 0.75f));
-		AddSub(FVector(200.f + i * 60.f, -1150.f + 80.f, 0.f), FLinearColor(0.75f, 0.25f, 0.20f));
+		AddSub(BenchALoc + FVector(60.f * i, -80.f, 0.f), FLinearColor(0.15f, 0.40f, 0.75f));
+		AddSub(BenchBLoc + FVector(60.f * i, -80.f, 0.f), FLinearColor(0.75f, 0.25f, 0.20f));
 	}
 }
 
@@ -179,8 +201,9 @@ void AMatchOfficialManager::Whistle()
 	if (WhistleSound) { UGameplayStatics::PlaySound2D(this, WhistleSound); }
 }
 
-void AMatchOfficialManager::SetScorerText(const FString& Line1, const FString& Line2, const FString& Line3)
+void AMatchOfficialManager::SetScorerText(const FString& Line1, const FString& Line2, const FString& Line3, const FString& Line4)
 {
 	if (!ScoreboardText) return;
-	ScoreboardText->SetText(FText::FromString(FString::Printf(TEXT("%s\n%s\n%s"), *Line1, *Line2, *Line3)));
+	ScoreboardText->SetText(FText::FromString(FString::Printf(TEXT("%s\n%s\n%s\n%s"),
+		*Line1, *Line2, *Line3, *Line4)));
 }

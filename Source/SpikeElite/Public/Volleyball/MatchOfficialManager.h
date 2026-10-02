@@ -31,8 +31,9 @@ public:
 	/** Play the program-generated referee whistle (own sound, no external asset). */
 	void Whistle();
 
-	/** Push live score text onto the scorer's table scoreboard (event-driven). */
-	void SetScorerText(const FString& Line1, const FString& Line2, const FString& Line3);
+	/** Push live score text onto the scorer's table scoreboard (event-driven).
+	 *  Four lines: SET / A score : B score / A sets : B sets / serving team. */
+	void SetScorerText(const FString& Line1, const FString& Line2, const FString& Line3, const FString& Line4);
 
 protected:
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UBoxComponent> Root;

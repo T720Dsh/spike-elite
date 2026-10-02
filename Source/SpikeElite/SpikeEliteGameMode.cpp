@@ -728,7 +728,8 @@ void ASpikeEliteGameMode::UpdateScoreboard()
 		Officials->SetScorerText(
 			FString::Printf(TEXT("SET %d"), CurrentSet),
 			FString::Printf(TEXT("A %d : %d B"), TeamAScore, TeamBScore),
-			FString::Printf(TEXT("Serve %s  Sets A%d:%d B"), TeamStr(ServingTeam), TeamASetsWon, TeamBSetsWon));
+			FString::Printf(TEXT("SETS A %d : %d B"), TeamASetsWon, TeamBSetsWon),
+			FString::Printf(TEXT("SERVE %s"), TeamStr(ServingTeam)));
 	}
 }
 

@@ -117,6 +117,9 @@ void ASpikeElitePlayerController::DevView(const FVector& Loc, const FRotator& Ro
 		DevCam->SetActorLocationAndRotation(Loc, Rot);
 		SetViewTarget(DevCam);
 	}
+	UE_LOG(LogSEMenu, Log, TEXT("DEV VIEW: devcam=%s loc=%s rot=%s viewtarget=%s"),
+		DevCam ? TEXT("valid") : TEXT("NULL"), *Loc.ToString(), *Rot.ToString(),
+		GetViewTarget() ? *GetViewTarget()->GetName() : TEXT("none"));
 }
 
 void ASpikeElitePlayerController::DevViewPlayer()
@@ -865,12 +868,25 @@ void ASpikeElitePlayerController::DevShotSuite()
 		}
 
 		// 08: officials — three captures: 1st referee stand (+Y net end), 2nd
-		// referee (-Y net end), scorer table + physical scoreboard (X=1750).
+		// referee (-Y net end), scorer table + physical scoreboard (0,-1200).
 		// Each capture waits its turn on the single-buffer screenshot gate.
 		if (!Done(8) && CanShot() && Done(7) && GM->GetOfficials())
 		{
 			const FVector CourtY = FVector(0.f, 0.f, 0.f);
 			if ((Shot8Mask & 1) == 0)
+			{
+				// M11f-4: scorer table + physical scoreboard sit at (0,-1200) on
+				// the -Y work side. The panel and its text face -X (towards the
+				// court), so the camera stands on the -X side of the device and
+				// looks back at the front face — readable, not mirrored.
+				const FVector Cam(-260.f, -1150.f, 150.f);
+				const FRotator R = UKismetMathLibrary::FindLookAtRotation(Cam, FVector(0.f, -1200.f, 155.f));
+				PC->DevView(Cam, R);
+				PC->DevShot(TEXT("shot_ss_08_scorer"));
+				Shot8Mask |= 1;
+				ShotDone();
+			}
+			else if ((Shot8Mask & 2) == 0)
 			{
 				// Side approach from the +X/+Y corner, head-level, so the net post
 				// does not occlude the referee standing on the platform.
@@ -878,28 +894,15 @@ void ASpikeElitePlayerController::DevShotSuite()
 				const FRotator R = UKismetMathLibrary::FindLookAtRotation(Cam, FVector(0.f, 720.f, 320.f));
 				PC->DevView(Cam, R);
 				PC->DevShot(TEXT("shot_ss_08_ref1"));
-				Shot8Mask |= 1;
-				ShotDone();
-			}
-			else if ((Shot8Mask & 2) == 0)
-			{
-				const FVector Cam(-300.f, -860.f, 200.f);
-				const FRotator R = UKismetMathLibrary::FindLookAtRotation(Cam, FVector(0.f, -720.f, 100.f));
-				PC->DevView(Cam, R);
-				PC->DevShot(TEXT("shot_ss_08_ref2"));
 				Shot8Mask |= 2;
 				ShotDone();
 			}
 			else if ((Shot8Mask & 4) == 0)
 			{
-				// Scorer table + physical scoreboard: tight low angle from the side
-				// so the table, scorer and scoreboard text all fit the frame.
-				// The scoreboard text faces the negative-Y aisle.  Photograph it
-				// from that side so the glyphs are readable instead of mirrored.
-				const FVector Cam(1600.f, -300.f, 130.f);
-				const FRotator R = UKismetMathLibrary::FindLookAtRotation(Cam, FVector(1750.f, 0.f, 110.f));
+				const FVector Cam(-300.f, -860.f, 200.f);
+				const FRotator R = UKismetMathLibrary::FindLookAtRotation(Cam, FVector(0.f, -720.f, 100.f));
 				PC->DevView(Cam, R);
-				PC->DevShot(TEXT("shot_ss_08_scorer"));
+				PC->DevShot(TEXT("shot_ss_08_ref2"));
 				Shot8Mask |= 4;
 				ShotDone();
 			}

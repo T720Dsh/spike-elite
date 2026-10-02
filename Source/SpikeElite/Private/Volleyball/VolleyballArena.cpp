@@ -277,7 +277,11 @@ void AVolleyballArena::PopulateStands()
 		FVector BodyLoc(BaseLoc.X + Sway, BaseLoc.Y + Sway, BaseLoc.Z + 14.f);
 		FVector LegLoc(BaseLoc.X + Sway, BaseLoc.Y + Sway, BaseLoc.Z + 2.f);
 		FVector HeadLoc(BaseLoc.X + Sway, BaseLoc.Y + Sway, BaseLoc.Z + 44.f);
-		CrowdBodies[Kind]->AddInstance(FTransform(FRotator::ZeroRotator, BodyLoc, FVector(0.32f, 0.24f, 0.34f)));
+		// M11f-4: orient the elongated body axis toward court centre so the four
+		// stands all face the match instead of one shared zero rotation.
+		const float FacingYaw = FMath::RadiansToDegrees(FMath::Atan2(-BodyLoc.Y, -BodyLoc.X));
+		const FRotator Facing(0.f, FacingYaw, 0.f);
+		CrowdBodies[Kind]->AddInstance(FTransform(Facing, BodyLoc, FVector(0.32f, 0.24f, 0.34f)));
 		CrowdLegs->AddInstance(FTransform(FRotator::ZeroRotator, LegLoc, FVector(0.22f, 0.20f, 0.26f)));
 		CrowdHeads->AddInstance(FTransform(FRotator::ZeroRotator, HeadLoc, FVector(0.15f, 0.15f, 0.15f)));
 	};
