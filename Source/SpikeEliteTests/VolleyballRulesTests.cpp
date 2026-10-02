@@ -13,6 +13,7 @@
 #include "Volleyball/SetPlay.h"
 #include "Volleyball/VolleyballIdentity.h"
 #include "Volleyball/ChallengeSave.h"
+#include "Volleyball/MatchMode.h"
 #include "UI/TacticalContactComponent.h"
 #include "Engine/World.h"
 #include "GameFramework/WorldSettings.h"
@@ -1655,6 +1656,30 @@ bool FSEIRosterPairingAndStarters::RunTest(const FString& Parameters)
 	{
 		TestTrue(TEXT("no libero default"), P.Role != EPlayerRole::Libero);
 	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSEICoachPreferenceDefaults,
+	"SpikeElite.Tests.CoachPreferenceDefaults",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FSEICoachPreferenceDefaults::RunTest(const FString& Parameters)
+{
+	// M11h-6: coach preferences are bounded and default to neutral behaviour
+	// (serve middle, single block, standard depth, play-driven setter, 0.5 risk).
+	FCoachPreferences P;
+	TestEqual(TEXT("serve zone default"), P.ServeZone, 0);
+	TestEqual(TEXT("block default"), P.BlockPreference, 1);
+	TestEqual(TEXT("defense default"), P.DefenseDepth, 0);
+	TestEqual(TEXT("setter default"), P.SetterPreference, 0);
+	TestEqual(TEXT("risk default"), P.RiskTolerance, 0.5f);
+	TestTrue(TEXT("neutral bias"), FMath::IsNearlyZero(P.ServeZoneBiasCm()));
+
+	P.ServeZone = 1;
+	TestTrue(TEXT("right bias positive"), P.ServeZoneBiasCm() > 0.f);
+	P.ServeZone = -1;
+	TestTrue(TEXT("left bias negative"), P.ServeZoneBiasCm() < 0.f);
+	P.ServeZone = 99; // must clamp to +1
+	TestEqual(TEXT("clamped zone"), FMath::Clamp(P.ServeZone, -1, 1), 1);
 	return true;
 }
 

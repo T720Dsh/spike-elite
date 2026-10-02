@@ -16,6 +16,7 @@ class USettingsWidget;
 class UScoreboardWidget;
 class UMatchEndWidget;
 class UConfirmWidget;
+class UCoachPanelWidget;
 
 UENUM(BlueprintType)
 enum class EMenuState : uint8
@@ -101,6 +102,27 @@ public:
 		return MenuState != EMenuState::Playing;
 	}
 
+	/** M11h-6: toggle the coach / team-management panel (Tab). Requests are
+	 *  validated by the GameMode (timeout/substitution windows, allowances,
+	 *  pairing); preferences are stored on the GameMode and read by the AI. */
+	UFUNCTION(BlueprintCallable, Category = "UI")
+	void ToggleCoachPanel();
+	bool IsCoachPanelOpen() const { return CoachPanel != nullptr; }
+	void RefreshCoachPanel();
+	/** M11h-6: cycle handlers for the coach panel buttons. */
+	void HandleCoachTimeoutA();
+	void HandleCoachTimeoutB();
+	void HandleCoachSubA();
+	void HandleCoachSubB();
+	void HandleCoachServeZone();
+	void HandleCoachBlock();
+	void HandleCoachDefense();
+	void HandleCoachSetter();
+	static FString CoachZoneLabel(const FCoachPreferences& P);
+	static FString CoachBlockLabel(const FCoachPreferences& P);
+	static FString CoachDefenseLabel(const FCoachPreferences& P);
+	static FString CoachSetterLabel(const FCoachPreferences& P);
+
 	/** Tactical slow-motion shot planner (human only). Created in BeginPlay. */
 	UPROPERTY()
 	TObjectPtr<UTacticalContactComponent> Tactical;
@@ -131,11 +153,11 @@ public:
 protected:
 	UPROPERTY() TObjectPtr<UMainMenuWidget> MainMenu;
 	UPROPERTY() TObjectPtr<UModeSelectWidget> ModeSelect;
-	UPROPERTY() TObjectPtr<UPauseMenuWidget> PauseMenu;
-	UPROPERTY() TObjectPtr<USettingsWidget> SettingsMenu;
+	UPROPERTY() TObjectPtr<UPauseMenuWidget> PauseMenu;	UPROPERTY() TObjectPtr<USettingsWidget> SettingsMenu;
 	UPROPERTY() TObjectPtr<UScoreboardWidget> Scoreboard;
 	UPROPERTY() TObjectPtr<UMatchEndWidget> MatchEnd;
 	UPROPERTY() TObjectPtr<UConfirmWidget> Confirm;
+	UPROPERTY() TObjectPtr<UCoachPanelWidget> CoachPanel;
 
 	EMenuState MenuState = EMenuState::MainMenu;
 

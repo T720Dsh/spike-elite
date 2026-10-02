@@ -8,6 +8,7 @@
 #include "UI/ScoreboardWidget.h"
 #include "UI/MatchEndWidget.h"
 #include "UI/ConfirmWidget.h"
+#include "UI/CoachPanelWidget.h"
 #include "UI/RotationWidget.h"
 #include "UI/SEUiStyle.h"
 #include "Engine/UserInterfaceSettings.h"
@@ -1447,6 +1448,11 @@ void ASpikeElitePlayerController::SetupInputComponent()
 
 	// H toggles the right-top rotation HUD (gameplay only).
 	InputComponent->BindAction(TEXT("ToggleRotation"), IE_Pressed, this, &ASpikeElitePlayerController::OnToggleRotation);
+
+	// M11h-6: Tab opens/closes the coach / team-management panel.
+	FInputActionBinding& CoachBind =
+		InputComponent->BindAction(TEXT("ToggleCoach"), IE_Pressed, this, &ASpikeElitePlayerController::ToggleCoachPanel);
+	CoachBind.bExecuteWhenPaused = true;
 }
 
 void ASpikeElitePlayerController::OnToggleRotation()
@@ -1454,6 +1460,167 @@ void ASpikeElitePlayerController::OnToggleRotation()
 	if (ASpikeEliteGameMode* GM = GetWorld()->GetAuthGameMode<ASpikeEliteGameMode>())
 	{
 		if (GM->GetRotationWidget()) { GM->GetRotationWidget()->ToggleVisible(); }
+	}
+}
+
+// ---------------- M11h-6: coach / team-management panel ----------------
+
+void ASpikeElitePlayerController::ToggleCoachPanel()
+{
+	// The panel is a live-play tool: never open over the pause menu, confirm
+	// dialog or result screen (they own the input mode).
+	if (MenuState != EMenuState::Playing) { return; }
+	if (CoachPanel)
+	{
+		CoachPanel->RemoveFromParent();
+		CoachPanel = nullptr;
+		if (ASpikeEliteGameMode* GM = GetWorld()->GetAuthGameMode<ASpikeEliteGameMode>())
+		{
+			GM->bCoachPanelOpen = false;
+		}
+		SetGameInputMode();
+		return;
+	}
+
+	CoachPanel = CreateWidget<UCoachPanelWidget>(this);
+	if (!CoachPanel) { return; }
+	CoachPanel->OnRequestTimeoutA.BindUObject(this, &ASpikeElitePlayerController::HandleCoachTimeoutA);
+	CoachPanel->OnRequestTimeoutB.BindUObject(this, &ASpikeElitePlayerController::HandleCoachTimeoutB);
+	CoachPanel->OnSubA.BindUObject(this, &ASpikeElitePlayerController::HandleCoachSubA);
+	CoachPanel->OnSubB.BindUObject(this, &ASpikeElitePlayerController::HandleCoachSubB);
+	CoachPanel->OnCycleServeZone.BindUObject(this, &ASpikeElitePlayerController::HandleCoachServeZone);
+	CoachPanel->OnCycleBlock.BindUObject(this, &ASpikeElitePlayerController::HandleCoachBlock);
+	CoachPanel->OnCycleDefense.BindUObject(this, &ASpikeElitePlayerController::HandleCoachDefense);
+	CoachPanel->OnCycleSetter.BindUObject(this, &ASpikeElitePlayerController::HandleCoachSetter);
+	CoachPanel->OnClosePanel.BindUObject(this, &ASpikeElitePlayerController::ToggleCoachPanel);
+	CoachPanel->AddToViewport(30);
+	CoachPanel->SetInitialFocus();
+	if (ASpikeEliteGameMode* GM = GetWorld()->GetAuthGameMode<ASpikeEliteGameMode>())
+	{
+		GM->bCoachPanelOpen = true;
+	}
+	// The panel is mouse-driven; keep the world running underneath (no pause).
+	FInputModeUIOnly Mode;
+	Mode.SetWidgetToFocus(CoachPanel->TakeWidget());
+	Mode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+	SetInputMode(Mode);
+	bShowMouseCursor = true;
+	RefreshCoachPanel();
+}
+
+void ASpikeElitePlayerController::RefreshCoachPanel()
+{
+	if (!CoachPanel) { return; }
+	ASpikeEliteGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<ASpikeEliteGameMode>() : nullptr;
+	if (!GM) { return; }
+	const FString Status = FString::Printf(
+		TEXT("%s %d:%d %s · 暂停 A:%d B:%d · 换人 A:%d B:%d"),
+		GM->ServingTeam == EVolleyballTeam::TeamA ? TEXT("A") :
+			GM->ServingTeam == EVolleyballTeam::TeamB ? TEXT("B") : TEXT("-"),
+		GM->TeamAScore, GM->TeamBScore,
+		GM->GetPhaseLabel(), GM->TimeoutLeftA, GM->TimeoutLeftB,
+		GM->SubstitutionsLeftA, GM->SubstitutionsLeftB);
+	CoachPanel->SetStatus(Status);
+	CoachPanel->SetPrefLabels(CoachZoneLabel(GM->GetCoach(EVolleyballTeam::TeamA)),
+		CoachBlockLabel(GM->GetCoach(EVolleyballTeam::TeamA)),
+		CoachDefenseLabel(GM->GetCoach(EVolleyballTeam::TeamA)),
+		CoachSetterLabel(GM->GetCoach(EVolleyballTeam::TeamA)));
+}
+
+void ASpikeElitePlayerController::HandleCoachTimeoutA()
+{
+	if (ASpikeEliteGameMode* GM = GetWorld()->GetAuthGameMode<ASpikeEliteGameMode>())
+	{
+		GM->RequestTeamTimeout(EVolleyballTeam::TeamA);
+		RefreshCoachPanel();
+	}
+}
+void ASpikeElitePlayerController::HandleCoachTimeoutB()
+{
+	if (ASpikeEliteGameMode* GM = GetWorld()->GetAuthGameMode<ASpikeEliteGameMode>())
+	{
+		GM->RequestTeamTimeout(EVolleyballTeam::TeamB);
+		RefreshCoachPanel();
+	}
+}
+void ASpikeElitePlayerController::HandleCoachSubA()
+{
+	if (ASpikeEliteGameMode* GM = GetWorld()->GetAuthGameMode<ASpikeEliteGameMode>())
+	{
+		GM->RequestSubstitution(EVolleyballTeam::TeamA, 0, TEXT("A07"));
+		RefreshCoachPanel();
+	}
+}
+void ASpikeElitePlayerController::HandleCoachSubB()
+{
+	if (ASpikeEliteGameMode* GM = GetWorld()->GetAuthGameMode<ASpikeEliteGameMode>())
+	{
+		GM->RequestSubstitution(EVolleyballTeam::TeamB, 0, TEXT("B07"));
+		RefreshCoachPanel();
+	}
+}
+void ASpikeElitePlayerController::HandleCoachServeZone()
+{
+	if (ASpikeEliteGameMode* GM = GetWorld()->GetAuthGameMode<ASpikeEliteGameMode>())
+	{
+		FCoachPreferences P = GM->GetCoach(EVolleyballTeam::TeamA);
+		P.ServeZone = (P.ServeZone + 2) % 3 - 1; // -1 -> 0 -> 1 -> -1
+		GM->SetCoachPreference(EVolleyballTeam::TeamA, P);
+		RefreshCoachPanel();
+	}
+}
+void ASpikeElitePlayerController::HandleCoachBlock()
+{
+	if (ASpikeEliteGameMode* GM = GetWorld()->GetAuthGameMode<ASpikeEliteGameMode>())
+	{
+		FCoachPreferences P = GM->GetCoach(EVolleyballTeam::TeamA);
+		P.BlockPreference = (P.BlockPreference + 1) % 3; // 0/1/2 cycle
+		GM->SetCoachPreference(EVolleyballTeam::TeamA, P);
+		RefreshCoachPanel();
+	}
+}
+void ASpikeElitePlayerController::HandleCoachDefense()
+{
+	if (ASpikeEliteGameMode* GM = GetWorld()->GetAuthGameMode<ASpikeEliteGameMode>())
+	{
+		FCoachPreferences P = GM->GetCoach(EVolleyballTeam::TeamA);
+		P.DefenseDepth = (P.DefenseDepth + 2) % 3 - 1; // -1 -> 0 -> 1 -> -1
+		GM->SetCoachPreference(EVolleyballTeam::TeamA, P);
+		RefreshCoachPanel();
+	}
+}
+void ASpikeElitePlayerController::HandleCoachSetter()
+{
+	if (ASpikeEliteGameMode* GM = GetWorld()->GetAuthGameMode<ASpikeEliteGameMode>())
+	{
+		FCoachPreferences P = GM->GetCoach(EVolleyballTeam::TeamA);
+		P.SetterPreference = (P.SetterPreference + 1) % 5; // 0..4 cycle
+		GM->SetCoachPreference(EVolleyballTeam::TeamA, P);
+		RefreshCoachPanel();
+	}
+}
+
+FString ASpikeElitePlayerController::CoachZoneLabel(const FCoachPreferences& P)
+{
+	return (P.ServeZone < 0) ? TEXT("左") : (P.ServeZone > 0) ? TEXT("右") : TEXT("中");
+}
+FString ASpikeElitePlayerController::CoachBlockLabel(const FCoachPreferences& P)
+{
+	return (P.BlockPreference == 0) ? TEXT("不拦") : (P.BlockPreference == 2) ? TEXT("双人") : TEXT("单人");
+}
+FString ASpikeElitePlayerController::CoachDefenseLabel(const FCoachPreferences& P)
+{
+	return (P.DefenseDepth < 0) ? TEXT("前压") : (P.DefenseDepth > 0) ? TEXT("后撤") : TEXT("标准");
+}
+FString ASpikeElitePlayerController::CoachSetterLabel(const FCoachPreferences& P)
+{
+	switch (P.SetterPreference)
+	{
+	case 1: return TEXT("主攻");
+	case 2: return TEXT("副攻");
+	case 3: return TEXT("接应");
+	case 4: return TEXT("后排");
+	default: return TEXT("默认");
 	}
 }
 

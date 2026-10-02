@@ -1166,6 +1166,18 @@ bool ASpikeEliteGameMode::RequestServe(ASpikeEliteCharacter* Server)
 		UE_LOG(LogVolleyballRules, Log, TEXT("Serve by %s (accuracy=%.2f, err=%.1f deg)"),
 			*Id->PlayerId, Id->ServeAccuracy, ErrDeg);
 	}
+	// M11h-6: coach serve-placement bias (lateral), applied as a small yaw bias
+	// on top of the server's own error — never an absolute teleport.
+	{
+		const FCoachPreferences& C = GetCoach(Team);
+		if (!FMath::IsNearlyZero(C.ServeZoneBiasCm()))
+		{
+			const float BiasDeg = C.ServeZoneBiasCm() / 400.f; // ~240 cm -> ~34° at 4 m flight
+			TossDir = TossDir.RotateAngleAxis(BiasDeg, FVector::UpVector);
+			UE_LOG(LogVolleyballRules, Log, TEXT("Coach serve bias team=%s zone=%d deg=%.1f"),
+				TeamStr(Team), C.ServeZone, BiasDeg);
+		}
+	}
 	TossTimer = 0.6f;
 	bInToss = true;
 	ServerPlayerIndex = GetPlayerIndex(Team, Server);
@@ -1691,6 +1703,19 @@ int32 ASpikeEliteGameMode::SelectAttackerForPlay(EVolleyballTeam Team) const
 	else if (Play.Category == TEXT("副攻")) { Preferred = { 2 }; }       // roster index 2 == P3
 	else if (Play.Category == TEXT("后排")) { Preferred = { 0, 4, 5 }; } // P1/P5/P6
 
+	// M11h-6: coach setter-distribution bias overrides the play category when
+	// the coach explicitly asks for a hitter type. The run-up point still comes
+	// from the play, so the ball flies to the same target — the coach only
+	// decides WHO attacks.
+	switch (GetCoach(Team).SetterPreference)
+	{
+	case 1: Preferred = { 3 }; break;                       // 主攻 -> 四号位 (P4)
+	case 2: Preferred = { 2 }; break;                       // 副攻 -> 近体快 (P3)
+	case 3: Preferred = { 1 }; break;                       // 接应 -> 二号位 (P2)
+	case 4: Preferred = { 0, 4, 5 }; break;                 // 后排
+	default: break;                                         // 0 = play-driven
+	}
+
 	const FVector RunupWorld = SESetPlays::MirrorLocal(Play.AttackRunupLocal, (Team == EVolleyballTeam::TeamA) ? 1 : -1);
 
 	for (int32 Slot : Preferred)
@@ -1859,7 +1884,17 @@ void ASpikeEliteGameMode::UpdateAIDirectives(float DeltaSeconds)
 						PrimaryBehavior = EAIBehavior::MoveToReceive;
 					}
 				}
+				// M11h-6: coach defensive depth shifts the receive target along the
+				// court's longitudinal axis (press = step in, drop back = step out).
 				PrimaryTarget = Landing;
+				{
+					const int32 Depth = GetCoach(Team).DefenseDepth;
+					if (Depth != 0)
+					{
+						const float Shift = (Team == EVolleyballTeam::TeamA) ? -Depth * 150.f : Depth * 150.f;
+						PrimaryTarget.X = FMath::Clamp(PrimaryTarget.X + Shift, -1550.f, 1550.f);
+					}
+				}
 				break;
 			case 1: // Set: designated setter zone.
 				Primary = SelectSetterPlayer(Team);

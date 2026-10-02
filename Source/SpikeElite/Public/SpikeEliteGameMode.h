@@ -139,6 +139,29 @@ public:
 	/** Rebuild bench/pairing/allowances for a new set or match. */
 	void ResetSubstitutionState();
 
+	// ---------------- M11h-6: coach / team-management preferences ----------------
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Volleyball|Coach")
+	FCoachPreferences CoachA;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Volleyball|Coach")
+	FCoachPreferences CoachB;
+	/** True while the coach panel is open (coach mode / normal team panel). */
+	bool bCoachPanelOpen = false;
+
+	/** Set a team's coach preference; validated and clamped. */
+	void SetCoachPreference(EVolleyballTeam Team, const FCoachPreferences& Pref)
+	{
+		FCoachPreferences& Dst = (Team == EVolleyballTeam::TeamA) ? CoachA : CoachB;
+		Dst.ServeZone = FMath::Clamp(Pref.ServeZone, -1, 1);
+		Dst.BlockPreference = FMath::Clamp(Pref.BlockPreference, 0, 2);
+		Dst.DefenseDepth = FMath::Clamp(Pref.DefenseDepth, -1, 1);
+		Dst.SetterPreference = FMath::Clamp(Pref.SetterPreference, 0, 4);
+		Dst.RiskTolerance = FMath::Clamp(Pref.RiskTolerance, 0.f, 1.f);
+	}
+	const FCoachPreferences& GetCoach(EVolleyballTeam Team) const
+	{
+		return (Team == EVolleyballTeam::TeamA) ? CoachA : CoachB;
+	}
+
 	/** M11d-3: previous serving team, so the rotation HUD can flag side-out 轮转. */
 	EVolleyballTeam LastRotationServeTeam = EVolleyballTeam::None;
 
@@ -227,6 +250,25 @@ public:
 	}
 	const FString& GetRallyResultText() const { return RallyResultText; }
 	float GetRallyResultDisplaySeconds() const { return RallyResultDisplayTimer; }
+
+	/** Chinese label of the current match-state node (coach panel status line). */
+	const TCHAR* GetPhaseLabel() const
+	{
+		switch (MatchState)
+		{
+		case EMatchState::PreMatch:            return TEXT("赛前");
+		case EMatchState::BetweenRallies:      return TEXT("回合间");
+		case EMatchState::ResettingPositions:  return TEXT("复位");
+		case EMatchState::AwaitingReady:       return TEXT("等待就绪");
+		case EMatchState::ServiceAuthorized:   return TEXT("允许发球");
+		case EMatchState::ServingToss:         return TEXT("发球抛球");
+		case EMatchState::Rally:               return TEXT("回合进行");
+		case EMatchState::Timeout:             return TEXT("球队暂停");
+		case EMatchState::SetOver:             return TEXT("局间休息");
+		case EMatchState::MatchOver:           return TEXT("比赛结束");
+		default:                               return TEXT("-");
+		}
+	}
 
 	/** Current score, current set. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Volleyball|Score")
