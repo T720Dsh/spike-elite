@@ -85,6 +85,10 @@ void UServeIntroWidget::BuildWidgetTree()
 void UServeIntroWidget::SetServer(int32 JerseyNumber, const FString& Name, const FString& TeamLabel,
 	const FString& Role, bool bShortBar)
 {
+	// Packaged builds can reach SetServer before the widget tree exists (the
+	// UMG tree is built on AddToViewport); the controller now adds to viewport
+	// first, but keep the guard so a re-entrant call can never deref null.
+	if (!NumberText || !NameText || !TeamRoleText) { return; }
 	bShort = bShortBar;
 	const FString Number = FString::Printf(TEXT("%d"), JerseyNumber);
 	NumberText->SetText(FText::FromString(Number));
@@ -134,8 +138,8 @@ void UServeIntroWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTim
 		}
 	}
 	const float Op = Alpha;
-	PanelBG->SetRenderOpacity(Op * 0.85f);
-	NumberText->SetRenderOpacity(Op);
-	NameText->SetRenderOpacity(Op);
-	TeamRoleText->SetRenderOpacity(Op);
+	if (PanelBG) { PanelBG->SetRenderOpacity(Op * 0.85f); }
+	if (NumberText) { NumberText->SetRenderOpacity(Op); }
+	if (NameText) { NameText->SetRenderOpacity(Op); }
+	if (TeamRoleText) { TeamRoleText->SetRenderOpacity(Op); }
 }

@@ -49,7 +49,10 @@ struct FMatchModeConfig
 	GENERATED_BODY()
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	EGameModeChoice Mode = EGameModeChoice::QuickMatch;
+	// None = no menu choice yet: a command-line / dev launch must NOT be forced
+	// into QuickMatch (that broke -FiveSetTest and direct full-rules launches).
+	// The mode menu always sets an explicit mode via SetMatchMode.
+	EGameModeChoice Mode = EGameModeChoice::None;
 
 	/** QuickMatch: true = 1 set x 3 pts (menu option); false = official rules. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)

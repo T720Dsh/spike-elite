@@ -1611,9 +1611,11 @@ void ASpikeElitePlayerController::ShowServeIntro(const FString& PlayerId, int32 
 	if (!ServeIntro) { return; }
 	const FString TeamLabel = (Team == EVolleyballTeam::TeamA) ? TEXT("TEAM A")
 		: (Team == EVolleyballTeam::TeamB) ? TEXT("TEAM B") : TEXT("-");
-	ServeIntro->SetServer(JerseyNumber, Name, TeamLabel, RoleText, bShortBar);
-	ServeIntro->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+	// Build the widget tree FIRST (AddToViewport triggers RebuildWidget), then
+	// populate: packaged builds otherwise hit SetServer before the tree exists.
 	ServeIntro->AddToViewport(25);
+	ServeIntro->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+	ServeIntro->SetServer(JerseyNumber, Name, TeamLabel, RoleText, bShortBar);
 }
 
 void ASpikeElitePlayerController::HideServeIntro()

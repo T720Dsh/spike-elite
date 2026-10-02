@@ -690,3 +690,19 @@ D:\Epic\UE_5.8\Engine\Binaries\Win64\UnrealEditor.exe `
 
 Controls: `WASD` move, mouse look, `Space` jump, `V` toggle first/third person,
 `LMB` hit, `E` serve, `Esc` pause/resume.
+
+## [M11h] - 2026-10-03 — 可玩排球比赛（豆包主代理轮）
+
+### Added
+- 球员身份与 12 人名单权威模型：稳定 PlayerId（A01..A12）、原创中文名、队内唯一号码、位置角色、有界属性（发球/传球/移动/反应），RosterA/B 校验与 FindIdentity。
+- 模式选择：快速短局 / 正式五局 / 12 人名单挑战赛（三档原创对手、存档推进）/ 教练模式（场下指令）/ 训练模式（路由）。
+- 发球员介绍：ServePresentation 状态机、右半屏赛事转播卡（号码/姓名/队伍·位置·发球）、连续同人短条、E 跳过、不吞 8 秒发球窗口。
+- 球队暂停：每局 2 次、30 秒倒计时、死球门禁、两队集结、Esc 系统暂停冻结计时。
+- 合法换人：每局 6 次、替补↔首发配对、原子切换、发球槽跟随身份、跨局重置。
+- 场下教练操控：CoachPanel（发球落区/拦网/防守深度/二传偏好/风险）、Tab 开关、AI 实际读取偏好。
+- 赛后个人统计：一传/二传/扣球(得分/失误)/拦网/救球/发球(得分/失误)，仅从真实触球与得分事件归因，MatchEnd 展示。
+- 打包版空指针与 FiveSet 模式根因修复（见 docs/M11h-Delivery.md）。
+
+### Notes
+- 自动化测试 78/78；QuickMatch SEED 1/42/4242、RematchStress×5、TacticalTest、真实五局验收均 PASS。
+- 未实现：训练项目完整逻辑、入场列队动画、裁判动作手势、名单编辑 UI、自由人规则；详见 docs/M11h-Delivery.md。

@@ -166,11 +166,22 @@ void ASpikeEliteGameMode::StartMatch()
 	// bots from a previous match) is obvious in the log.
 	LogActorCounts(TEXT("BeforeStart"));
 
-	// M11h-2: the menu-picked mode decides scoring. -QuickMatch dev flag also
-	// sets bQuickMatch in the constructor; a menu "正式五局" resets it to false.
-	if (MatchModeConfig.Mode != EGameModeChoice::None)
+	// M11h-2: the menu-picked mode decides scoring. A menu "正式五局" uses full
+	// rules. IMPORTANT: MatchModeConfig defaults to QuickMatch, so a command-line
+	// / dev launch WITHOUT a menu choice must NOT be silently forced to a short
+	// set — that broke -FiveSetTest (best-of-five acceptance) and any direct
+	// full-rules launch. Only the -QuickMatch dev flag applies then.
+	if (MatchModeConfig.Mode == EGameModeChoice::None)
 	{
-		bQuickMatch = (MatchModeConfig.Mode == EGameModeChoice::QuickMatch) ? MatchModeConfig.bShortSets : false;
+		bQuickMatch = FParse::Param(FCommandLine::Get(), TEXT("QuickMatch"));
+	}
+	else if (MatchModeConfig.Mode == EGameModeChoice::QuickMatch)
+	{
+		bQuickMatch = MatchModeConfig.bShortSets;
+	}
+	else
+	{
+		bQuickMatch = false; // Challenge12 / Coach / Training run full rules.
 	}
 	UE_LOG(LogVolleyballRules, Log, TEXT("StartMatch mode=%s quick=%d stage=%d"),
 		FMatchModeConfig::DisplayName(MatchModeConfig.Mode), bQuickMatch ? 1 : 0, MatchModeConfig.ChallengeStage);

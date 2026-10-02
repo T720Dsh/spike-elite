@@ -27,9 +27,9 @@
 
 ## 核心体验
 
-以下列出产品愿景，**不是全部已实现功能**。当前仍使用原创程序化角色；自由人、正式换人/球队暂停、授权球员、联网、动捕与商业级写实资产未完成。现场模型改进与验收见 [M11g 交付记录](docs/M11g-Codex-Art-Delivery.md)，下一轮玩法任务见 [M11h 豆包 Prompt](docs/M11h-Doubao-Gameplay-Prompt.md)。
+以下列出产品愿景，**不是全部已实现功能**。当前仍使用原创程序化角色；自由人、入场列队动画、裁判动作手势、训练模式完整项目、名单编辑 UI 与商业级写实资产未完成。M11h 玩法轮（模式选择/12 人名单/球队暂停/合法换人/教练操控/发球员介绍/赛后统计）见 [M11h 交付记录](docs/M11h-Delivery.md)，现场美术与验收见 [M11g 交付记录](docs/M11g-Codex-Art-Delivery.md)。
 
-本机最新图形包：`Dist/M11g/Windows/SpikeElite.exe`；根目录 `Play_SPIKE_ELITE.bat` 优先启动此包（不存在时回退旧 `Dist/Windows`）。包与实机截图不入 Git，源码更新后需重新构建，不代表 GitHub Release 已更新。
+本机最新图形包：`Dist/M11h/Windows/SpikeElite.exe`；根目录 `Play_SPIKE_ELITE.bat` 优先启动此包。包与实机截图不入 Git，源码更新后需重新构建，不代表 GitHub Release 已更新。
 
 - **真实 6v6 室内排球**：严格遵循 FIVB 2025–2028 规则，rally point、顺时针轮换、5-1 / 6-2 进攻体系、Libero 自由人、拦网/吊球/后排进攻全部还原。
 - **第一人称沉浸视角**（核心卖点）：你就是场上那个球员——跳起来扣球的主观冲击力、3D 音频定位、辅助雷达与轨迹预测，解决 FP 看不到全场的问题。第三人称肩后镜、战术俯视镜、直播观战镜并存。
