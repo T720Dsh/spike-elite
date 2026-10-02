@@ -187,6 +187,11 @@ void ASpikeEliteGameMode::StartMatch()
 	TeamAPlayers.Reset();
 	TeamBPlayers.Reset();
 	SetScoresA.Reset();
+	// M11h-4: match start resets timeout allowances and any pending huddle.
+	TimeoutLeftA = TimeoutLeftB = 2;
+	TimeoutTeam = EVolleyballTeam::None;
+	TimeoutTimer = 0.f;
+	TimeoutPausedSeconds = 0.f;
 
 	// M11h-1: authoritative 12-player rosters + starting lineups (original
 	// identities only; rotation later changes slots, never PlayerId).
@@ -580,6 +585,28 @@ void ASpikeEliteGameMode::Tick(float DeltaSeconds)
 		}
 		break;
 	}
+	case EMatchState::Timeout:
+	{
+		// FIVB 30 s team timeout. World pause (Esc) stops Tick, so the clock
+		// naturally pauses and never jumps; TimeoutPausedSeconds guards against
+		// any externally-scaled resume drift.
+		TimeoutTimer -= DeltaSeconds;
+		if (TimeoutTimer <= 0.f)
+		{
+			UE_LOG(LogVolleyballRules, Log, TEXT("Timeout ended team=%s (30s elapsed)"),
+				TeamStr(TimeoutTeam));
+			TimeoutTeam = EVolleyballTeam::None;
+			TimeoutTimer = 0.f;
+			TimeoutPausedSeconds = 0.f;
+			// Players return to their formation, then the 2nd referee checks
+			// readiness and the 1st referee authorizes the serve again.
+			RespawnPlayersToPositions();
+			MatchState = EMatchState::ResettingPositions;
+			PhaseTimer = ResetDelay;
+			UpdateScoreboard();
+		}
+		break;
+	}
 	case EMatchState::Rally:
 	{
 		// ---- Single-authority net collision (the visual net has NO physics) ----
@@ -731,6 +758,7 @@ void ASpikeEliteGameMode::UpdateScoreboard()
 	case EMatchState::ServiceAuthorized:  Phase = TEXT("允许发球"); break;
 	case EMatchState::ServingToss:        Phase = TEXT("发球抛球"); break;
 	case EMatchState::Rally:              Phase = TEXT("回合进行"); break;
+	case EMatchState::Timeout:            Phase = TEXT("球队暂停"); break;
 	case EMatchState::SetOver:            Phase = TEXT("局间休息"); break;
 	case EMatchState::MatchOver:          Phase = TEXT("比赛结束"); break;
 	default:                              Phase = TEXT("-"); break;
@@ -738,7 +766,13 @@ void ASpikeEliteGameMode::UpdateScoreboard()
 
 	// Serve hint ONLY in the legal state, for the legal server.
 	FString ServeHint;
-	if (MatchState == EMatchState::ServiceAuthorized && ServingTeam == EVolleyballTeam::TeamA)
+	if (MatchState == EMatchState::Timeout)
+	{
+		// M11h-4: show the live 30 s timeout clock and remaining allowances.
+		ServeHint = FString::Printf(TEXT("球队暂停 · %s 队 · %.0f 秒 · 剩余 A:%d B:%d"),
+			TeamStr(TimeoutTeam), FMath::CeilToFloat(TimeoutTimer), TimeoutLeftA, TimeoutLeftB);
+	}
+	else if (MatchState == EMatchState::ServiceAuthorized && ServingTeam == EVolleyballTeam::TeamA)
 	{
 		if (ASpikeEliteCharacter* Player = Cast<ASpikeEliteCharacter>(UGameplayStatics::GetPlayerPawn(this, 0)))
 		{
@@ -945,6 +979,11 @@ void ASpikeEliteGameMode::StartNextSet()
 	PointsToWin = bQuickMatch ? 3 : SEVolleyballRules::PointsToWinForSet(CurrentSet);
 	SetScoresA.Add(0);
 	SetScoresB.Add(0);
+	// M11h-4: timeout allowances reset at the start of every set (FIVB 15.2).
+	TimeoutLeftA = TimeoutLeftB = 2;
+	TimeoutTeam = EVolleyballTeam::None;
+	TimeoutTimer = 0.f;
+	TimeoutPausedSeconds = 0.f;
 	RespawnPlayersToPositions();
 	SEVolleyballRules::BeginRally(RallyState, ServingTeam);
 	MatchState = EMatchState::BetweenRallies;
@@ -2089,4 +2128,90 @@ void ASpikeEliteGameMode::RefreshRotationView()
 	BuildRotationView(State);
 	RotationWidget->Refresh(State);
 	if (ServingTeam != EVolleyballTeam::None) { LastRotationServeTeam = ServingTeam; }
+}
+
+// ---------------- M11h-4: team timeout ----------------
+
+bool ASpikeEliteGameMode::CanRequestTimeout() const
+{
+	// Shared tested rule: dead ball before the service whistle only.
+	return SEVolleyballRules::CanRequestTimeoutInPhase(MatchState);
+}
+
+bool ASpikeEliteGameMode::RequestTeamTimeout(EVolleyballTeam Team)
+{
+	if (Team == EVolleyballTeam::None) { return false; }
+	if (!CanRequestTimeout())
+	{
+		const auto StateName = [](EMatchState S) -> const TCHAR*
+		{
+			switch (S)
+			{
+			case EMatchState::PreMatch: return TEXT("PreMatch");
+			case EMatchState::BetweenRallies: return TEXT("BetweenRallies");
+			case EMatchState::ResettingPositions: return TEXT("ResettingPositions");
+			case EMatchState::AwaitingReady: return TEXT("AwaitingReady");
+			case EMatchState::ServiceAuthorized: return TEXT("ServiceAuthorized");
+			case EMatchState::ServingToss: return TEXT("ServingToss");
+			case EMatchState::Rally: return TEXT("Rally");
+			case EMatchState::Timeout: return TEXT("Timeout");
+			case EMatchState::SetOver: return TEXT("SetOver");
+			case EMatchState::MatchOver: return TEXT("MatchOver");
+			default: return TEXT("?");
+			}
+		};
+		UE_LOG(LogVolleyballRules, Log, TEXT("Timeout request REJECTED team=%s state=%s (not a dead-ball window)"),
+			TeamStr(Team), StateName(MatchState));
+		return false;
+	}
+	if (GetTimeoutLeft(Team) <= 0)
+	{
+		UE_LOG(LogVolleyballRules, Log, TEXT("Timeout request REJECTED team=%s (no timeouts left this set)"),
+			TeamStr(Team));
+		return false;
+	}
+
+	// Consume one timeout and enter the independent timeout phase. The world is
+	// NOT paused: coach UI, player huddle and the 30 s clock keep running.
+	if (Team == EVolleyballTeam::TeamA) { TimeoutLeftA = SEVolleyballRules::TimeoutLeftAfterRequest(TimeoutLeftA); }
+	else { TimeoutLeftB = SEVolleyballRules::TimeoutLeftAfterRequest(TimeoutLeftB); }
+	TimeoutTeam = Team;
+	TimeoutTimer = SEVolleyballRules::TimeoutSeconds();
+	TimeoutPausedSeconds = 0.f;
+	MatchState = EMatchState::Timeout;
+	bAIServePending = false; // no auto-serve can fire during the huddle
+
+	// Huddle: move each team to its bench-side gathering zone (outside the free
+	// zone, no collisions with the net / officials).
+	const float SideX = (Team == EVolleyballTeam::TeamA) ? 1750.f : -1750.f;
+	const TArray<TObjectPtr<ASpikeEliteCharacter>>& Roster =
+		(Team == EVolleyballTeam::TeamA) ? TeamAPlayers : TeamBPlayers;
+	for (int32 i = 0; i < Roster.Num(); ++i)
+	{
+		if (Roster[i])
+		{
+			const FVector Gather(SideX * (Team == EVolleyballTeam::TeamA ? 1.f : 1.f),
+				-450.f + 150.f * i, 0.f);
+			Roster[i]->HomePosition = Gather; // temporary huddle target
+		}
+	}
+	UE_LOG(LogVolleyballRules, Log, TEXT("Team timeout STARTED team=%s leftA=%d leftB=%d 30s"),
+		TeamStr(Team), TimeoutLeftA, TimeoutLeftB);
+	UpdateScoreboard();
+	RefreshRotationView();
+	return true;
+}
+
+void ASpikeEliteGameMode::CancelTeamTimeout()
+{
+	if (MatchState != EMatchState::Timeout) { return; }
+	UE_LOG(LogVolleyballRules, Log, TEXT("Team timeout CANCELLED team=%s"),
+		TeamStr(TimeoutTeam));
+	TimeoutTeam = EVolleyballTeam::None;
+	TimeoutTimer = 0.f;
+	TimeoutPausedSeconds = 0.f;
+	RespawnPlayersToPositions();
+	MatchState = EMatchState::ResettingPositions;
+	PhaseTimer = ResetDelay;
+	UpdateScoreboard();
 }

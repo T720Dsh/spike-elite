@@ -37,6 +37,7 @@ enum class EMatchState : uint8
 	ServiceAuthorized  UMETA(DisplayName = "Whistle blown, service authorized"),
 	ServingToss        UMETA(DisplayName = "Serving toss"),
 	Rally              UMETA(DisplayName = "Rally in progress"),
+	Timeout            UMETA(DisplayName = "Team timeout (30s)"),
 	SetOver            UMETA(DisplayName = "Set finished"),
 	MatchOver          UMETA(DisplayName = "Match finished")
 };

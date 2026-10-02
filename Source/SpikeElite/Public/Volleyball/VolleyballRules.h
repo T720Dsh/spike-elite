@@ -280,6 +280,27 @@ namespace SEVolleyballRules
 		return State == EMatchState::Rally && !bRallySettled;
 	}
 
+	/** M11h-4: dead-ball windows in which a team timeout may be requested
+	 *  (FIVB 15.4: between rallies, before the service whistle). ServingToss /
+	 *  Rally / Timeout / SetOver / MatchOver / PreMatch are never legal. */
+	inline bool CanRequestTimeoutInPhase(EMatchState State)
+	{
+		return State == EMatchState::BetweenRallies
+			|| State == EMatchState::ResettingPositions
+			|| State == EMatchState::AwaitingReady
+			|| State == EMatchState::ServiceAuthorized;
+	}
+
+	/** M11h-4: consume one timeout allowance (FIVB: 2 per set). Never negative. */
+	inline int32 TimeoutLeftAfterRequest(int32 Left)
+	{
+		return Left > 0 ? Left - 1 : 0;
+	}
+
+	/** M11h-4: allowances reset at the start of every set / match. */
+	inline int32 TimeoutsPerSet() { return 2; }
+	inline float TimeoutSeconds() { return 30.f; }
+
 	/** Mark the rally as live. Called by GameMode when the serve is actually hit
 	 *  out (ExecuteServe) and the state enters Rally. Tests assert the lifecycle
 	 *  BeginRally(false) -> StartPlay(true) -> SettleRally(false). */

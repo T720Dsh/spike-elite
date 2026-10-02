@@ -83,6 +83,37 @@ public:
 	/** M11h-2b: apply stage difficulty to the opponent (Team B) roster. */
 	void ApplyChallengeDifficulty();
 
+	// ---------------- M11h-4: team timeouts (FIVB subset) ----------------
+	/** Per-team timeouts remaining this set (FIVB: 2 per set, 30 s). Esc
+	 *  system pause does NOT consume these. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Volleyball|Flow")
+	int32 TimeoutLeftA = 2;
+	int32 TimeoutLeftB = 2;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Volleyball|Flow")
+	EVolleyballTeam TimeoutTeam = EVolleyballTeam::None;
+	/** Seconds remaining in the current timeout (0 when not in a timeout). */
+	float TimeoutTimer = 0.f;
+	/** Seconds of system-pause time accumulated during a timeout (so the 30 s
+	 *  clock never jumps forward after Esc resume). */
+	float TimeoutPausedSeconds = 0.f;
+
+	/** Request a team timeout. Legal only on a dead ball BEFORE the service
+	 *  whistle (BetweenRallies/ResettingPositions/AwaitingReady/ServiceAuthorized),
+	 *  never during ServingToss/Rally/SetOver/MatchOver, with >=1 remaining. */
+	UFUNCTION(BlueprintCallable, Category = "Volleyball|Flow")
+	bool RequestTeamTimeout(EVolleyballTeam Team);
+
+	/** Abort/cancel the current timeout (dev / menu path). */
+	void CancelTeamTimeout();
+	int32 GetTimeoutLeft(EVolleyballTeam Team) const
+	{
+		return (Team == EVolleyballTeam::TeamA) ? TimeoutLeftA : TimeoutLeftB;
+	}
+	float GetTimeoutRemaining() const { return TimeoutTimer; }
+	bool IsInTimeout() const { return MatchState == EMatchState::Timeout; }
+	/** Dead-ball window in which a team timeout may legally be requested. */
+	bool CanRequestTimeout() const;
+
 	/** M11d-3: previous serving team, so the rotation HUD can flag side-out 轮转. */
 	EVolleyballTeam LastRotationServeTeam = EVolleyballTeam::None;
 

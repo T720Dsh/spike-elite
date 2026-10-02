@@ -1553,5 +1553,50 @@ bool FSEChallengeDifficultyBounded::RunTest(const FString& Parameters)
 }
 
 
+// ---------------- M11h-4: team timeout rules ----------------
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSEITimeoutLegalWindows,
+	"SpikeElite.Tests.TimeoutLegalWindows",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FSEITimeoutLegalWindows::RunTest(const FString& Parameters)
+{
+	// FIVB: only dead-ball phases before the service whistle allow a request.
+	TestTrue(TEXT("between rallies"),  SEVolleyballRules::CanRequestTimeoutInPhase(EMatchState::BetweenRallies));
+	TestTrue(TEXT("resetting"),        SEVolleyballRules::CanRequestTimeoutInPhase(EMatchState::ResettingPositions));
+	TestTrue(TEXT("awaiting ready"),   SEVolleyballRules::CanRequestTimeoutInPhase(EMatchState::AwaitingReady));
+	TestTrue(TEXT("service authorized"), SEVolleyballRules::CanRequestTimeoutInPhase(EMatchState::ServiceAuthorized));
+	TestFalse(TEXT("serving toss"),    SEVolleyballRules::CanRequestTimeoutInPhase(EMatchState::ServingToss));
+	TestFalse(TEXT("rally live"),      SEVolleyballRules::CanRequestTimeoutInPhase(EMatchState::Rally));
+	TestFalse(TEXT("timeout"),         SEVolleyballRules::CanRequestTimeoutInPhase(EMatchState::Timeout));
+	TestFalse(TEXT("set over"),        SEVolleyballRules::CanRequestTimeoutInPhase(EMatchState::SetOver));
+	TestFalse(TEXT("match over"),      SEVolleyballRules::CanRequestTimeoutInPhase(EMatchState::MatchOver));
+	TestFalse(TEXT("pre match"),       SEVolleyballRules::CanRequestTimeoutInPhase(EMatchState::PreMatch));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSEITimeoutAllowanceConsumption,
+	"SpikeElite.Tests.TimeoutAllowanceConsumption",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FSEITimeoutAllowanceConsumption::RunTest(const FString& Parameters)
+{
+	// FIVB: 2 per set, consumed once per request, never negative; resets to 2
+	// for each new set; Esc system pause is a separate path (not consumed here).
+	TestEqual(TEXT("per set"), SEVolleyballRules::TimeoutsPerSet(), 2);
+	TestEqual(TEXT("duration"), (int32)SEVolleyballRules::TimeoutSeconds(), 30);
+
+	int32 Left = SEVolleyballRules::TimeoutsPerSet();
+	TestEqual(TEXT("first consume"), SEVolleyballRules::TimeoutLeftAfterRequest(Left), 1);
+	Left = SEVolleyballRules::TimeoutLeftAfterRequest(Left);
+	TestEqual(TEXT("second consume"), SEVolleyballRules::TimeoutLeftAfterRequest(Left), 0);
+	Left = SEVolleyballRules::TimeoutLeftAfterRequest(Left);
+	TestEqual(TEXT("never negative"), Left, 0);
+
+	// The phase gate also rejects touches during Timeout (shared IsTouchLegalInPhase).
+	TestFalse(TEXT("no touch during timeout"),
+		SEVolleyballRules::IsTouchLegalInPhase(EMatchState::Timeout, false));
+	return true;
+}
+
+
 #endif // WITH_DEV_AUTOMATION_TESTS
 
