@@ -177,6 +177,8 @@ protected:
 	void DevRematchStress();
 	/** -ShotSuite: capture the M11c acceptance screenshot set from a real match. */
 	void DevShotSuite();
+	/** -PoseSuite: pin each procedural pose and capture front/side/back + run frames. */
+	void DevPoseSuite();
 	/** Request a named high-resolution screenshot (runs even while paused). */
 	void DevShot(const FString& Name);
 	/** Point the dev camera at a world transform, or back at the player pawn. */

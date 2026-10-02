@@ -536,10 +536,24 @@ void ASpikeEliteCharacter::UpdateProceduralAnimation(float DeltaSeconds)
 		RunPhase *= 0.85f;
 	}
 
-	const EAnimPose Pose = ResolvePose(DeltaSeconds);
+	const EAnimPose Pose = bDevPoseOverride ? DevPose : ResolvePose(DeltaSeconds);
 	CurrentPose = Pose;
 	ApplyPose(Pose, DeltaSeconds);
 }
+
+#if WITH_DEV_AUTOMATION_TESTS
+void ASpikeEliteCharacter::DevSetPoseOverride(EAnimPose Pose, bool bEnable)
+{
+	bDevPoseOverride = bEnable;
+	DevPose = Pose;
+	CurrentPose = bEnable ? Pose : CurrentPose;
+}
+
+void ASpikeEliteCharacter::DevSetRunPhase(float Phase)
+{
+	RunPhase = Phase;
+}
+#endif
 
 EAnimPose ASpikeEliteCharacter::ResolvePose(float DeltaSeconds)
 {

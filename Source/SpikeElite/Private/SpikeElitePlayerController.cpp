@@ -13,6 +13,8 @@
 #include "UI/TacticalContactComponent.h"
 #include "SpikeEliteGameMode.h"
 #include "SpikeEliteCharacter.h"
+#include "GameFramework/SpringArmComponent.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "Blueprint/UserWidget.h"
 #include "Camera/CameraActor.h"
 #include "Camera/CameraComponent.h"
@@ -136,6 +138,14 @@ void ASpikeElitePlayerController::DevAutoStart()
 	if (FParse::Param(FCommandLine::Get(), TEXT("ShotSuite")))
 	{
 		DevShotSuite();
+		return;
+	}
+
+	// -PoseSuite: pin each procedural pose and capture front/side/back plus a
+	// run-cycle frame strip (leg alternation evidence).
+	if (FParse::Param(FCommandLine::Get(), TEXT("PoseSuite")))
+	{
+		DevPoseSuite();
 		return;
 	}
 
@@ -355,6 +365,137 @@ void ASpikeElitePlayerController::DevRematchStress()
 	}));
 }
 
+
+void ASpikeElitePlayerController::DevPoseSuite()
+{
+	// -PoseSuite: pin each procedural pose and capture front/side/back plus a
+	// run-cycle frame strip (leg alternation evidence). Non-Shipping only.
+	struct FDevEvent { float Delay; TFunction<void()> Fn; };
+	TArray<FDevEvent> Events;
+	auto At = [&Events](float Delay, TFunction<void()> Fn) { Events.Add(FDevEvent{ Delay, MoveTemp(Fn) }); };
+
+	struct FPoseEntry { EAnimPose Pose; const TCHAR* Name; };
+	const FPoseEntry Poses[] = {
+		{ EAnimPose::Idle,       TEXT("idle") },
+		{ EAnimPose::Run,        TEXT("run") },
+		{ EAnimPose::Jump,       TEXT("jump") },
+		{ EAnimPose::Receive,    TEXT("receive") },
+		{ EAnimPose::Set,        TEXT("set") },
+		{ EAnimPose::Spike,      TEXT("spike") },
+		{ EAnimPose::Block,      TEXT("block") },
+		{ EAnimPose::Dive,       TEXT("dive") },
+		{ EAnimPose::Recover,    TEXT("recover") },
+		{ EAnimPose::Serve,      TEXT("serve") },
+		{ EAnimPose::RaiseHands, TEXT("raisehands") },
+	};
+
+	auto GetPoseTarget = [this]() -> ASpikeEliteCharacter*
+	{
+		if (ASpikeEliteCharacter* P = Cast<ASpikeEliteCharacter>(GetPawn())) { return P; }
+		if (ASpikeEliteGameMode* GM = Cast<ASpikeEliteGameMode>(UGameplayStatics::GetGameMode(this)))
+		{
+			const TArray<TObjectPtr<ASpikeEliteCharacter>>& RosterA = GM->GetTeamPlayers(EVolleyballTeam::TeamA);
+			if (RosterA.Num() > 0) { return RosterA[0]; }
+		}
+		return nullptr;
+	};
+	auto SetCamYaw = [this, GetPoseTarget](float Yaw)
+	{
+		if (ASpikeEliteCharacter* C = GetPoseTarget())
+		{
+			// Aim at the torso (head-height base), keep the camera slightly above
+			// and ~3.3m out so the whole body, from feet to raised hands, fits.
+			const FVector Torso = C->GetActorLocation() + FVector(0.f, 0.f, 100.f);
+			const FVector Dir = FRotator(0.f, Yaw, 0.f).Vector();
+			const FVector CamPos = Torso + Dir * 330.f + FVector(0.f, 0.f, 25.f);
+			DevView(CamPos, (Torso - CamPos).Rotation());
+		}
+	};
+	auto SetPose = [this, GetPoseTarget](EAnimPose Pose)
+	{
+		if (ASpikeEliteCharacter* C = GetPoseTarget())
+		{
+			// Park the subject at a fixed court spot with zero velocity so the
+			// pinned pose is framed cleanly and nothing walks it around.
+			C->SetActorLocation(FVector(450.f, 0.f, C->GetActorLocation().Z));
+			if (UCharacterMovementComponent* Move = C->GetCharacterMovement())
+			{
+				Move->Velocity = FVector::ZeroVector;
+			}
+			// Push the match ball far away so it never blocks the pose close-up.
+			if (ASpikeEliteGameMode* GM = Cast<ASpikeEliteGameMode>(UGameplayStatics::GetGameMode(this)))
+			{
+				if (AVolleyballBall* Ball = GM->GetBall())
+				{
+					Ball->SetActorLocation(FVector(99999.f, 0.f, 200.f));
+				}
+			}
+			C->DevSetPoseOverride(Pose, true);
+			C->SetThirdPersonArmLength(150.f);
+		}
+	};
+	auto DevShot3D = [this](const FString& Name)
+	{
+		// Pure 3D capture (no HUD/banners) so the pose itself fills the shot.
+		ConsoleCommand(FString::Printf(TEXT("Screenshot filename=%s"), *Name), true);
+	};
+
+	At(1.0f, [this]() { UE_LOG(LogSEMenu, Log, TEXT("DEV POSE SUITE: starting match")); StartMatch(); });
+
+	float T = 3.0f;
+	for (const FPoseEntry& P : Poses)
+	{
+		At(T, [SetPose, P]() { SetPose(P.Pose); });
+		T += 0.35f;
+		At(T, [this, SetCamYaw, DevShot3D, P]() { SetCamYaw(0.f); DevShot3D(FString::Printf(TEXT("shot_pose_%s_front"), P.Name)); });
+		T += 0.35f;
+		At(T, [this, SetCamYaw, DevShot3D, P]() { SetCamYaw(90.f); DevShot3D(FString::Printf(TEXT("shot_pose_%s_side"), P.Name)); });
+		T += 0.35f;
+		At(T, [this, SetCamYaw, DevShot3D, P]() { SetCamYaw(180.f); DevShot3D(FString::Printf(TEXT("shot_pose_%s_back"), P.Name)); });
+		T += 0.2f;
+	}
+
+	// Run-cycle frame strip: pinned Run pose, advancing phase, fixed side view.
+	At(T, [SetPose, SetCamYaw]() { SetPose(EAnimPose::Run); SetCamYaw(90.f); });
+	T += 0.25f;
+	for (int32 f = 0; f < 8; f++)
+	{
+		At(T, [this, f, GetPoseTarget, DevShot3D]() {
+			if (ASpikeEliteCharacter* C = GetPoseTarget())
+			{
+				C->DevSetRunPhase(static_cast<float>(f) * 0.25f);
+			}
+			DevShot3D(FString::Printf(TEXT("shot_pose_run_frame%d"), f));
+		});
+		T += 0.3f;
+	}
+
+	At(T, [this, GetPoseTarget]() {
+		if (ASpikeEliteCharacter* C = GetPoseTarget())
+		{
+			C->DevSetPoseOverride(EAnimPose::Idle, false);
+		}
+		UE_LOG(LogSEMenu, Log, TEXT("DEV POSE SUITE: done, quitting"));
+		ConsoleCommand(TEXT("quit"));
+	});
+
+	TWeakObjectPtr<ASpikeElitePlayerController> Weak(this);
+	const double StartTime = FPlatformTime::Seconds();
+	int32 Index = 0;
+	FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda(
+		[Weak, StartTime, Events = MoveTemp(Events), Index = 0](float) mutable -> bool
+	{
+		ASpikeElitePlayerController* PC = Weak.Get();
+		if (!PC) { return false; }
+		const double Elapsed = FPlatformTime::Seconds() - StartTime;
+		while (Index < Events.Num() && Elapsed >= static_cast<double>(Events[Index].Delay))
+		{
+			if (Events[Index].Fn) { Events[Index].Fn(); }
+			++Index;
+		}
+		return Index < Events.Num();
+	}));
+}
 
 void ASpikeElitePlayerController::DevShotSuite()
 {

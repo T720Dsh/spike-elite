@@ -165,8 +165,19 @@ public:
 	/** Remember a successful contact so the contact pose plays for a short window. */
 	void NotifyContact(EBallTouchType Type);
 
+#if WITH_DEV_AUTOMATION_TESTS
+	/** -PoseSuite: pin the procedural pose for screenshot verification.
+	 *  bEnable=false restores the normal ResolvePose() authority. */
+	void DevSetPoseOverride(EAnimPose Pose, bool bEnable);
+	/** -PoseSuite: advance the run-cycle phase manually (leg alternation frames). */
+	void DevSetRunPhase(float Phase);
+#endif
+
 	/** Dev aid (-Closeup): shorten the spring arm so the body fills the view. */
 	void SetThirdPersonArmLength(float NewLength);
+
+	/** Read access for -PoseSuite camera framing (CameraBoom is protected). */
+	USpringArmComponent* GetCameraBoom() const { return CameraBoom; }
 
 	/** Refresh the chest/back number after GameMode assigns JerseyNumber. */
 	void RefreshJerseyNumberVisual();
@@ -222,6 +233,12 @@ protected:
 	float ContactPoseTimer = 0.f;
 	/** Local swing phase for the run cycle (radians). */
 	float RunPhase = 0.f;
+
+#if WITH_DEV_AUTOMATION_TESTS
+	/** -PoseSuite: pinned pose overrides ResolvePose() while enabled. */
+	bool bDevPoseOverride = false;
+	EAnimPose DevPose = EAnimPose::Idle;
+#endif
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera")
 	bool bFirstPerson = false;
