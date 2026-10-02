@@ -78,7 +78,7 @@
 - [x] M11d-3 比赛 HUD 重构：左右对称比分板、阶段徽章、触球圆点、中央回合横幅、帮助条分离；右上角小球场站位图（队色圆点/金色发球/白色受控/轮转提示）
 - [x] M11d-4 战术 UI 重排：攻击卡片化（目标区/力度条/弧线档位/绿黄红）、二传 13+1 ScrollBox 分组列表、防守双列（拦网策略/后排防守）
 - [x] M11d-5/6 场馆双色吸音板与无品牌赛事文字标识、角色胸背球衣号码、比赛用球黄蓝白多面板（授权插槽 fallback 保留）
-- [ ] M11d-7 完整交付验收：已有 720p/1080p 截图、测试与包产物，但打包渲染、三分辨率/缩放边界及部分视觉项目尚未闭环。见 docs/M11d-Codex-Review.md。
+- [x] M11e-1 打包版有画面启动闭环：M11e-0 修正后全新 Win64 包在 D3D12（3 次冷启动）/D3D11 真实渲染下完整跑通 QuickMatch+Rematch 流程，TacticalTest PASS，主菜单/比赛/战术/结果截图逐张验收，启动器默认指向验收包（M11d 挂起重打包后不再复现，根因边界见 docs/M11e-report.md）
 - [ ] 战术 AI 完整化（后排进攻细化、自由人）、外部角色动画模型、网络同步
 
 下一步具体行动见 [docs/05-roadmap.md](docs/05-roadmap.md)。
@@ -94,14 +94,16 @@
 > `Dist\Windows\SpikeElite.exe`（本地打包产物，不入 Git）。如需面向玩家的新版"解压即玩"包，请在
 > [Releases](https://github.com/T720Dsh/spike-elite/releases) 发布新版本——M11c/M11d 均未自动推送远程。
 
-> **M11d 打包版已知问题**：全新 Win64 Development 包（`Dist\Windows\SpikeElite.exe`，约 839MB）
-> 在本机 D3D12/D3D11 渲染初始化阶段稳定挂起（卡在 Slate 字体懒加载后的 `Texture streaming: Enabled`，
-> 位于 `LogInit: Game Engine Initialized` 之前）。根因尚未定位，不能据此排除项目构造函数、资源同步加载、
-> cook 依赖或插件。`-NullRHI` 下打包版可运行 QuickMatch 逻辑，但不验证图形、字体或 UMG 渲染，
-> 因此打包版图形验收尚未通过。开发/验收环境下请用
-> `UnrealEditor.exe SpikeElite.uproject -game ...`（渲染与逻辑完全正常）代替打包版。
+> **M11e-1 打包版渲染已通过验收**：M11e-0 现场修正后的全新 Win64 Development 包（`Dist\Windows\SpikeElite.exe`，
+> exe 332MB，包总量约 939MB）在真实图形 RHI 下正常启动：D3D12 冷启动 3 次 + D3D11 对照，每次均完成
+> QuickMatch → MatchOver → Confirm-cancel → Rematch → 第二场 → 退出（DevVerifyFailures=0）；打包版
+> TacticalTest PASS（真实击球 ×2）；主菜单/比赛 HUD/战术瞄准/二传 13+1/MatchOver 截图逐张读取通过。
+> M11d 打包启动挂起在本轮重打包后不再复现——最可能为 M11d 打包时的 cook/缓存状态问题（挂起日志卡在
+> Slate Freetype 字体面创建前，M11e-0 重打包后字体面正常创建并进入 `Game Engine Initialized`），
+> 未完全排除 M11e-0 代码差异；根因边界保留，详见 docs/M11e-report.md。
 
-`Play_SPIKE_ELITE.bat` 在安装了引擎时默认启动 Editor 游戏模式；显式传入 `--packaged` 可诊断当前包。
+`Play_SPIKE_ELITE.bat` 默认启动打包版 exe（`Dist\Windows\SpikeElite.exe`）；无包时提示先执行构建脚本，
+`--editor` 可切换到 Unreal Editor 游戏模式（开发者用）。
 
 **运行步骤：**
 1. 解压 `SpikeElite-v1.0.0-win64.zip` 到任意目录（绿色版，免安装）。

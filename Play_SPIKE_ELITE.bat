@@ -1,8 +1,9 @@
 @echo off
 REM ============================================================
 REM  SPIKE ELITE - launcher
-REM  M11d: packaged rendering has an unresolved startup hang.
-REM  Default to verified Editor game mode. --packaged opts into diagnosis.
+REM  M11e-1: packaged build verified on D3D12/D3D11 (cold starts,
+REM  QuickMatch/Rematch, tactical UI). Default: packaged game.
+REM  --editor opts into Unreal Editor game mode (developer).
 REM ============================================================
 cd /d "%~dp0"
 
@@ -10,8 +11,7 @@ set "PACKAGED=%~dp0Dist\Windows\SpikeElite.exe"
 set "UE=D:\Epic\UE_5.8\Engine\Binaries\Win64\UnrealEditor.exe"
 set "PROJ=%~dp0SpikeElite.uproject"
 
-if /i "%~1"=="--packaged" goto packaged
-if exist "%UE%" goto editor
+if /i "%~1"=="--editor" goto editor
 
 :packaged
 if exist "%PACKAGED%" (

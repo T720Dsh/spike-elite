@@ -14,6 +14,8 @@
 #include "Engine/Font.h"
 #include "Kismet/GameplayStatics.h"
 #include "Materials/MaterialInstanceDynamic.h"
+#include "Misc/CommandLine.h"
+#include "Misc/Parse.h"
 
 ASpikeEliteCharacter::ASpikeEliteCharacter()
 {
@@ -99,6 +101,13 @@ ASpikeEliteCharacter::ASpikeEliteCharacter()
 	// M11d-6: jersey number on chest and back (engine default font, no external
 	// assets). The capsule is the only collider and is hidden, so the text
 	// renders through it without interfering with gameplay.
+	// M11e-1 diagnosis: TextRender's default material (DefaultTextMaterialOpaque)
+	// and the Roboto font load synchronously during CDO construction, i.e. during
+	// engine init — this is the only M11d-added sync-load path that runs before
+	// "Game Engine Initialized". `-NoJerseyText` skips both components so the
+	// packaged startup hang can be bisected (Development diagnostic only).
+	const bool bNoJerseyText = FParse::Param(FCommandLine::Get(), TEXT("NoJerseyText"));
+	if (!bNoJerseyText)
 	{
 		static ConstructorHelpers::FObjectFinder<UFont> RobotoFont(TEXT("/Engine/EngineFonts/Roboto"));
 		const FVector NumScale(1.f);
@@ -130,7 +139,7 @@ ASpikeEliteCharacter::ASpikeEliteCharacter()
 		JerseyBack->SetVerticalAlignment(EVRTA_TextCenter);
 		JerseyBack->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 		JerseyBack->SetCastShadow(false);
-	}
+	} // !bNoJerseyText
 
 	GetCapsuleComponent()->SetCapsuleHalfHeight(84.f);
 	GetCapsuleComponent()->SetCapsuleRadius(32.f);

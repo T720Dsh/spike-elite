@@ -8,6 +8,24 @@ for milestone tags once a first playable is tagged.
 
 ## [Unreleased]
 
+### M11e-1 打包版有画面启动闭环（2026-10-02）
+
+M11e-0 现场修正后的全新 Win64 Development 包（`Dist\Windows\SpikeElite.exe`，exe 332MB / 包 939MB）
+在真实图形 RHI 下通过验收：
+
+- D3D12 冷启动 ×3（SEED 42/1/4242），每次完整 QuickMatch → MatchOver → Confirm-cancel（PASS×2）
+  → Rematch → 第二场 MatchOver → 退出，DevVerifyFailures=0；D3D11 对照同流程 PASS。
+- 打包版 `-TacticalTest` PASS（真实击球 ×2，failures=0）。
+- 打包版截图逐张读取通过：主菜单（标题/副标题/三按钮/版本角标）、比赛 HUD（对称比分板/阶段徽章/
+  轮次小球场/发球金标/受控白圈）、战术瞄准卡片、二传 13+1 列表、MatchOver、Rematch 后第二场。
+- M11d 打包启动挂起重打包后不再复现：挂起日志卡在 Slate Freetype 字体面创建前（`RobotoRegular.ufont`
+  读取完成后无 `Freetype font face successfully created`），M11e-0 重打包后字体面正常创建并进入
+  `Game Engine Initialized` → `LoadMap`。最可能为 M11d 打包时的 cook/缓存状态问题；未完全排除
+  M11e-0 代码差异（角色关节缩放继承修复等 CDO 级改动）。根因边界保留。
+- 启动器 `Play_SPIKE_ELITE.bat` 改为默认启动打包版 exe（无包时提示构建，`--editor` 切 Editor）。
+- 诊断开关 `-NoJerseyText`（Development）：跳过角色 CDO 中的 TextRender 号码组件，用于 bisect
+  引擎初始化期的字体/文本材质同步加载路径。
+
 ### M11d 现场复核修正（2026-10-02）
 
 修复分段肢体的缩放继承与髋/躯干连接，恢复正常尺寸的前臂、手、大腿、小腿；
