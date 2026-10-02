@@ -205,6 +205,8 @@ void ASpikeEliteGameMode::StartMatch()
 	// M11h-5: full substitution reset AFTER rosters exist (allowances, bench
 	// pool, on-court six = this set's starting lineup).
 	ResetSubstitutionState();
+	// M11h-8: per-player stats reset at match start, accumulate across sets.
+	ResetMatchStats();
 	// M11h-3: fresh match -> full server intro for the first server.
 	LastPresentedServerId = TEXT("");
 	PresentationTimer = 0.f;
@@ -902,6 +904,7 @@ void ASpikeEliteGameMode::AwardPoint(EVolleyballTeam ScoringTeam)
 	else { return; }
 
 	const bool bWasServeWin = (ServingTeam == ScoringTeam);
+	const EVolleyballTeam ServingTeamBeforePoint = ServingTeam;
 	ServingTeam = ScoringTeam;
 	if (!bWasServeWin)
 	{
@@ -911,6 +914,16 @@ void ASpikeEliteGameMode::AwardPoint(EVolleyballTeam ScoringTeam)
 		RotateTeam(ScoringTeam);
 		if (ScoringTeam == EVolleyballTeam::TeamA) { TeamARotation = SEVolleyballRules::AdvanceRotationIndex(TeamARotation); }
 		else { TeamBRotation = SEVolleyballRules::AdvanceRotationIndex(TeamBRotation); }
+	}
+	// M11h-8: attribute the rally outcome to player stats (server ace/error,
+	// attack win/error, block) from the real last-touch data. Indexed by court
+	// slot; the last touch index lives in RallyState.
+	if (RallyState.LastTouchPlayerIndex >= 0 && RallyState.LastTouchTeam != EVolleyballTeam::None)
+	{
+		SEVolleyballRules::AttachStatsForRally(
+			StatsFor(RallyState.LastTouchTeam), RallyState.LastTouchType,
+			RallyState.LastTouchPlayerIndex, RallyState.TouchCount,
+			ScoringTeam, ServingTeamBeforePoint, RallyState.LastTouchTeam);
 	}
 	RefreshRotationView();
 
@@ -1051,6 +1064,33 @@ void ASpikeEliteGameMode::DriveFiveSet()
 	}
 	// Safety: alternate if anything unexpected lands here.
 	AwardPoint(AS <= BS ? EVolleyballTeam::TeamA : EVolleyballTeam::TeamB);
+}
+
+void ASpikeEliteGameMode::ResetMatchStats()
+{
+	StatsA.Reset();
+	StatsB.Reset();
+	for (int32 i = 0; i < 6; ++i)
+	{
+		StatsA.Add(SEVolleyballRules::FPlayerMatchStats());
+		StatsB.Add(SEVolleyballRules::FPlayerMatchStats());
+	}
+}
+
+void ASpikeEliteGameMode::RecordTouchStat(EVolleyballTeam Team, int32 CourtIndex, EBallTouchType Type, bool bWasDiveSave)
+{
+	TArray<SEVolleyballRules::FPlayerMatchStats>& Stats = StatsFor(Team);
+	if (!Stats.IsValidIndex(CourtIndex)) { return; }
+	SEVolleyballRules::FPlayerMatchStats& S = Stats[CourtIndex];
+	switch (Type)
+	{
+	case EBallTouchType::Receive: S.Receives++; break;
+	case EBallTouchType::Set:     S.Sets++;     break;
+	case EBallTouchType::Attack:  S.Attacks++;  break;
+	case EBallTouchType::Block:   S.Blocks++;   break;
+	default: break;
+	}
+	if (bWasDiveSave) { S.Digs++; }
 }
 
 // ---------------- M11h-3: server introduction ----------------
@@ -1465,6 +1505,9 @@ bool ASpikeEliteGameMode::DoTouch(ASpikeEliteCharacter* Toucher, EBallTouchType 
 				TeamStr(Team), *Toucher->GetName(),
 				*SEVolleyballRules::TouchTypeLabel(EffectiveType));
 		}
+
+		// M11h-8: attribute the touch to the player's match stats (real event).
+		RecordTouchStat(Team, Index, EffectiveType, Toucher->WasDiveSaveRecorded());
 
 		// M11b-5 block: the touch did not consume a team touch, but if the ball
 		// stayed on the blocker's side of the net (soft block into the block

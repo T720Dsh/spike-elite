@@ -173,6 +173,22 @@ public:
 		return (Team == EVolleyballTeam::TeamA) ? CoachA : CoachB;
 	}
 
+	// ---------------- M11h-8: per-player match stats ----------------
+	/** Per-court-slot stats (indexed like TeamAPlayers, 0..5). Reset per match,
+	 *  accumulate across sets. Attributed from real touch/point events only.
+	 *  (Plain C++ members: the stat struct is a non-reflected namespace type.) */
+	TArray<SEVolleyballRules::FPlayerMatchStats> StatsA;
+	TArray<SEVolleyballRules::FPlayerMatchStats> StatsB;
+	/** Reset StatsA/StatsB to 6 empty slots (match start / rematch). */
+	void ResetMatchStats();
+	/** The stats array for a team (indexed by court slot). */
+	TArray<SEVolleyballRules::FPlayerMatchStats>& StatsFor(EVolleyballTeam Team)
+	{
+		return (Team == EVolleyballTeam::TeamA) ? StatsA : StatsB;
+	}
+	/** A real touch happened: bump the type counters (dive saves included). */
+	void RecordTouchStat(EVolleyballTeam Team, int32 CourtIndex, EBallTouchType Type, bool bWasDiveSave);
+
 	/** M11d-3: previous serving team, so the rotation HUD can flag side-out 轮转. */
 	EVolleyballTeam LastRotationServeTeam = EVolleyballTeam::None;
 

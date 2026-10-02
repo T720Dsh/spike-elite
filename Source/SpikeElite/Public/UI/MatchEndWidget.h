@@ -36,12 +36,16 @@ public:
 	void SetInitialFocus();
 
 	/** Populate the result screen. */
-	void SetResult(EVolleyballTeam Winner, const TArray<int32>& ScoresA, const TArray<int32>& ScoresB);
+	void SetResult(EVolleyballTeam Winner, const TArray<int32>& ScoresA, const TArray<int32>& ScoresB,
+		const TArray<SEVolleyballRules::FPlayerMatchStats>& StatsA,
+		const TArray<SEVolleyballRules::FPlayerMatchStats>& StatsB,
+		const TArray<FPlayerIdentity>& RosterA, const TArray<FPlayerIdentity>& RosterB);
 
 protected:
 	UPROPERTY() TObjectPtr<UTextBlock> Title;
 	UPROPERTY() TObjectPtr<UTextBlock> WinnerText;
 	UPROPERTY() TObjectPtr<UTextBlock> SetScoresText;
+	UPROPERTY() TObjectPtr<UTextBlock> StatsText;
 	UPROPERTY() TObjectPtr<UTextBlock> ScoreCardA;
 	UPROPERTY() TObjectPtr<UTextBlock> ScoreCardB;
 	UPROPERTY() TObjectPtr<UButton> BtnRematch;

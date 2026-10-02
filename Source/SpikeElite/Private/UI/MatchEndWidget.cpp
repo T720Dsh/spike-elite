@@ -122,6 +122,14 @@ void UMatchEndWidget::BuildWidgetTree()
 	SetScoresText->SetAutoWrapText(true);
 	Col->AddChildToVerticalBox(SetScoresText);
 
+	// M11h-8: per-player match stats (from real touch/point events).
+	StatsText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
+	StatsText->SetFont(SEUiStyle::Font(13));
+	StatsText->SetColorAndOpacity(FSlateColor(FLinearColor(0.8f, 0.83f, 0.88f)));
+	StatsText->SetJustification(ETextJustify::Center);
+	StatsText->SetAutoWrapText(true);
+	Col->AddChildToVerticalBox(StatsText);
+
 	UTextBlock* Sp = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
 	Sp->SetText(FText::FromString(TEXT(" ")));
 	Col->AddChildToVerticalBox(Sp);
@@ -149,7 +157,10 @@ void UMatchEndWidget::SetInitialFocus()
 	}
 }
 
-void UMatchEndWidget::SetResult(EVolleyballTeam Winner, const TArray<int32>& ScoresA, const TArray<int32>& ScoresB)
+void UMatchEndWidget::SetResult(EVolleyballTeam Winner, const TArray<int32>& ScoresA, const TArray<int32>& ScoresB,
+	const TArray<SEVolleyballRules::FPlayerMatchStats>& StatsA,
+	const TArray<SEVolleyballRules::FPlayerMatchStats>& StatsB,
+	const TArray<FPlayerIdentity>& RosterA, const TArray<FPlayerIdentity>& RosterB)
 {
 	const bool bA = (Winner == EVolleyballTeam::TeamA);
 	if (WinnerText)
@@ -165,5 +176,28 @@ void UMatchEndWidget::SetResult(EVolleyballTeam Winner, const TArray<int32>& Sco
 			Lines += FString::Printf(TEXT("第 %d 局   A %d : %d B\n"), i + 1, ScoresA[i], ScoresB[i]);
 		}
 		SetScoresText->SetText(FText::FromString(Lines));
+	}
+	if (StatsText)
+	{
+		// Only players with any recorded activity appear; stats come from the
+		// authoritative GameMode counters, never fabricated.
+		FString Lines;
+		auto AddTeam = [&Lines](const TCHAR* Label, const TArray<SEVolleyballRules::FPlayerMatchStats>& S,
+			const TArray<FPlayerIdentity>& R)
+		{
+			Lines += FString::Printf(TEXT("\n── %s ──\n"), Label);
+			for (int32 i = 0; i < S.Num() && i < R.Num(); i++)
+			{
+				const SEVolleyballRules::FPlayerMatchStats& St = S[i];
+				if (St.Receives + St.Sets + St.Attacks + St.Digs + St.Blocks + St.ServeAces + St.ServeErrors == 0) { continue; }
+				Lines += FString::Printf(TEXT("#%d %s 一传%d 二传%d 扣球%d(%d分/%d失) 拦网%d 救球%d 发球%d分/%d失\n"),
+					R[i].JerseyNumber, *R[i].DisplayName,
+					St.Receives, St.Sets, St.Attacks, St.AttackWins, St.AttackErrors,
+					St.Blocks, St.Digs, St.ServeAces, St.ServeErrors);
+			}
+		};
+		AddTeam(TEXT("TEAM A"), StatsA, RosterA);
+		AddTeam(TEXT("TEAM B"), StatsB, RosterB);
+		StatsText->SetText(FText::FromString(Lines));
 	}
 }

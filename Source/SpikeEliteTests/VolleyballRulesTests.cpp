@@ -1689,6 +1689,50 @@ bool FSEICoachPreferenceDefaults::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSEIStatsAttribution,
+	"SpikeElite.Tests.StatsAttribution",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FSEIStatsAttribution::RunTest(const FString& Parameters)
+{
+	// M11h-8: rally-outcome stats are attributed from real last-touch data only.
+	TArray<SEVolleyballRules::FPlayerMatchStats> S;
+	for (int32 i = 0; i < 6; ++i) { S.Add(SEVolleyballRules::FPlayerMatchStats()); }
+
+	// Attack by the rally winner -> AttackWins.
+	SEVolleyballRules::AttachStatsForRally(S, EBallTouchType::Attack, 2, 3,
+		EVolleyballTeam::TeamA, EVolleyballTeam::TeamA, EVolleyballTeam::TeamA);
+	TestEqual(TEXT("attack win"), S[2].AttackWins, 1);
+	TestEqual(TEXT("attack counted"), S[2].Attacks, 1);
+
+	// Attack by the rally loser -> AttackErrors.
+	SEVolleyballRules::AttachStatsForRally(S, EBallTouchType::Attack, 3, 2,
+		EVolleyballTeam::TeamA, EVolleyballTeam::TeamA, EVolleyballTeam::TeamB);
+	TestEqual(TEXT("attack error"), S[3].AttackErrors, 1);
+
+	// Serve fault: last touch serve, serving team did NOT win.
+	SEVolleyballRules::AttachStatsForRally(S, EBallTouchType::Serve, 0, 0,
+		EVolleyballTeam::TeamB, EVolleyballTeam::TeamA, EVolleyballTeam::TeamA);
+	TestEqual(TEXT("serve error"), S[0].ServeErrors, 1);
+
+	// Serve ace: serve last touch, no touches, serving team wins.
+	SEVolleyballRules::AttachStatsForRally(S, EBallTouchType::Serve, 0, 0,
+		EVolleyballTeam::TeamA, EVolleyballTeam::TeamA, EVolleyballTeam::TeamA);
+	TestEqual(TEXT("serve ace"), S[0].ServeAces, 1);
+
+	// Block by the rally loser counts as a block contact.
+	SEVolleyballRules::AttachStatsForRally(S, EBallTouchType::Block, 1, 2,
+		EVolleyballTeam::TeamA, EVolleyballTeam::TeamB, EVolleyballTeam::TeamB);
+	TestEqual(TEXT("block contact"), S[1].Blocks, 1);
+	// Receive / Set type counters.
+	SEVolleyballRules::AttachStatsForRally(S, EBallTouchType::Receive, 4, 1,
+		EVolleyballTeam::TeamB, EVolleyballTeam::TeamB, EVolleyballTeam::TeamB);
+	SEVolleyballRules::AttachStatsForRally(S, EBallTouchType::Set, 5, 2,
+		EVolleyballTeam::TeamB, EVolleyballTeam::TeamB, EVolleyballTeam::TeamB);
+	TestEqual(TEXT("receive"), S[4].Receives, 1);
+	TestEqual(TEXT("set"), S[5].Sets, 1);
+	return true;
+}
+
 
 #endif // WITH_DEV_AUTOMATION_TESTS
 

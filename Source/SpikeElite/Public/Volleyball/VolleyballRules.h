@@ -307,6 +307,55 @@ namespace SEVolleyballRules
 	inline int32 SubstitutionsPerSet() { return 6; }
 	inline int32 SubstitutionsLeftAfter(int32 Left) { return Left > 0 ? Left - 1 : 0; }
 
+	/** M11h-8: per-player match stats, attributed ONLY from real events. */
+	struct FPlayerMatchStats
+	{
+		int32 Receives = 0;  // first touch of the rally (serve receive)
+		int32 Sets = 0;      // second touch
+		int32 Attacks = 0;   // attack contacts
+		int32 Digs = 0;      // successful dive saves
+		int32 Blocks = 0;    // block contacts
+		int32 ServeAces = 0;
+		int32 ServeErrors = 0;
+		int32 AttackWins = 0;
+		int32 AttackErrors = 0;
+	};
+
+	/** Attribute the end of a rally to the relevant player stats (pure logic,
+	 *  tested without actors). OutStats is indexed by court slot 0..5.
+	 *  - The rally winner scoring via an attack: AttackWins for the attacker.
+	 *  - The rally loser's last touch being an attack (fault / dug out):
+	 *    AttackErrors for the attacker.
+	 *  - Serve fault (serve was the last touch and the serving team did NOT win):
+	 *    ServeErrors for the server.
+	 *  - Serve ace (no touches, serving team wins): ServeAces for the server.
+	 *  - Last touch was a block for the rally loser: Blocks for the blocker. */
+	inline void AttachStatsForRally(TArray<FPlayerMatchStats>& OutStats,
+		EBallTouchType LastTouchType, int32 LastTouchIndex, int32 TouchCount,
+		EVolleyballTeam ScoringTeam, EVolleyballTeam ServingTeam,
+		EVolleyballTeam LastTouchTeam)
+	{
+		if (!OutStats.IsValidIndex(LastTouchIndex)) { return; }
+		FPlayerMatchStats& S = OutStats[LastTouchIndex];
+		const bool bServerWon = (ServingTeam == ScoringTeam && ServingTeam != EVolleyballTeam::None);
+		switch (LastTouchType)
+		{
+		case EBallTouchType::Receive: S.Receives++; break;
+		case EBallTouchType::Set:     S.Sets++;     break;
+		case EBallTouchType::Attack:
+			S.Attacks++;
+			if (LastTouchTeam == ScoringTeam) { S.AttackWins++; }
+			else { S.AttackErrors++; }
+			break;
+		case EBallTouchType::Block:   S.Blocks++;   break;
+		case EBallTouchType::Serve:
+			if (bServerWon && TouchCount == 0) { S.ServeAces++; }
+			else if (!bServerWon) { S.ServeErrors++; }
+			break;
+		default: break;
+		}
+	}
+
 	/** Mark the rally as live. Called by GameMode when the serve is actually hit
 	 *  out (ExecuteServe) and the state enters Rally. Tests assert the lifecycle
 	 *  BeginRally(false) -> StartPlay(true) -> SettleRally(false). */

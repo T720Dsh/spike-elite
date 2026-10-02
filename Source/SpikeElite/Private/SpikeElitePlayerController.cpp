@@ -1912,7 +1912,23 @@ void ASpikeElitePlayerController::OnMatchOver(const TArray<int32>& ScoresA, cons
 		if (GM->GetRotationWidget()) { GM->GetRotationWidget()->SetVisibility(ESlateVisibility::Collapsed); }
 	}
 	BuildMatchEnd();
-	if (MatchEnd) { MatchEnd->SetResult(Winner, ScoresA, ScoresB); }
+	if (MatchEnd)
+	{
+		ASpikeEliteGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<ASpikeEliteGameMode>() : nullptr;
+		// M11h-8: per-player stats (attributed from real events) feed the result
+		// screen; identities come from the authoritative rosters.
+		if (GM)
+		{
+			MatchEnd->SetResult(Winner, ScoresA, ScoresB,
+				GM->StatsA, GM->StatsB, GM->RosterA.Registered, GM->RosterB.Registered);
+		}
+		else
+		{
+			MatchEnd->SetResult(Winner, ScoresA, ScoresB,
+				TArray<SEVolleyballRules::FPlayerMatchStats>(), TArray<SEVolleyballRules::FPlayerMatchStats>(),
+				TArray<FPlayerIdentity>(), TArray<FPlayerIdentity>());
+		}
+	}
 	SetUIInputMode(MatchEnd);
 	MatchEnd->SetInitialFocus();   // M11f-3
 }
