@@ -205,6 +205,9 @@ void ASpikeEliteGameMode::StartMatch()
 	// M11h-5: full substitution reset AFTER rosters exist (allowances, bench
 	// pool, on-court six = this set's starting lineup).
 	ResetSubstitutionState();
+	// M11h-3: fresh match -> full server intro for the first server.
+	LastPresentedServerId = TEXT("");
+	PresentationTimer = 0.f;
 	// M11h-2b: challenge mode — load progress and apply stage difficulty to the
 	// opponent (bounded attribute modifiers only, never a separate ruleset).
 	if (MatchModeConfig.Mode == EGameModeChoice::Challenge12)
@@ -555,7 +558,16 @@ void ASpikeEliteGameMode::Tick(float DeltaSeconds)
 	case EMatchState::AwaitingReady:
 	{
 		PhaseTimer -= DeltaSeconds;
-		if (PhaseTimer <= 0.f) { BeginServiceAuthorized(); }
+		// M11h-3: after readiness the server-intro card plays, THEN the whistle
+		// opens the 8 s window. The intro never eats into the 8 s and never
+		// authorizes an early serve.
+		if (PhaseTimer <= 0.f) { EnterServePresentation(); }
+		break;
+	}
+	case EMatchState::ServePresentation:
+	{
+		PresentationTimer -= DeltaSeconds;
+		if (PresentationTimer <= 0.f) { BeginServiceAuthorized(); }
 		break;
 	}
 	case EMatchState::ServiceAuthorized:
@@ -758,6 +770,7 @@ void ASpikeEliteGameMode::UpdateScoreboard()
 	case EMatchState::BetweenRallies:     Phase = TEXT("回合间"); break;
 	case EMatchState::ResettingPositions: Phase = TEXT("球员就位"); break;
 	case EMatchState::AwaitingReady:      Phase = TEXT("裁判确认准备"); break;
+	case EMatchState::ServePresentation:  Phase = TEXT("发球员介绍"); break;
 	case EMatchState::ServiceAuthorized:  Phase = TEXT("允许发球"); break;
 	case EMatchState::ServingToss:        Phase = TEXT("发球抛球"); break;
 	case EMatchState::Rally:              Phase = TEXT("回合进行"); break;
@@ -991,6 +1004,8 @@ void ASpikeEliteGameMode::StartNextSet()
 	// starting six return (FIVB 15.2 — starters may be used again in the next
 	// set; on-court lineup returns to this set's starting lineup).
 	ResetSubstitutionState();
+	// M11h-3: a new set always shows the full server intro card again.
+	LastPresentedServerId = TEXT("");
 	RespawnPlayersToPositions();
 	SEVolleyballRules::BeginRally(RallyState, ServingTeam);
 	MatchState = EMatchState::BetweenRallies;
@@ -1038,13 +1053,54 @@ void ASpikeEliteGameMode::DriveFiveSet()
 	AwardPoint(AS <= BS ? EVolleyballTeam::TeamA : EVolleyballTeam::TeamB);
 }
 
+// ---------------- M11h-3: server introduction ----------------
+
+void ASpikeEliteGameMode::EnterServePresentation()
+{
+	if (MatchState != EMatchState::AwaitingReady) { return; }
+	TArray<TObjectPtr<ASpikeEliteCharacter>>& Roster = (ServingTeam == EVolleyballTeam::TeamA) ? TeamAPlayers : TeamBPlayers;
+	ASpikeEliteCharacter* Server = (Roster.Num() > 0) ? Roster[0].Get() : nullptr;
+	const FPlayerIdentity* Id = FindIdentity(ServingTeam, Server);
+	// Identity PlayerId is a stable FString ("A01"); the actor's int PlayerId is
+	// only the spawn index. The presentation tracks the IDENTITY, so a
+	// substitution keeps the comparison meaningful.
+	const FString ServerId = Id ? Id->PlayerId : TEXT("");
+
+	// Same player serving again -> short name/number bar only; a new server gets
+	// the full card. The intro runs at UI/real time (world is NOT paused here).
+	const bool bSameServer = (!ServerId.IsEmpty() && ServerId == LastPresentedServerId);
+	PresentationTimer = bSameServer ? 1.2f : 2.2f;
+	MatchState = EMatchState::ServePresentation;
+	UpdateScoreboard();
+
+	const FPlayerIdentity* ServerIdentity = FindIdentity(ServingTeam, Server);
+	if (ASpikeElitePlayerController* SEPC = Cast<ASpikeElitePlayerController>(UGameplayStatics::GetPlayerController(this, 0)))
+	{
+		SEPC->ShowServeIntro(ServerId, ServerIdentity ? ServerIdentity->JerseyNumber : 0,
+			ServerIdentity ? ServerIdentity->DisplayName : TEXT("发球员"),
+			ServingTeam, ServerIdentity ? SEVolleyballRoster::RoleDisplayName(ServerIdentity->Role) : TEXT(""),
+			bSameServer);
+	}
+	UE_LOG(LogVolleyballRules, Log, TEXT("Serve presentation: server=%s same=%d"),
+		*ServerId, bSameServer ? 1 : 0);
+}
+
+void ASpikeEliteGameMode::SkipServePresentation()
+{
+	if (MatchState != EMatchState::ServePresentation) { return; }
+	if (ASpikeElitePlayerController* SEPC = Cast<ASpikeElitePlayerController>(UGameplayStatics::GetPlayerController(this, 0)))
+	{
+		SEPC->HideServeIntro();
+	}
+	BeginServiceAuthorized();
+}
+
 void ASpikeEliteGameMode::BeginServiceAuthorized()
 {
 	if (!Ball) return;
 
 	TArray<TObjectPtr<ASpikeEliteCharacter>>& Roster = (ServingTeam == EVolleyballTeam::TeamA) ? TeamAPlayers : TeamBPlayers;
 	ASpikeEliteCharacter* Server = (Roster.Num() > 0) ? Roster[0].Get() : nullptr;
-
 	// M11c-1: the server must stand BEHIND the end line (X=±900) inside the
 	// service zone (~±1150..1300) during the authorized window; only after the
 	// ball is hit may they step back on court. Temporarily pinning HomePosition
@@ -1070,6 +1126,13 @@ void ASpikeEliteGameMode::BeginServiceAuthorized()
 
 	MatchState = EMatchState::ServiceAuthorized;
 	bInToss = false;
+
+	// M11h-3: remember who was presented so consecutive serves reuse a short bar.
+	{
+		TArray<TObjectPtr<ASpikeEliteCharacter>>& PresRoster = (ServingTeam == EVolleyballTeam::TeamA) ? TeamAPlayers : TeamBPlayers;
+		const FPlayerIdentity* PresId = FindIdentity(ServingTeam, (PresRoster.Num() > 0) ? PresRoster[0].Get() : nullptr);
+		LastPresentedServerId = PresId ? PresId->PlayerId : TEXT("");
+	}
 
 	// M11b-2: the 1st referee blows the service whistle and the 8 s window opens.
 	// Before this whistle the E key is refused (RequestServe state gate).

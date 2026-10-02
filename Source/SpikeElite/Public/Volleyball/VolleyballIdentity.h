@@ -131,6 +131,20 @@ namespace SEVolleyballRoster
 	constexpr int32 RegisteredSize = 12;
 	constexpr int32 CourtSize = 6;
 
+	/** Original Chinese position label (never localizes real-brand names). */
+	inline const TCHAR* RoleDisplayName(EPlayerRole Role)
+	{
+		switch (Role)
+		{
+		case EPlayerRole::OutsideHitter: return TEXT("主攻");
+		case EPlayerRole::MiddleBlocker: return TEXT("副攻");
+		case EPlayerRole::Setter:        return TEXT("二传");
+		case EPlayerRole::Opposite:      return TEXT("接应");
+		case EPlayerRole::Libero:        return TEXT("自由人（未启用）");
+		default:                         return TEXT("球员");
+		}
+	}
+
 	/** Build the fixed original 12-player squad for a team. */
 	SPIKEELITE_API void BuildDefaultRoster(EVolleyballTeam Team, FTeamRosterState& Out);
 

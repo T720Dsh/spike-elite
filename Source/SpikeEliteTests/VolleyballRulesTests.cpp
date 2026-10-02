@@ -1572,6 +1572,12 @@ bool FSEITimeoutLegalWindows::RunTest(const FString& Parameters)
 	TestFalse(TEXT("set over"),        SEVolleyballRules::CanRequestTimeoutInPhase(EMatchState::SetOver));
 	TestFalse(TEXT("match over"),      SEVolleyballRules::CanRequestTimeoutInPhase(EMatchState::MatchOver));
 	TestFalse(TEXT("pre match"),       SEVolleyballRules::CanRequestTimeoutInPhase(EMatchState::PreMatch));
+	// M11h-3: the server-intro card is NOT a legal timeout/substitution window
+	// and never allows touches or serves (it only plays before the whistle).
+	TestFalse(TEXT("serve presentation no timeout"),
+		SEVolleyballRules::CanRequestTimeoutInPhase(EMatchState::ServePresentation));
+	TestFalse(TEXT("serve presentation no touch"),
+		SEVolleyballRules::IsTouchLegalInPhase(EMatchState::ServePresentation, false));
 	return true;
 }
 

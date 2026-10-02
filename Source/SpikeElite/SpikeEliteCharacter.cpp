@@ -602,6 +602,13 @@ void ASpikeEliteCharacter::ServeBall()
 {
 	if (ASpikeEliteGameMode* GM = Cast<ASpikeEliteGameMode>(UGameplayStatics::GetGameMode(this)))
 	{
+		// M11h-3: E during the server-intro card skips the presentation (to the
+		// whistle), it does NOT serve — the intro never authorizes an early serve.
+		if (GM->MatchState == EMatchState::ServePresentation)
+		{
+			GM->SkipServePresentation();
+			return;
+		}
 		GM->RequestServe(this);
 	}
 }

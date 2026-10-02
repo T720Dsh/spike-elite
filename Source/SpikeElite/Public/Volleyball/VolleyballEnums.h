@@ -34,6 +34,7 @@ enum class EMatchState : uint8
 	BetweenRallies     UMETA(DisplayName = "Post-rally result display"),
 	ResettingPositions UMETA(DisplayName = "Players returning to formation"),
 	AwaitingReady      UMETA(DisplayName = "2nd referee checking readiness"),
+	ServePresentation  UMETA(DisplayName = "Server intro card"),
 	ServiceAuthorized  UMETA(DisplayName = "Whistle blown, service authorized"),
 	ServingToss        UMETA(DisplayName = "Serving toss"),
 	Rally              UMETA(DisplayName = "Rally in progress"),

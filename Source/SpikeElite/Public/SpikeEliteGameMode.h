@@ -114,6 +114,17 @@ public:
 	/** Dead-ball window in which a team timeout may legally be requested. */
 	bool CanRequestTimeout() const;
 
+	// ---------------- M11h-3: server introduction (ServePresentation) ----------------
+	/** Seconds the server intro card stays up (long for a new server, short bar
+	 *  when the same player serves again consecutively). */
+	float PresentationTimer = 0.f;
+	/** PlayerId of the last presented server (to pick short vs long intro). */
+	FString LastPresentedServerId;
+	/** Skip the intro early (E / Enter) and move to the whistle. */
+	void SkipServePresentation();
+	/** Enter the server-intro phase (called when AwaitingReady elapses). */
+	void EnterServePresentation();
+
 	// ---------------- M11h-5: substitutions (FIVB 15.1/15.2/15.6 subset) ----------------
 	/** Substitutions remaining this set (FIVB: 6 per set). */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Volleyball|Flow")

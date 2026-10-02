@@ -9,6 +9,7 @@
 #include "UI/MatchEndWidget.h"
 #include "UI/ConfirmWidget.h"
 #include "UI/CoachPanelWidget.h"
+#include "UI/ServeIntroWidget.h"
 #include "UI/RotationWidget.h"
 #include "UI/SEUiStyle.h"
 #include "Engine/UserInterfaceSettings.h"
@@ -1600,6 +1601,29 @@ void ASpikeElitePlayerController::HandleCoachSetter()
 	}
 }
 
+void ASpikeElitePlayerController::ShowServeIntro(const FString& PlayerId, int32 JerseyNumber,
+	const FString& Name, EVolleyballTeam Team, const FString& RoleText, bool bShortBar)
+{
+	if (!ServeIntro)
+	{
+		ServeIntro = CreateWidget<UServeIntroWidget>(this);
+	}
+	if (!ServeIntro) { return; }
+	const FString TeamLabel = (Team == EVolleyballTeam::TeamA) ? TEXT("TEAM A")
+		: (Team == EVolleyballTeam::TeamB) ? TEXT("TEAM B") : TEXT("-");
+	ServeIntro->SetServer(JerseyNumber, Name, TeamLabel, RoleText, bShortBar);
+	ServeIntro->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+	ServeIntro->AddToViewport(25);
+}
+
+void ASpikeElitePlayerController::HideServeIntro()
+{
+	if (ServeIntro)
+	{
+		ServeIntro->FadeOut();
+	}
+}
+
 FString ASpikeElitePlayerController::CoachZoneLabel(const FCoachPreferences& P)
 {
 	return (P.ServeZone < 0) ? TEXT("左") : (P.ServeZone > 0) ? TEXT("右") : TEXT("中");
@@ -1858,6 +1882,7 @@ void ASpikeElitePlayerController::BuildMatchEnd()
 void ASpikeElitePlayerController::OnMatchOver(const TArray<int32>& ScoresA, const TArray<int32>& ScoresB, EVolleyballTeam Winner)
 {
 	UE_LOG(LogSEMenu, Log, TEXT("Match over: winner=%s"), Winner == EVolleyballTeam::TeamA ? TEXT("A") : Winner == EVolleyballTeam::TeamB ? TEXT("B") : TEXT("-"));
+	HideServeIntro(); // M11h-3: the result screen never keeps the server card.
 	// M11f-2: stable broadcast end-of-match view. Point the player camera at the
 	// court centre from a slight elevation instead of leaving the last rally's
 	// tight framing (player back or scorer text filling the result background).
@@ -1897,6 +1922,7 @@ void ASpikeElitePlayerController::Rematch()
 	UE_LOG(LogSEMenu, Log, TEXT("Rematch requested"));
 	if (MatchEnd) { MatchEnd->RemoveFromParent(); MatchEnd = nullptr; }
 	HideAllMenus();
+	HideServeIntro(); // M11h-3: never carry the server card into a fresh match
 	MenuState = EMenuState::Playing;
 	SetGameInputMode();
 	if (ASpikeEliteGameMode* GM = Cast<ASpikeEliteGameMode>(UGameplayStatics::GetGameMode(this)))

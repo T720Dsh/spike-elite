@@ -17,6 +17,7 @@ class UScoreboardWidget;
 class UMatchEndWidget;
 class UConfirmWidget;
 class UCoachPanelWidget;
+class UServeIntroWidget;
 
 UENUM(BlueprintType)
 enum class EMenuState : uint8
@@ -123,6 +124,11 @@ public:
 	static FString CoachDefenseLabel(const FCoachPreferences& P);
 	static FString CoachSetterLabel(const FCoachPreferences& P);
 
+	/** M11h-3: show the broadcast server-intro card (ServePresentation). */
+	void ShowServeIntro(const FString& PlayerId, int32 JerseyNumber, const FString& Name,
+		EVolleyballTeam Team, const FString& Role, bool bShortBar);
+	void HideServeIntro();
+
 	/** Tactical slow-motion shot planner (human only). Created in BeginPlay. */
 	UPROPERTY()
 	TObjectPtr<UTacticalContactComponent> Tactical;
@@ -158,6 +164,7 @@ protected:
 	UPROPERTY() TObjectPtr<UMatchEndWidget> MatchEnd;
 	UPROPERTY() TObjectPtr<UConfirmWidget> Confirm;
 	UPROPERTY() TObjectPtr<UCoachPanelWidget> CoachPanel;
+	UPROPERTY() TObjectPtr<UServeIntroWidget> ServeIntro;
 
 	EMenuState MenuState = EMenuState::MainMenu;
 
