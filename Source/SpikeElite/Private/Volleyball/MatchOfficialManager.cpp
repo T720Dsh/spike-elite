@@ -82,8 +82,14 @@ void AMatchOfficialManager::BuildStand()
 		FVector(1.6f, 1.6f, 0.12f), FLinearColor(0.35f, 0.36f, 0.40f), ECollisionEnabled::QueryOnly);
 	StandLadder = MakeBlock(TEXT("StandLadder"), StandLoc + FVector(120.f, 0, 110.f),
 		FVector(0.9f, 0.9f, 2.2f), FLinearColor(0.30f, 0.31f, 0.35f));
+	// Guard rails: two upright posts plus the cross bar so the platform reads
+	// as a real referee tower rather than a floating slab.
 	StandRailing = MakeBlock(TEXT("StandRailing"), StandLoc + FVector(0, 0, 300.f),
 		FVector(1.6f, 0.10f, 0.5f), FLinearColor(0.45f, 0.47f, 0.52f));
+	StandRailingPostA = MakeBlock(TEXT("StandRailingPostA"), StandLoc + FVector(-80.f, 0, 280.f),
+		FVector(0.12f, 0.12f, 1.6f), FLinearColor(0.45f, 0.47f, 0.52f));
+	StandRailingPostB = MakeBlock(TEXT("StandRailingPostB"), StandLoc + FVector(80.f, 0, 280.f),
+		FVector(0.12f, 0.12f, 1.6f), FLinearColor(0.45f, 0.47f, 0.52f));
 	StandPadding = MakeBlock(TEXT("StandPadding"), StandLoc + FVector(0, 0, 220.f),
 		FVector(1.7f, 0.3f, 0.5f), FLinearColor(0.60f, 0.30f, 0.25f));
 
@@ -106,22 +112,32 @@ void AMatchOfficialManager::BuildScorer()
 	const FVector TableLoc(1750.f, 0.f, 0.f);
 	ScorerTable = MakeBlock(TEXT("ScorerTable"), TableLoc + FVector(0, 0, 75.f),
 		FVector(1.8f, 0.9f, 0.1f), FLinearColor(0.45f, 0.40f, 0.32f), ECollisionEnabled::QueryOnly);
-	ScorerChair = MakeBlock(TEXT("ScorerChair"), TableLoc + FVector(-80.f, 0, 30.f),
+	ScorerChair = MakeBlock(TEXT("ScorerChair"), TableLoc + FVector(80.f, 0, 30.f),
 		FVector(0.5f, 0.5f, 0.6f), FLinearColor(0.35f, 0.36f, 0.40f));
-	// Scorer sits facing the court / 1st referee (-X direction).
-	ScorerBody = MakeBlock(TEXT("ScorerBody"), TableLoc + FVector(-10.f, 0, 105.f),
+	// Scorer sits behind the table, facing the court / 1st referee (-X direction).
+	ScorerBody = MakeBlock(TEXT("ScorerBody"), TableLoc + FVector(70.f, 0, 105.f),
 		FVector(0.40f, 0.30f, 0.90f), FLinearColor(0.25f, 0.30f, 0.45f));
-	ScorerHead = MakeBlock(TEXT("ScorerHead"), TableLoc + FVector(-10.f, 0, 168.f),
+	ScorerHead = MakeBlock(TEXT("ScorerHead"), TableLoc + FVector(70.f, 0, 168.f),
 		FVector(0.28f, 0.28f, 0.28f), FLinearColor(0.72f, 0.55f, 0.42f));
 
-	// Live scorer's scoreboard facing the court (+X face toward -X).
+	// Physical scorer's scoreboard device on the table: a pedestal plus a
+	// tall panel whose front face (-X, toward the court and the broadcast
+	// camera) carries the live text, so it reads from the stands and the
+	// scorer never blocks it.
+	ScoreboardDevice = MakeBlock(TEXT("ScoreboardDevice"), TableLoc + FVector(-10.f, 0, 108.f),
+		FVector(1.1f, 0.6f, 0.10f), FLinearColor(0.18f, 0.19f, 0.24f), ECollisionEnabled::QueryOnly);
+	ScoreboardPanel = MakeBlock(TEXT("ScoreboardPanel"), TableLoc + FVector(-10.f, 0, 150.f),
+		FVector(1.05f, 0.05f, 0.85f), FLinearColor(0.08f, 0.09f, 0.14f), ECollisionEnabled::QueryOnly);
+
+	// Live text on the panel's -X face. Yaw 180 faces the text toward the
+	// court so it reads correctly from the stands / broadcast camera.
 	ScoreboardText = CreateDefaultSubobject<UTextRenderComponent>(TEXT("ScoreboardText"));
 	ScoreboardText->SetupAttachment(Root);
-	ScoreboardText->SetRelativeLocation(TableLoc + FVector(10.f, 0, 110.f));
-	ScoreboardText->SetRelativeRotation(FRotator(0.f, -90.f, 0.f));
+	ScoreboardText->SetRelativeLocation(TableLoc + FVector(-10.f, 0, 150.f));
+	ScoreboardText->SetRelativeRotation(FRotator(0.f, 180.f, 0.f));
 	ScoreboardText->SetHorizontalAlignment(EHorizTextAligment::EHTA_Center);
-	ScoreboardText->SetWorldSize(26.f);
-	ScoreboardText->SetTextRenderColor(FColor::White);
+	ScoreboardText->SetWorldSize(22.f);
+	ScoreboardText->SetTextRenderColor(FColor(255, 214, 64));
 	ScoreboardText->SetText(FText::FromString(TEXT("SPIKE ELITE\nSET 1\n0 : 0")));
 }
 
@@ -134,15 +150,19 @@ void AMatchOfficialManager::BuildBenches()
 	BenchB = MakeBlock(TEXT("BenchB"), FVector(200.f, -1150.f, 30.f),
 		FVector(5.f, 0.4f, 0.35f), FLinearColor(0.55f, 0.30f, 0.25f), ECollisionEnabled::QueryOnly);
 
-	// Lightweight substitutes (visual only, no collision) on both benches.
+	// Lightweight substitutes (visual only, no collision) on both benches,
+	// posed seated (short body + legs) instead of standing blocks.
 	int32 SubIdx = 0;
 	auto AddSub = [this, &SubIdx](const FVector& Loc, const FLinearColor& Jersey)
 	{
-		UStaticMeshComponent* B = MakeBlock(*FString::Printf(TEXT("Sub%d"), SubIdx), Loc + FVector(0, 0, 55.f),
-			FVector(0.36f, 0.26f, 0.85f), Jersey);
+		UStaticMeshComponent* B = MakeBlock(*FString::Printf(TEXT("Sub%d"), SubIdx), Loc + FVector(0, 0, 38.f),
+			FVector(0.34f, 0.26f, 0.55f), Jersey);
 		Substitutes.Add(B);
-		UStaticMeshComponent* H = MakeBlock(*FString::Printf(TEXT("SubHead%d"), SubIdx), Loc + FVector(0, 0, 110.f),
-			FVector(0.26f, 0.26f, 0.26f), FLinearColor(0.72f, 0.55f, 0.42f));
+		UStaticMeshComponent* Leg = MakeBlock(*FString::Printf(TEXT("SubLeg%d"), SubIdx), Loc + FVector(0, 0, 16.f),
+			FVector(0.22f, 0.24f, 0.45f), FLinearColor(0.20f, 0.21f, 0.26f));
+		Substitutes.Add(Leg);
+		UStaticMeshComponent* H = MakeBlock(*FString::Printf(TEXT("SubHead%d"), SubIdx), Loc + FVector(0, 0, 72.f),
+			FVector(0.24f, 0.24f, 0.24f), FLinearColor(0.72f, 0.55f, 0.42f));
 		Substitutes.Add(H);
 		++SubIdx;
 	};

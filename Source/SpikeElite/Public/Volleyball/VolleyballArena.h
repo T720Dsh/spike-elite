@@ -68,6 +68,7 @@ protected:
 	// Stands & crowd (instanced)
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UInstancedStaticMeshComponent> StandSteps;
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UInstancedStaticMeshComponent> CrowdHeads;
+	UPROPERTY(VisibleAnywhere) TObjectPtr<UInstancedStaticMeshComponent> CrowdLegs;
 	UPROPERTY(VisibleAnywhere) TArray<TObjectPtr<UInstancedStaticMeshComponent>> CrowdBodies;
 
 	// Railings + LED boards (instanced thin slabs)

@@ -41,6 +41,8 @@ protected:
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UStaticMeshComponent> StandPlatform;
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UStaticMeshComponent> StandLadder;
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UStaticMeshComponent> StandRailing;
+	UPROPERTY(VisibleAnywhere) TObjectPtr<UStaticMeshComponent> StandRailingPostA;
+	UPROPERTY(VisibleAnywhere) TObjectPtr<UStaticMeshComponent> StandRailingPostB;
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UStaticMeshComponent> StandPadding;
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UStaticMeshComponent> Ref1Body;
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UStaticMeshComponent> Ref1Head;
@@ -54,6 +56,8 @@ protected:
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UStaticMeshComponent> ScorerChair;
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UStaticMeshComponent> ScorerBody;
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UStaticMeshComponent> ScorerHead;
+	UPROPERTY(VisibleAnywhere) TObjectPtr<UStaticMeshComponent> ScoreboardDevice;
+	UPROPERTY(VisibleAnywhere) TObjectPtr<UStaticMeshComponent> ScoreboardPanel;
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UTextRenderComponent> ScoreboardText;
 
 	// Benches (Team A / Team B) with lightweight substitutes

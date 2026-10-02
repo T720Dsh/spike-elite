@@ -233,6 +233,15 @@ void AVolleyballArena::BuildStands(UStaticMesh* Cube)
 	CrowdHeads->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	if (auto* M = ArenaMakeMID(CrowdHeads, FLinearColor(0.72f, 0.55f, 0.42f)))
 		CrowdHeads->SetMaterial(0, M);
+
+	// Seated-leg silhouettes (dark) so the crowd reads as sitting in the stand
+	// rows instead of a wall of upright coloured blocks.
+	CrowdLegs = CreateDefaultSubobject<UInstancedStaticMeshComponent>(TEXT("CrowdLegs"));
+	CrowdLegs->SetupAttachment(Root);
+	CrowdLegs->SetStaticMesh(Cube);
+	CrowdLegs->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	if (auto* M = ArenaMakeMID(CrowdLegs, FLinearColor(0.16f, 0.17f, 0.22f)))
+		CrowdLegs->SetMaterial(0, M);
 }
 
 void AVolleyballArena::BeginPlay()
@@ -252,6 +261,7 @@ void AVolleyballArena::PopulateStands()
 	CrowdRows = FMath::Clamp(CrowdRows, 5, 12);
 	StandSteps->ClearInstances();
 	CrowdHeads->ClearInstances();
+	if (CrowdLegs) CrowdLegs->ClearInstances();
 	Railings->ClearInstances();
 	for (auto& B : CrowdBodies) if (B) B->ClearInstances();
 
@@ -263,10 +273,13 @@ void AVolleyballArena::PopulateStands()
 	{
 		const int32 Kind = FMath::RandRange(0, BodyKinds - 1);
 		const float Sway = FMath::FRandRange(-3.f, 3.f);
-		FVector BodyLoc(BaseLoc.X + Sway, BaseLoc.Y + Sway, BaseLoc.Z + 30.f);
-		FVector HeadLoc(BaseLoc.X + Sway, BaseLoc.Y + Sway, BaseLoc.Z + 68.f);
-		CrowdBodies[Kind]->AddInstance(FTransform(FRotator::ZeroRotator, BodyLoc, FVector(0.28f, 0.20f, 0.55f)));
-		CrowdHeads->AddInstance(FTransform(FRotator::ZeroRotator, HeadLoc, FVector(0.16f, 0.16f, 0.16f)));
+		// Seated silhouette: low wide body, dark legs below, head on top.
+		FVector BodyLoc(BaseLoc.X + Sway, BaseLoc.Y + Sway, BaseLoc.Z + 14.f);
+		FVector LegLoc(BaseLoc.X + Sway, BaseLoc.Y + Sway, BaseLoc.Z + 2.f);
+		FVector HeadLoc(BaseLoc.X + Sway, BaseLoc.Y + Sway, BaseLoc.Z + 44.f);
+		CrowdBodies[Kind]->AddInstance(FTransform(FRotator::ZeroRotator, BodyLoc, FVector(0.32f, 0.24f, 0.34f)));
+		CrowdLegs->AddInstance(FTransform(FRotator::ZeroRotator, LegLoc, FVector(0.22f, 0.20f, 0.26f)));
+		CrowdHeads->AddInstance(FTransform(FRotator::ZeroRotator, HeadLoc, FVector(0.15f, 0.15f, 0.15f)));
 	};
 
 	// Side stands (along X), 10 rows, central aisle gap + corner aisles.

@@ -106,7 +106,9 @@ void AVolleyballCourt::BuildNet(UStaticMesh* Cube, UStaticMesh* Cyl)
 	NetGrid->SetupAttachment(Root);
 	if (Cube) NetGrid->SetStaticMesh(Cube);
 	NetGrid->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	if (auto* M = CourtMakeMID(NetGrid, FLinearColor(0.68f, 0.69f, 0.72f)))
+	// M11e-4: finer, darker net strands so the net reads as mesh, not a thick
+	// white fence hiding the far side.
+	if (auto* M = CourtMakeMID(NetGrid, FLinearColor(0.38f, 0.40f, 0.44f)))
 		NetGrid->SetMaterial(0, M);
 
 	NetTopBand = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("NetTopBand"));
@@ -181,13 +183,13 @@ void AVolleyballCourt::PopulateNetGrid()
 	const float NetW = HalfCourtWidth*2 + NetOverhang*2;
 	const float HalfNetW = NetW / 2.f;
 	const float NetBottom = NetHeight - NetBandHeight;
-	const float Spacing = 12.f;
+	const float Spacing = 8.f;
 
 	const int32 HCount = FMath::Max(2, FMath::RoundToInt(NetBandHeight / Spacing));
 	for (int32 i = 0; i <= HCount; ++i)
 	{
 		const float Z = NetBottom + (NetBandHeight * i / HCount);
-		FTransform T(FRotator::ZeroRotator, FVector(0, 0, Z), FVector(0.012f, NetW/100.f, 0.012f));
+		FTransform T(FRotator::ZeroRotator, FVector(0, 0, Z), FVector(0.009f, NetW/100.f, 0.009f));
 		NetGrid->AddInstance(T);
 	}
 	for (float Y = -HalfNetW; Y <= HalfNetW + 0.1f; Y += Spacing)
