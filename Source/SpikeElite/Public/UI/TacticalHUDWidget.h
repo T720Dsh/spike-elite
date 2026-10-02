@@ -66,6 +66,11 @@ public:
 	void UpdateAttackInfo(const FShotIntent& Intent, const SEVolleyballTrajectory::FShotSolution& Sol);
 	void ShowTiming(float Progress01, const FString& Status);
 
+	/** True when the cursor is over one of the tactical panels. The contact
+	 *  component uses this to keep UMG card clicks (select-only) from being
+	 *  misread as a world-space LMB confirm. */
+	bool IsPointerOverPanel() const;
+
 	/** Set-play list: rebuild highlight / details from the current selection. */
 	void UpdateSetList(int32 Selected);
 	/** Defense list highlight. */
@@ -90,6 +95,8 @@ protected:
 	UPROPERTY() TObjectPtr<UTextBlock> AttackHelp;
 	UPROPERTY() TObjectPtr<UProgressBar> TimingBar;
 	UPROPERTY() TObjectPtr<UTextBlock> TimingLabel;
+	/** Attack panel body container (for pointer-over detection). */
+	UPROPERTY() TObjectPtr<UVerticalBox> AttackList;
 
 	UPROPERTY() TObjectPtr<UTextBlock> SetTitle;
 	UPROPERTY() TObjectPtr<UTextBlock> SetCategory;

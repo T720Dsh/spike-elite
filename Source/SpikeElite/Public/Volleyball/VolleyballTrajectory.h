@@ -152,6 +152,9 @@ namespace SEVolleyballTrajectory
 		FVector Landing = FVector::ZeroVector;
 		float FlightTime = 0.f;
 		FVector Apex = FVector::ZeroVector;
+		/** Apex height measured ABOVE the contact point (cm), so arc labels
+		 *  stay meaningful for attacks struck from an already-high contact. */
+		float ApexAboveContact = 0.f;
 		bool bCrossedNet = false;
 		bool bInBounds = false;
 		bool bValid = false;

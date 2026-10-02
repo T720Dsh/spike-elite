@@ -93,6 +93,7 @@ void UTacticalHUDWidget::BuildAttackPanel()
 	AttackBorder = MakePanel(WidgetTree, Root, FVector2D(16.f, -16.f), FVector2D(380.f, 320.f));
 	UVerticalBox* V = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass());
 	AttackBorder->AddChild(V);
+	AttackList = V;
 
 	AttackHeader = MakeRowText(WidgetTree, V, TEXT("战术瞄准"), 22, SEUiStyle::Colors::Gold);
 	AttackStage = MakeRowText(WidgetTree, V, TEXT("选择落点"), 16, SEUiStyle::Colors::White);
@@ -256,6 +257,26 @@ void UTacticalHUDWidget::HideAll()
 	if (DefenseBorder) { DefenseBorder->SetVisibility(ESlateVisibility::Collapsed); }
 }
 
+bool UTacticalHUDWidget::IsPointerOverPanel() const
+{
+	float MX = 0.f, MY = 0.f;
+	if (!GetOwningPlayer() || !GetOwningPlayer()->GetMousePosition(MX, MY))
+	{
+		return false;
+	}
+	const FVector2D Pos(MX, MY);
+	const UBorder* Borders[3] = { AttackBorder, SetBorder, DefenseBorder };
+	for (const UBorder* Border : Borders)
+	{
+		if (Border && Border->GetVisibility() == ESlateVisibility::Visible)
+		{
+			const FGeometry& G = Border->GetCachedGeometry();
+			if (G.IsUnderLocation(Pos)) { return true; }
+		}
+	}
+	return false;
+}
+
 namespace
 {
 	/** Friendly landing-zone name instead of raw cm coordinates. */
@@ -269,10 +290,12 @@ namespace
 		return FB + LR;
 	}
 
-	FString ArcLabel(float ApexZ)
+	FString ArcLabel(float ApexAboveContact)
 	{
-		if (ApexZ < 160.f) { return TEXT("低"); }
-		if (ApexZ < 260.f) { return TEXT("中"); }
+		// Arc height is measured above the CONTACT point (not world Z), so a
+		// high strike point still reads low/mid/high correctly.
+		if (ApexAboveContact < 60.f) { return TEXT("低"); }
+		if (ApexAboveContact < 150.f) { return TEXT("中"); }
 		return TEXT("高");
 	}
 }
@@ -283,13 +306,21 @@ void UTacticalHUDWidget::UpdateAttackInfo(const FShotIntent& Intent, const SEVol
 	const int32 TeamSide = Player ? Player->TeamSide : 1;
 	FString Verdict;
 	FLinearColor VerdictColor = SEUiStyle::Colors::Error;
+	const bool bSameSideTouch = (Intent.TouchType == EBallTouchType::Set || Intent.TouchType == EBallTouchType::Receive);
 	if (!Sol.bValid) { Verdict = TEXT("不可行"); }
+	else if (bSameSideTouch)
+	{
+		// Same-side pass/set is NOT required to cross the net: in-bounds is a
+		// legal outcome, out-of-bounds is the only failure mode.
+		Verdict = Sol.bInBounds ? TEXT("界内 可行") : TEXT("出界");
+		VerdictColor = Sol.bInBounds ? SEUiStyle::Colors::Safe : SEUiStyle::Colors::Error;
+	}
 	else if (Sol.bCrossedNet && Sol.bInBounds) { Verdict = TEXT("界内 可行"); VerdictColor = SEUiStyle::Colors::Safe; }
 	else if (Sol.bCrossedNet || Sol.bInBounds) { Verdict = TEXT("接近边界/触网风险"); VerdictColor = SEUiStyle::Colors::Warn; }
 	else { Verdict = TEXT("出界或触网"); }
 
 	const FString Key = FString::Printf(TEXT("A|%.0f|%.0f|%.2f|%.2f|%.2f|%s"),
-		Intent.TargetLocation.X, Intent.TargetLocation.Y, Intent.Power, Sol.FlightTime, Sol.Apex.Z, *Verdict);
+		Intent.TargetLocation.X, Intent.TargetLocation.Y, Intent.Power, Sol.FlightTime, Sol.ApexAboveContact, *Verdict);
 	if (Key == LastAttackKey) { return; }
 	LastAttackKey = Key;
 
@@ -300,7 +331,7 @@ void UTacticalHUDWidget::UpdateAttackInfo(const FShotIntent& Intent, const SEVol
 	AttackTarget->SetText(FText::FromString(FString::Printf(TEXT("目标区：%s"), *ZoneFromTarget(Intent.TargetLocation, TeamSide))));
 	AttackPower->SetText(FText::FromString(FString::Printf(TEXT("力度 %d%%"), FMath::RoundToInt(Intent.Power * 100.f))));
 	if (PowerBar) { PowerBar->SetPercent(FMath::Clamp(Intent.Power, 0.f, 1.f)); }
-	AttackArc->SetText(FText::FromString(FString::Printf(TEXT("弧线 %s · 飞行 %.2f 秒"), *ArcLabel(Sol.Apex.Z), Sol.FlightTime)));
+	AttackArc->SetText(FText::FromString(FString::Printf(TEXT("弧线 %s · 飞行 %.2f 秒"), *ArcLabel(Sol.ApexAboveContact), Sol.FlightTime)));
 	AttackVerdict->SetText(FText::FromString(Verdict));
 	AttackVerdict->SetColorAndOpacity(FSlateColor(VerdictColor));
 }
@@ -334,6 +365,15 @@ void UTacticalHUDWidget::UpdateSetList(int32 Selected)
 		const bool bSel = (i == Selected);
 		SetRows[i]->SetText(FText::FromString(FString::Printf(TEXT("%s %s — %s"), bSel ? TEXT("▶") : TEXT("  "), *Plays[i].Category, *Plays[i].DisplayName)));
 		SetRows[i]->SetColorAndOpacity(FSlateColor(bSel ? SEUiStyle::Colors::Gold : SEUiStyle::Colors::White));
+		if (SetRowButtons.IsValidIndex(i))
+		{
+			// Selected row gets a visible gold-tinted background (keyboard
+			// Up/Down/Q/E move this highlight = the focus visual).
+			SetRowButtons[i]->SetStyle(SEUiStyle::ButtonStyle(
+				bSel ? FLinearColor(0.32f, 0.24f, 0.04f, 0.92f) : FLinearColor(0.1f, 0.1f, 0.15f, 0.9f),
+				bSel ? FLinearColor(0.42f, 0.32f, 0.06f, 0.92f) : FLinearColor(0.25f, 0.25f, 0.35f, 0.9f),
+				FLinearColor(0.05f, 0.05f, 0.1f, 0.9f)));
+		}
 	}
 	if (SetCategory)
 	{
@@ -366,5 +406,12 @@ void UTacticalHUDWidget::UpdateDefenseList(int32 Selected)
 		const bool bSel = (i == Selected);
 		DefenseRows[i]->SetText(FText::FromString(FString::Printf(TEXT("%s %s"), bSel ? TEXT("▶") : TEXT("  "), *Labels[i])));
 		DefenseRows[i]->SetColorAndOpacity(FSlateColor(bSel ? FLinearColor(1.f, 0.85f, 0.2f) : FLinearColor::White));
+		if (DefenseRowButtons.IsValidIndex(i))
+		{
+			DefenseRowButtons[i]->SetStyle(SEUiStyle::ButtonStyle(
+				bSel ? FLinearColor(0.32f, 0.24f, 0.04f, 0.92f) : FLinearColor(0.1f, 0.1f, 0.15f, 0.9f),
+				bSel ? FLinearColor(0.42f, 0.32f, 0.06f, 0.92f) : FLinearColor(0.25f, 0.25f, 0.35f, 0.9f),
+				FLinearColor(0.05f, 0.05f, 0.1f, 0.9f)));
+		}
 	}
 }

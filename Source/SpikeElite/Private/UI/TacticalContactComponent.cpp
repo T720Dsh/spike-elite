@@ -170,7 +170,8 @@ void UTacticalContactComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 			if (TacticalUI) { TacticalUI->HideAll(); }
 			break;
 		}
-		if (OwnerPC->WasInputKeyJustPressed(EKeys::LeftMouseButton) || OwnerPC->WasInputKeyJustPressed(EKeys::Enter))
+		if ((OwnerPC->WasInputKeyJustPressed(EKeys::LeftMouseButton) && !(TacticalUI && TacticalUI->IsPointerOverPanel()))
+			|| OwnerPC->WasInputKeyJustPressed(EKeys::Enter))
 		{
 			ConfirmDefensePlan();
 			break;
@@ -310,27 +311,25 @@ void UTacticalContactComponent::TickPlanning(float DeltaTime)
 	if (bSetTactics)
 	{
 		const TArray<FSetPlayDefinition>& Plays = SESetPlays::GetPlays();
+		bool bSelectionChanged = false;
 		if (OwnerPC->WasInputKeyJustPressed(EKeys::Q) || OwnerPC->WasInputKeyJustPressed(EKeys::Up))
 		{
 			SelectedPlay = (SelectedPlay + 1) % Plays.Num();
+			bSelectionChanged = true;
 		}
 		if (OwnerPC->WasInputKeyJustPressed(EKeys::E) || OwnerPC->WasInputKeyJustPressed(EKeys::Down))
 		{
 			SelectedPlay = (SelectedPlay - 1 + Plays.Num()) % Plays.Num();
+			bSelectionChanged = true;
 		}
+		// Keyboard selection and mouse-card clicks share ApplySetPlayToIntent,
+		// so the Intent/preview always follow the SAME SelectedPlay index.
+		if (bSelectionChanged) { ApplySetPlayToIntent(SelectedPlay); }
 		if (TacticalUI) { TacticalUI->UpdateSetList(SelectedPlay); }
-		// Mouse still picks the landing when free trajectory is selected.
-		if (Plays.IsValidIndex(SelectedPlay) && Plays[SelectedPlay].PlayId != 14)
-		{
-			const FSetPlayDefinition& Play = Plays[SelectedPlay];
-			const FVector Target = SESetPlays::MirrorLocal(Play.TargetLocal, Pawn->TeamSide);
-			Intent.TargetLocation = Target;
-			Intent.DesiredFlightTime = Play.DesiredFlightTime;
-		}
 		if (HintText)
 		{
 			const FString Name = Plays.IsValidIndex(SelectedPlay) ? Plays[SelectedPlay].DisplayName : TEXT("?");
-			HintText->SetText(FText::FromString(FString::Printf(TEXT("二传战术：%s  Q/E切换 · 左键确认 · 右键取消"), *Name)));
+			HintText->SetText(FText::FromString(FString::Printf(TEXT("二传战术：%s  Q/E或方向键选择 · 空白区左键/Enter确认 · 右键取消"), *Name)));
 		}
 	}
 	else
@@ -348,12 +347,23 @@ void UTacticalContactComponent::TickPlanning(float DeltaTime)
 			GM->GetBall() ? GM->GetBall()->GetActorLocation() : FVector::ZeroVector, Intent, 0.f));
 	}
 
-	// Confirm / cancel.
-	if (OwnerPC->WasInputKeyJustPressed(EKeys::LeftMouseButton))
+	// Confirm / cancel. Card clicks select only: while the cursor is over a
+	// tactical panel, LMB belongs to the UMG button (selection), never to the
+	// world-space confirm. Enter confirms anywhere; a world LMB confirms too.
+	const bool bPointerOverPanel = (TacticalUI && TacticalUI->IsPointerOverPanel());
+	if (OwnerPC->WasInputKeyJustPressed(EKeys::LeftMouseButton) && !bPointerOverPanel)
 	{
 		if (PendingTouchType == EBallTouchType::Set && GM.IsValid())
 		{
 			GM->SetActiveSetPlay(SelectedPlay);   // M11c-5: attacker run-up follows the play
+		}
+		EnterArmed();
+	}
+	else if (OwnerPC->WasInputKeyJustPressed(EKeys::Enter))
+	{
+		if (PendingTouchType == EBallTouchType::Set && GM.IsValid())
+		{
+			GM->SetActiveSetPlay(SelectedPlay);
 		}
 		EnterArmed();
 	}
@@ -500,21 +510,46 @@ void UTacticalContactComponent::ConfirmDefensePlan()
 	UE_LOG(LogVolleyballRules, Log, TEXT("[DefensePlan] player chose plan=%d"), DefenseSelected + 1);
 }
 
+void UTacticalContactComponent::ApplySetPlayToIntent(int32 Index)
+{
+	const TArray<FSetPlayDefinition>& Plays = SESetPlays::GetPlays();
+	if (!Plays.IsValidIndex(Index) || !Pawn.IsValid()) { return; }
+	const FSetPlayDefinition& Play = Plays[Index];
+	// Free trajectory (id 14) keeps the mouse-picked landing and manual arc.
+	if (Play.PlayId == 14)
+	{
+		const FVector Ground = PickGroundPoint();
+		if (!Ground.IsZero()) { Intent.TargetLocation = Ground; }
+		return;
+	}
+	Intent.TargetLocation = SESetPlays::MirrorLocal(Play.TargetLocal, Pawn->TeamSide);
+	Intent.DesiredFlightTime = Play.DesiredFlightTime;
+	Intent.ApexHeight = Play.ApexHeight;
+	Intent.TouchType = EBallTouchType::Set;
+	UE_LOG(LogVolleyballRules, Log, TEXT("[SetPlayPick] index=%d name=%s target=%s flight=%.2f apex=%.0f"),
+		Index, *Play.DisplayName, *Intent.TargetLocation.ToString(), Intent.DesiredFlightTime, Play.ApexHeight);
+}
+
 void UTacticalContactComponent::HandleSetPlayPicked(int32 Index)
 {
 	const TArray<FSetPlayDefinition>& Plays = SESetPlays::GetPlays();
-	if (Plays.IsValidIndex(Index))
-	{
-		SelectedPlay = Index;
-		if (TacticalUI) { TacticalUI->UpdateSetList(SelectedPlay); }
-	}
+	if (!Plays.IsValidIndex(Index)) { return; }
+	SelectedPlay = Index;
+	// A card click selects AND rebuilds the Intent/preview through the same
+	// function the keyboard uses, so the dotted line, verdict and the final
+	// execution all read the same index/target/flight-time.
+	ApplySetPlayToIntent(SelectedPlay);
+	RebuildPreview();
+	if (TacticalUI) { TacticalUI->UpdateSetList(SelectedPlay); }
 }
 
 void UTacticalContactComponent::HandleDefensePicked(int32 Index)
 {
+	// Card click SELECTS only — confirmation is a separate world-LMB or Enter
+	// (or the AI default after the timer). Old cards must never auto-commit a
+	// plan the player was still reading.
 	DefenseSelected = FMath::Clamp(Index, 0, 7);
 	if (TacticalUI) { TacticalUI->UpdateDefenseList(DefenseSelected); }
-	ConfirmDefensePlan();
 }
 
 #if !UE_BUILD_SHIPPING
@@ -532,11 +567,10 @@ bool UTacticalContactComponent::DevTacticalStep(int32& PhaseOut, int32 SetPlayIn
 		if (SetPlayIndex >= 0 && PendingTouchType == EBallTouchType::Set
 			&& SESetPlays::GetPlays().IsValidIndex(SetPlayIndex))
 		{
-			SelectedPlay = SetPlayIndex;
-			const FSetPlayDefinition& Play = SESetPlays::GetPlays()[SetPlayIndex];
-			Intent.TargetLocation = SESetPlays::MirrorLocal(Play.TargetLocal, Pawn->TeamSide);
-			Intent.DesiredFlightTime = Play.DesiredFlightTime;
-			if (TacticalUI) { TacticalUI->UpdateSetList(SelectedPlay); }
+			// Go through the production card-click handler so the dev flow
+			// exercises the SAME select->intent->preview->execute index chain
+			// as a real mouse click (M11e-2).
+			HandleSetPlayPicked(SetPlayIndex);
 		}
 		else if (!TargetOverride.IsZero())
 		{

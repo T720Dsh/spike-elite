@@ -142,6 +142,11 @@ protected:
 	void HandleSetPlayPicked(int32 Index);
 	void HandleDefensePicked(int32 Index);
 
+	/** Mirror one data-driven set play into the live Intent and refresh the
+	 *  preview. Shared by keyboard cycling AND mouse-card clicks so both input
+	 *  paths select the same index, target, flight time and apex. */
+	void ApplySetPlayToIntent(int32 Index);
+
 	EBallTouchType PendingTouchType = EBallTouchType::Unknown;
 
 	/** Selected set-play index into SESetPlays::GetPlays() (-1 = mouse aim). */

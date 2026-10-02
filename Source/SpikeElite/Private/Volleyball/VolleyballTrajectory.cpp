@@ -125,6 +125,7 @@ SEVolleyballTrajectory::FShotSolution SEVolleyballTrajectory::BuildShotSolution(
 	S.Landing = S.Trajectory.Landing;
 	S.FlightTime = S.Trajectory.FlightTime;
 	S.Apex = S.Trajectory.Apex;
+	S.ApexAboveContact = S.Trajectory.Apex.Z - Start.Z;
 	S.bCrossedNet = S.Trajectory.bCrossedNet;
 	S.bInBounds = S.Trajectory.bInBounds;
 	S.bValid = S.Trajectory.bValid;
