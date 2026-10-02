@@ -351,6 +351,13 @@ protected:
 	/** Finish the toss: strike the ball, record the serve touch, enter Rally. */
 	void ExecuteServe();
 
+	/** M11f-5: Development-only accelerated best-of-five integration driver. */
+	void DriveFiveSet();
+	bool bFiveSetTest = false;
+	bool bFiveSetReported = false;
+	double FiveSetExitAt = -1.0;
+	FTimerHandle FiveSetStartTimer;
+
 	/** Single-settlement rally end shared by land / faults / serve faults. */
 	void EndRally(ERallyEndReason Reason, EVolleyballTeam ScoringTeam);
 

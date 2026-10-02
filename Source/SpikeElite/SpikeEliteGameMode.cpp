@@ -142,6 +142,17 @@ void ASpikeEliteGameMode::BeginPlay()
 		Human->SetActorLocation(FVector(0,0,-2000.f));
 		Human->SetActorEnableCollision(false);
 	}
+	// M11f-5: Development-only accelerated best-of-five acceptance driver.
+#if !UE_BUILD_SHIPPING
+	bFiveSetTest = FParse::Param(FCommandLine::Get(), TEXT("FiveSetTest"));
+	if (bFiveSetTest)
+	{
+		UE_LOG(LogVolleyballRules, Log, TEXT("FIVE SET TEST: accelerated best-of-five driver armed"));
+		// The driver owns its own match lifecycle (no devauto needed): start the
+		// production match shortly after world begin.
+		GetWorldTimerManager().SetTimer(FiveSetStartTimer, this, &ASpikeEliteGameMode::StartMatch, 1.0f, false);
+	}
+#endif
 }
 
 void ASpikeEliteGameMode::StartMatch()
@@ -436,6 +447,11 @@ void ASpikeEliteGameMode::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 	if (!bMatchActive || !Ball || !Court) return;
+
+#if !UE_BUILD_SHIPPING
+	// M11f-5: Development-only accelerated best-of-five acceptance driver.
+	if (bFiveSetTest) { DriveFiveSet(); }
+#endif
 
 	// M11b-6: 5 s performance heartbeat (frame time, actor count) for the report.
 	{ static float PerfTimer = 0.f; PerfTimer += DeltaSeconds;
@@ -850,6 +866,25 @@ void ASpikeEliteGameMode::CheckSetWin()
 		RallyResultText.Empty();
 		RallyResultDisplayTimer = 0.0f;
 		UpdateScoreboard();
+#if !UE_BUILD_SHIPPING
+		// M11f-5: accelerated best-of-five acceptance — report the full set
+		// history and exit BEFORE NotifyMatchOver pauses the world (a paused
+		// world stops this Tick, which would strand the driver).
+		if (bFiveSetTest)
+		{
+			const bool bOk = (TeamASetsWon == 3 && TeamBSetsWon == 2 && CurrentSet == 5);
+			UE_LOG(LogVolleyballRules, Log, TEXT("FIVE SET TEST: MatchOver winner=%s setsA=%d setsB=%d"),
+				TeamStr(MatchWinner), TeamASetsWon, TeamBSetsWon);
+			for (int32 i = 0; i < SetScoresA.Num(); ++i)
+			{
+				UE_LOG(LogVolleyballRules, Log, TEXT("FIVE SET TEST: set %d -> A %d : %d B"),
+					i + 1, SetScoresA[i], SetScoresB.Num() > i ? SetScoresB[i] : -1);
+			}
+			UE_LOG(LogVolleyballRules, Log, TEXT("FIVE SET TEST: RESULT=%s"), bOk ? TEXT("PASS") : TEXT("FAIL"));
+			FPlatformMisc::RequestExit(0);
+			return;
+		}
+#endif
 		NotifyMatchOver();
 		return;
 	}
@@ -876,6 +911,45 @@ void ASpikeEliteGameMode::StartNextSet()
 	InterRallyTimer = SetOverDelay * 0.6f;
 	UpdateScoreboard();
 	UE_LOG(LogVolleyballRules, Log, TEXT("Set %d begins (to %d)"), CurrentSet, PointsToWin);
+}
+
+void ASpikeEliteGameMode::DriveFiveSet()
+{
+	// M11f-5: accelerated best-of-five acceptance. Reuses the PRODUCTION
+	// scoring path (AwardPoint -> CheckSetWin -> IsSetWon/IsMatchWon) and the
+	// production state transitions (SetOver -> StartNextSet). No result arrays
+	// are faked; every point goes through AwardPoint and every set through
+	// CheckSetWin. Plan: A wins sets 1/3/5, B wins 2/4 -> 3:2, with sets
+	// ending 26:24 (first four) and 16:14 (fifth) — both prove "lead by 2".
+	// MatchOver reporting/exit happens inside CheckSetWin before the world
+	// pauses for the result screen.
+	if (MatchState == EMatchState::MatchOver || MatchState == EMatchState::SetOver) { return; }
+	// Only drive from BetweenRallies (points land after a settled rally).
+	if (MatchState != EMatchState::BetweenRallies) { return; }
+
+	// Production target points: 25 for sets 1-4, 15 for the deciding set.
+	const int32 PlanPts = SEVolleyballRules::PointsToWinForSet(CurrentSet);
+	const EVolleyballTeam Winner = (CurrentSet % 2 == 1) ? EVolleyballTeam::TeamA : EVolleyballTeam::TeamB;
+	const int32 AS = TeamAScore;
+	const int32 BS = TeamBScore;
+
+	// Alternate up to 24:24 (14:14 in set 5) so no early "lead by 2" set end.
+	if (AS < PlanPts - 1 && BS < PlanPts - 1)
+	{
+		AwardPoint(AS <= BS ? EVolleyballTeam::TeamA : EVolleyballTeam::TeamB);
+		return;
+	}
+	// Tied at 24:24 / 14:14 -> winner takes two straight.
+	if (AS == PlanPts - 1 && BS == PlanPts - 1) { AwardPoint(Winner); return; }
+	// Winner leads by one (25:24 / 15:14) -> one more ends the set 26:24 / 16:14.
+	if ((Winner == EVolleyballTeam::TeamA && AS == PlanPts && BS == PlanPts - 1) ||
+		(Winner == EVolleyballTeam::TeamB && BS == PlanPts && AS == PlanPts - 1))
+	{
+		AwardPoint(Winner);
+		return;
+	}
+	// Safety: alternate if anything unexpected lands here.
+	AwardPoint(AS <= BS ? EVolleyballTeam::TeamA : EVolleyballTeam::TeamB);
 }
 
 void ASpikeEliteGameMode::BeginServiceAuthorized()

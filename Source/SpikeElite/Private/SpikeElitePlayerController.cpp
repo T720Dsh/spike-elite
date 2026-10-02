@@ -669,38 +669,23 @@ void ASpikeElitePlayerController::DevShotSuite()
 		}
 
 		// 02: first receive after a legal serve (TouchCount==1, type Receive).
-		// Natural capture when the rally provides it; deterministic fallback
-		// after 20 s pins the Receive pose on a defender so the suite can
-		// never stall on this shot forever.
+		// M11f-5: only a PRODUCTION touch counts — the shot requires a legal
+		// serve crossing the net followed by a real TryTouchBall/DoTouch on the
+		// receiving side. No pose pinning / pose override: a pinned Receive would
+		// be a fake, not evidence of the receive path. If the fast rally window
+		// is sampled past, the shot simply waits for the next receive.
 		if (!Done(2) && CanShot() && GM->IsRallyLive())
 		{
 			const bool bRealReceive = GM->GetTouchCount() == 1
 				&& GM->GetLastTouchType() == EBallTouchType::Receive
 				&& GM->GetServeCrossedNet();
 			ASpikeEliteCharacter* Rec = nullptr;
-			int32 PIdx = -1;
 			if (bRealReceive)
 			{
-				PIdx = GM->GetLastTouchPlayerIndex();
+				const int32 PIdx = GM->GetLastTouchPlayerIndex();
 				const EVolleyballTeam LastTeam = GM->GetLastTouchTeam();
 				const TArray<TObjectPtr<ASpikeEliteCharacter>>& Roster = GM->GetTeamPlayers(LastTeam);
 				if (Roster.IsValidIndex(PIdx)) { Rec = Roster[PIdx]; }
-			}
-			else if (Elapsed > 20.0)
-			{
-				// Deterministic fallback: pin a Receive pose on the defending
-				// team's first player so the shot is reproducible even if the
-				// fast rally window was sampled past.
-				const EVolleyballTeam DefTeam = GM->GetPossessingTeam();
-				const TArray<TObjectPtr<ASpikeEliteCharacter>>& Roster = GM->GetTeamPlayers(DefTeam);
-				if (Roster.Num() > 0)
-				{
-					Rec = Roster[0];
-					Rec->DevSetPoseOverride(EAnimPose::Receive, true);
-					PIdx = 0;
-					UE_LOG(LogSEMenu, Log, TEXT("DEV SHOT SUITE: first-receive fallback (team=%d)"),
-						(int32)DefTeam);
-				}
 			}
 			if (Rec)
 			{
@@ -977,8 +962,22 @@ void ASpikeElitePlayerController::DevShotSuite()
 		}
 		if (Elapsed > 420.0)
 		{
-			UE_LOG(LogSEMenu, Log, TEXT("DEV SHOT SUITE: timeout (mask=%u), quitting"), DoneMask);
-			PC->ConsoleCommand(TEXT("quit"));
+			// M11f-5: report the missing groups explicitly and exit NON-zero so
+			// the acceptance harness fails loudly; a benign quit with a timeout
+			// log used to mask incomplete captures.
+			FString Missing;
+			for (int32 i = 1; i <= 9; ++i)
+			{
+				if (!Done(i))
+				{
+					if (!Missing.IsEmpty()) { Missing += TEXT(","); }
+					Missing += FString::Printf(TEXT("shot_ss_%02d"), i);
+				}
+			}
+			UE_LOG(LogSEMenu, Error, TEXT("DEV SHOT SUITE: timeout (mask=%u, missing: %s) — FAIL"),
+				DoneMask, *Missing);
+			PC->DevVerify(false, TEXT("ShotSuite captured all groups before timeout"));
+			FPlatformMisc::RequestExit(true);
 			return false;
 		}
 		return true;
