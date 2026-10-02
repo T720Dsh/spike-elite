@@ -197,6 +197,16 @@ void ASpikeEliteGameMode::StartMatch()
 		if (!SEVolleyballRoster::ValidateRoster(RosterA, ProblemA)) { UE_LOG(LogVolleyballRules, Warning, TEXT("RosterA invalid: %s"), *ProblemA); }
 		if (!SEVolleyballRoster::ValidateRoster(RosterB, ProblemB)) { UE_LOG(LogVolleyballRules, Warning, TEXT("RosterB invalid: %s"), *ProblemB); }
 	}
+	// M11h-2b: challenge mode — load progress and apply stage difficulty to the
+	// opponent (bounded attribute modifiers only, never a separate ruleset).
+	if (MatchModeConfig.Mode == EGameModeChoice::Challenge12)
+	{
+		LoadChallengeState();
+		MatchModeConfig.ChallengeStage = FMath::Clamp(ChallengeSave.Stage, 0, SEChallenge::StageCount);
+		UE_LOG(LogVolleyballRules, Log, TEXT("Challenge stage=%d opponent=%s won=%d"),
+			MatchModeConfig.ChallengeStage, SEChallenge::OpponentName(MatchModeConfig.ChallengeStage), ChallengeSave.Won);
+		ApplyChallengeDifficulty();
+	}
 	SetScoresB.Reset();
 	SetScoresA.Add(0);
 	SetScoresB.Add(0);
@@ -904,6 +914,17 @@ void ASpikeEliteGameMode::CheckSetWin()
 			return;
 		}
 #endif
+		// M11h-2b: challenge progress — a Team A win advances the stage.
+		if (MatchModeConfig.Mode == EGameModeChoice::Challenge12 && MatchWinner == EVolleyballTeam::TeamA)
+		{
+			LoadChallengeState();
+			ChallengeSave.Won++;
+			if (ChallengeSave.Stage + 1 >= SEChallenge::StageCount) { ChallengeSave.bCompleted = true; ChallengeSave.Stage = SEChallenge::StageCount; }
+			else { ChallengeSave.Stage++; }
+			SaveChallengeState();
+			UE_LOG(LogVolleyballRules, Log, TEXT("Challenge advanced: stage=%d won=%d completed=%d"),
+				ChallengeSave.Stage, ChallengeSave.Won, ChallengeSave.bCompleted ? 1 : 0);
+		}
 		NotifyMatchOver();
 		return;
 	}
@@ -1992,6 +2013,42 @@ void ASpikeEliteGameMode::NotifyMatchOver()
 	{
 		SEPC->OnMatchOver(SetScoresA, SetScoresB, MatchWinner);
 	}
+}
+
+void ASpikeEliteGameMode::LoadChallengeState()
+{
+	SEChallenge::Load(ChallengeSave);
+}
+
+void ASpikeEliteGameMode::SaveChallengeState()
+{
+	SEChallenge::Save(ChallengeSave);
+}
+
+void ASpikeEliteGameMode::ApplyChallengeDifficulty()
+{
+	// Bounded attribute modifiers on the OPPONENT roster. Skill still never
+	// decides a hit — these only shift seeded error/consistency ranges, and
+	// every attribute stays clamped to 0..1.
+	const int32 Stage = FMath::Clamp(MatchModeConfig.ChallengeStage, 0, SEChallenge::StageCount - 1);
+	const float ServeScale = SEChallenge::OpponentServeErrScale(Stage);
+	const float PassScale = SEChallenge::OpponentPassErrScale(Stage);
+	const float BlockScale = SEChallenge::OpponentBlockScale(Stage);
+	const float MoveScale = SEChallenge::OpponentMoveScale(Stage);
+	const float ReactScale = SEChallenge::OpponentReactionScale(Stage);
+	int32 ModCount = 0;
+	for (FPlayerIdentity& P : RosterB.Registered)
+	{
+		// Opponent serve accuracy: scale the *error term* (1-acc), not the acc.
+		P.ServeAccuracy = FMath::Clamp(1.f - (1.f - P.ServeAccuracy) * ServeScale, 0.f, 1.f);
+		P.PassAccuracy = FMath::Clamp(1.f - (1.f - P.PassAccuracy) * PassScale, 0.f, 1.f);
+		P.BlockSkill = FMath::Clamp(P.BlockSkill * BlockScale, 0.f, 1.f);
+		P.MoveSpeed = FMath::Clamp(P.MoveSpeed * MoveScale, 0.f, 1.f);
+		P.Reaction = FMath::Clamp(P.Reaction * ReactScale, 0.f, 1.f);
+		ModCount++;
+	}
+	UE_LOG(LogVolleyballRules, Log, TEXT("Challenge difficulty applied stage=%d players=%d (serveScale=%.2f pass=%.2f block=%.2f move=%.2f react=%.2f)"),
+		Stage, ModCount, ServeScale, PassScale, BlockScale, MoveScale, ReactScale);
 }
 
 void ASpikeEliteGameMode::BuildRotationView(FRotationViewState& Out) const

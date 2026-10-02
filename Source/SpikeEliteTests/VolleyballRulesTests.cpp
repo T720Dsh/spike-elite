@@ -12,6 +12,7 @@
 #include "Volleyball/VolleyballTrajectory.h"
 #include "Volleyball/SetPlay.h"
 #include "Volleyball/VolleyballIdentity.h"
+#include "Volleyball/ChallengeSave.h"
 #include "UI/TacticalContactComponent.h"
 #include "Engine/World.h"
 #include "GameFramework/WorldSettings.h"
@@ -1485,6 +1486,69 @@ bool FSEIdentityLiberoNotEnabled::RunTest(const FString& Parameters)
 			TestNotEqual(TEXT("no libero in default squads"), P.Role, EPlayerRole::Libero);
 		}
 	}
+	return true;
+}
+
+
+// ---------------- M11h-2b: challenge save + difficulty ----------------
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSEChallengeSaveRoundtrip,
+	"SpikeElite.Tests.ChallengeSaveRoundtrip",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FSEChallengeSaveRoundtrip::RunTest(const FString& Parameters)
+{
+	SEChallenge::FSaveData D;
+	D.Stage = 1; D.Won = 1; D.bCompleted = false;
+	SEChallenge::Save(D);
+	SEChallenge::FSaveData L;
+	SEChallenge::Load(L);
+	TestEqual(TEXT("schema version"), L.SchemaVersion, SEChallenge::SchemaVersion);
+	TestEqual(TEXT("stage roundtrip"), L.Stage, 1);
+	TestEqual(TEXT("won roundtrip"), L.Won, 1);
+	TestFalse(TEXT("completed false"), L.bCompleted);
+
+	// Completed state: stage pinned to StageCount.
+	SEChallenge::FSaveData C;
+	C.Stage = 3; C.Won = 3; C.bCompleted = true;
+	SEChallenge::Save(C);
+	SEChallenge::FSaveData LC;
+	SEChallenge::Load(LC);
+	TestEqual(TEXT("completed stage capped"), LC.Stage, SEChallenge::StageCount);
+	TestTrue(TEXT("completed flag"), LC.bCompleted);
+
+	// Missing file defaults cleanly.
+	SEChallenge::FSaveData M;
+	M.Stage = 7; // illegal out-of-range must repair on load
+	SEChallenge::Save(M);
+	SEChallenge::Load(M);
+	TestTrue(TEXT("out-of-range stage repaired"), M.Stage <= SEChallenge::StageCount);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSEChallengeDifficultyBounded,
+	"SpikeElite.Tests.ChallengeDifficultyBounded",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FSEChallengeDifficultyBounded::RunTest(const FString& Parameters)
+{
+	// Every stage's modifiers are bounded; applying them keeps 0..1 attributes.
+	for (int32 Stage = 0; Stage < 3; ++Stage)
+	{
+		const float S = SEChallenge::OpponentServeErrScale(Stage);
+		const float P = SEChallenge::OpponentPassErrScale(Stage);
+		const float B = SEChallenge::OpponentBlockScale(Stage);
+		const float M = SEChallenge::OpponentMoveScale(Stage);
+		const float R = SEChallenge::OpponentReactionScale(Stage);
+		TestTrue(FString::Printf(TEXT("stage %d scales bounded"), Stage),
+			S >= 0.5f && S <= 1.5f && P >= 0.5f && P <= 1.5f &&
+			B >= 0.5f && B <= 1.5f && M >= 0.5f && M <= 1.5f &&
+			R >= 0.5f && R <= 1.5f);
+		TestTrue(TEXT("opponent name non-empty"), FCString::Strlen(SEChallenge::OpponentName(Stage)) > 0);
+	}
+	// Stage 2 block should be the strongest of the three (fast block identity).
+	TestTrue(TEXT("stage2 block sharpest"),
+		SEChallenge::OpponentBlockScale(2) > SEChallenge::OpponentBlockScale(0));
+	TestTrue(TEXT("stage1 serve tightest"),
+		SEChallenge::OpponentServeErrScale(1) < SEChallenge::OpponentServeErrScale(0));
 	return true;
 }
 

@@ -6,6 +6,7 @@
 #include "Volleyball/VolleyballEnums.h"
 #include "Volleyball/VolleyballIdentity.h"
 #include "Volleyball/MatchMode.h"
+#include "Volleyball/ChallengeSave.h"
 #include "Volleyball/VolleyballRules.h"
 #include "Volleyball/VolleyballTrajectory.h"
 #include "SpikeEliteGameMode.generated.h"
@@ -74,6 +75,13 @@ public:
 	 *  command line only sets the same flag in the constructor. */
 	void SetMatchMode(const FMatchModeConfig& Cfg) { MatchModeConfig = Cfg; }
 	EGameModeChoice GetMatchMode() const { return MatchModeConfig.Mode; }
+
+	/** M11h-2b: challenge save state (loaded on demand, saved at MatchOver). */
+	SEChallenge::FSaveData ChallengeSave;
+	void LoadChallengeState();
+	void SaveChallengeState();
+	/** M11h-2b: apply stage difficulty to the opponent (Team B) roster. */
+	void ApplyChallengeDifficulty();
 
 	/** M11d-3: previous serving team, so the rotation HUD can flag side-out 轮转. */
 	EVolleyballTeam LastRotationServeTeam = EVolleyballTeam::None;
