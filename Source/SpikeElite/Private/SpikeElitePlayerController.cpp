@@ -2,6 +2,7 @@
 #include "SpikeElitePlayerController.h"
 #include "Volleyball/VolleyballBall.h"
 #include "UI/MainMenuWidget.h"
+#include "UI/ModeSelectWidget.h"
 #include "UI/PauseMenuWidget.h"
 #include "UI/SettingsWidget.h"
 #include "UI/ScoreboardWidget.h"
@@ -1542,6 +1543,7 @@ void ASpikeElitePlayerController::SetUIInputMode(UUserWidget* FocusWidget)
 void ASpikeElitePlayerController::HideAllMenus()
 {
 	if (MainMenu)     { MainMenu->RemoveFromParent();     MainMenu = nullptr; }
+	if (ModeSelect)   { ModeSelect->RemoveFromParent();   ModeSelect = nullptr; }
 	if (PauseMenu)    { PauseMenu->RemoveFromParent();    PauseMenu = nullptr; }
 	if (SettingsMenu) { SettingsMenu->RemoveFromParent(); SettingsMenu = nullptr; }
 	if (MatchEnd)     { MatchEnd->RemoveFromParent();     MatchEnd = nullptr; }
@@ -1559,7 +1561,7 @@ void ASpikeElitePlayerController::ShowMainMenu()
 	MainMenu = CreateWidget<UMainMenuWidget>(this);
 	if (MainMenu)
 	{
-		MainMenu->OnStart.BindUObject(this, &ASpikeElitePlayerController::StartMatch);
+		MainMenu->OnStart.BindUObject(this, &ASpikeElitePlayerController::ShowModeSelect);
 		MainMenu->OnSettings.BindUObject(this, &ASpikeElitePlayerController::OpenSettingsFromMenu);
 		// M11: the main menu "退出游戏" button also goes through the confirm dialog
 		// so a stray click cannot kill the process while a match is in progress.
@@ -1585,6 +1587,50 @@ void ASpikeElitePlayerController::StartMatch()
 	{
 		GM->StartMatch();
 	}
+}
+
+void ASpikeElitePlayerController::ShowModeSelect()
+{
+	UE_LOG(LogSEMenu, Log, TEXT("ShowModeSelect"));
+	HideAllMenus();
+	MenuState = EMenuState::MainMenu;
+	SetPause(false);
+
+	ModeSelect = CreateWidget<UModeSelectWidget>(this);
+	if (ModeSelect)
+	{
+		ModeSelect->OnPickQuick.BindLambda([this](bool bShort) { StartMatchAs(EGameModeChoice::QuickMatch, bShort, 0); });
+		ModeSelect->OnPickChallenge.BindLambda([this]() { StartMatchAs(EGameModeChoice::Challenge12, true, 0); });
+		ModeSelect->OnPickCoach.BindLambda([this]() { StartMatchAs(EGameModeChoice::Coach, false, 0); });
+		ModeSelect->OnPickTraining.BindLambda([this]() { StartMatchAs(EGameModeChoice::Training, false, 0); });
+		ModeSelect->OnBack.BindUObject(this, &ASpikeElitePlayerController::ShowMainMenu);
+		ModeSelect->AddToViewport(10);
+		SetUIInputMode(ModeSelect);
+		ModeSelect->SetInitialFocus();
+	}
+}
+
+void ASpikeElitePlayerController::StartMatchAs(EGameModeChoice Mode, bool bShortSets, int32 ChallengeStage)
+{
+	UE_LOG(LogSEMenu, Log, TEXT("StartMatchAs mode=%d short=%d stage=%d"), (int32)Mode, bShortSets ? 1 : 0, ChallengeStage);
+	HideAllMenus();
+	MenuState = EMenuState::Playing;
+	SetGameInputMode();
+	if (ASpikeEliteGameMode* GM = Cast<ASpikeEliteGameMode>(UGameplayStatics::GetGameMode(this)))
+	{
+		FMatchModeConfig Cfg;
+		Cfg.Mode = Mode;
+		Cfg.bShortSets = bShortSets;
+		Cfg.ChallengeStage = ChallengeStage;
+		GM->SetMatchMode(Cfg);
+		GM->StartMatch();
+	}
+}
+
+void ASpikeElitePlayerController::ShowTrainingDrill(int32 Drill)
+{
+	UE_LOG(LogSEMenu, Log, TEXT("ShowTrainingDrill %d"), Drill);
+	StartMatchAs(EGameModeChoice::Training, false, Drill);
 }
 
 void ASpikeElitePlayerController::OnMatchStarted(UScoreboardWidget* InScoreboard)

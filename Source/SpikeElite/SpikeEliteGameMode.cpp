@@ -166,6 +166,15 @@ void ASpikeEliteGameMode::StartMatch()
 	// bots from a previous match) is obvious in the log.
 	LogActorCounts(TEXT("BeforeStart"));
 
+	// M11h-2: the menu-picked mode decides scoring. -QuickMatch dev flag also
+	// sets bQuickMatch in the constructor; a menu "正式五局" resets it to false.
+	if (MatchModeConfig.Mode != EGameModeChoice::None)
+	{
+		bQuickMatch = (MatchModeConfig.Mode == EGameModeChoice::QuickMatch) ? MatchModeConfig.bShortSets : false;
+	}
+	UE_LOG(LogVolleyballRules, Log, TEXT("StartMatch mode=%s quick=%d stage=%d"),
+		FMatchModeConfig::DisplayName(MatchModeConfig.Mode), bQuickMatch ? 1 : 0, MatchModeConfig.ChallengeStage);
+
 	// Reset scores/state.
 	LastRotationServeTeam = EVolleyballTeam::None;
 	TeamAScore = TeamBScore = 0;

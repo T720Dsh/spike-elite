@@ -5,6 +5,7 @@
 #include "GameFramework/GameModeBase.h"
 #include "Volleyball/VolleyballEnums.h"
 #include "Volleyball/VolleyballIdentity.h"
+#include "Volleyball/MatchMode.h"
 #include "Volleyball/VolleyballRules.h"
 #include "Volleyball/VolleyballTrajectory.h"
 #include "SpikeEliteGameMode.generated.h"
@@ -64,6 +65,15 @@ public:
 	/** M11h-1: identity of the character's court player (or nullptr for bench/
 	 *  non-roster actors). Team decided from the character's TeamSide. */
 	const FPlayerIdentity* FindIdentity(EVolleyballTeam Team, const ASpikeEliteCharacter* C) const;
+
+	/** M11h-2: current production mode configuration (menu-picked). */
+	FMatchModeConfig MatchModeConfig;
+
+	/** M11h-2: apply the menu-selected mode before StartMatch. QuickMatch with
+	 *  bShortSets=false runs the official five-set rules; the dev -QuickMatch
+	 *  command line only sets the same flag in the constructor. */
+	void SetMatchMode(const FMatchModeConfig& Cfg) { MatchModeConfig = Cfg; }
+	EGameModeChoice GetMatchMode() const { return MatchModeConfig.Mode; }
 
 	/** M11d-3: previous serving team, so the rotation HUD can flag side-out 轮转. */
 	EVolleyballTeam LastRotationServeTeam = EVolleyballTeam::None;

@@ -4,11 +4,13 @@
 #include "CoreMinimal.h"
 #include "GameFramework/PlayerController.h"
 #include "SpikeEliteGameMode.h"
+#include "Volleyball/MatchMode.h"
 #include "SpikeElitePlayerController.generated.h"
 
 class UTrajectoryPreviewComponent;
 class UTacticalContactComponent;
 class UMainMenuWidget;
+class UModeSelectWidget;
 class UPauseMenuWidget;
 class USettingsWidget;
 class UScoreboardWidget;
@@ -58,6 +60,17 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "UI")
 	void StartMatch();
+
+	/** M11h-2: mode-select page (QuickMatch short/full, challenge, coach, training). */
+	UFUNCTION(BlueprintCallable, Category = "UI")
+	void ShowModeSelect();
+
+	/** M11h-2: start a match with the chosen production mode. */
+	UFUNCTION(BlueprintCallable, Category = "UI")
+	void StartMatchAs(EGameModeChoice Mode, bool bShortSets, int32 ChallengeStage = 0);
+
+	UFUNCTION(BlueprintCallable, Category = "UI")
+	void ShowTrainingDrill(int32 Drill);
 
 	UFUNCTION(BlueprintCallable, Category = "UI")
 	void PauseGame();
@@ -117,6 +130,7 @@ public:
 
 protected:
 	UPROPERTY() TObjectPtr<UMainMenuWidget> MainMenu;
+	UPROPERTY() TObjectPtr<UModeSelectWidget> ModeSelect;
 	UPROPERTY() TObjectPtr<UPauseMenuWidget> PauseMenu;
 	UPROPERTY() TObjectPtr<USettingsWidget> SettingsMenu;
 	UPROPERTY() TObjectPtr<UScoreboardWidget> Scoreboard;
