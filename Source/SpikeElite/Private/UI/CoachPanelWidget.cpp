@@ -11,6 +11,7 @@
 #include "Components/CanvasPanelSlot.h"
 #include "Components/SizeBox.h"
 #include "Components/SizeBoxSlot.h"
+#include "Components/ScrollBox.h"
 #include "Blueprint/WidgetTree.h"
 
 UCoachPanelWidget::UCoachPanelWidget(const FObjectInitializer& OI) : Super(OI) {}
@@ -68,10 +69,7 @@ void UCoachPanelWidget::BuildWidgetTree()
 	UImage* BG = CoachMakeSolidImage(WidgetTree, FLinearColor(0.02f, 0.05f, 0.10f, 0.88f));
 	if (UCanvasPanelSlot* S = Root->AddChildToCanvas(BG))
 	{
-		S->SetAnchors(FAnchors(1.f, 0.5f));
-		S->SetAlignment(FVector2D(1.f, 0.5f));
-		S->SetSize(FVector2D(420.f, 720.f));
-		S->SetAutoSize(false);
+		S->SetAnchors(FAnchors(.59f,.13f,.99f,.96f)); S->SetOffsets(FMargin(0));
 	}
 
 	UTextBlock* Title = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
@@ -81,10 +79,7 @@ void UCoachPanelWidget::BuildWidgetTree()
 	Title->SetJustification(ETextJustify::Center);
 	if (UCanvasPanelSlot* S = Root->AddChildToCanvas(Title))
 	{
-		S->SetAnchors(FAnchors(1.f, 0.f));
-		S->SetAlignment(FVector2D(1.f, 0.f));
-		S->SetPosition(FVector2D(-440.f, 20.f));
-		S->SetSize(FVector2D(400.f, 40.f));
+		S->SetAnchors(FAnchors(.60f,.14f,.98f,.20f)); S->SetOffsets(FMargin(0));
 	}
 
 	StatusText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
@@ -93,25 +88,20 @@ void UCoachPanelWidget::BuildWidgetTree()
 	StatusText->SetJustification(ETextJustify::Center);
 	if (UCanvasPanelSlot* S = Root->AddChildToCanvas(StatusText))
 	{
-		S->SetAnchors(FAnchors(1.f, 0.f));
-		S->SetAlignment(FVector2D(1.f, 0.f));
-		S->SetPosition(FVector2D(-440.f, 66.f));
-		S->SetSize(FVector2D(400.f, 44.f));
+		S->SetAnchors(FAnchors(.60f,.21f,.98f,.31f)); S->SetOffsets(FMargin(0));
 	}
 
 	Column = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass());
-	if (UCanvasPanelSlot* S = Root->AddChildToCanvas(Column))
+	UScrollBox* Scroll=WidgetTree->ConstructWidget<UScrollBox>(); Scroll->AddChild(Column);
+	if (UCanvasPanelSlot* S = Root->AddChildToCanvas(Scroll))
 	{
-		S->SetAnchors(FAnchors(1.f, 0.f));
-		S->SetAlignment(FVector2D(1.f, 0.f));
-		S->SetPosition(FVector2D(-440.f, 118.f));
-		S->SetSize(FVector2D(360.f, 560.f));
+		S->SetAnchors(FAnchors(.60f,.32f,.98f,.94f)); S->SetOffsets(FMargin(0));
 	}
 
 	const FButtonStyle Normal = SEUiStyle::SecondaryButton();
 	BtnTimeoutA = CoachMakeBtn(WidgetTree, Column, TEXT("A 队暂停（剩余 2）"), Normal);
 	BtnTimeoutB = CoachMakeBtn(WidgetTree, Column, TEXT("B 队暂停（剩余 2）"), Normal);
-	BtnSubA = CoachMakeBtn(WidgetTree, Column, TEXT("A 队换人 1↔7（剩余 6）"), Normal);
+	BtnSubA = CoachMakeBtn(WidgetTree, Column, TEXT("A 队完整换人名单"), Normal);
 	BtnSubB = CoachMakeBtn(WidgetTree, Column, TEXT("B 队换人 1↔7（剩余 6）"), Normal);
 	BtnServeZone = CoachMakeBtn(WidgetTree, Column, TEXT("发球落区：中"), Normal);
 	BtnBlock = CoachMakeBtn(WidgetTree, Column, TEXT("拦网策略：单人"), Normal);
@@ -128,6 +118,9 @@ void UCoachPanelWidget::BuildWidgetTree()
 	BtnDefense->OnClicked.AddDynamic(this, &UCoachPanelWidget::HandleDefense);
 	BtnSetter->OnClicked.AddDynamic(this, &UCoachPanelWidget::HandleSetter);
 	BtnClose->OnClicked.AddDynamic(this, &UCoachPanelWidget::HandleClose);
+	BtnTimeoutB->SetVisibility(ESlateVisibility::Collapsed);
+	BtnSubB->SetVisibility(ESlateVisibility::Collapsed);
+	StatusText->SetAutoWrapText(true);
 }
 
 void UCoachPanelWidget::NativeConstruct()

@@ -3,12 +3,14 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "Volleyball/VolleyballEnums.h"
 #include "MatchOfficialManager.generated.h"
 
 class UStaticMeshComponent;
 class UBoxComponent;
 class UTextRenderComponent;
 class USoundWaveProcedural;
+class UAudioComponent;
 
 /**
  * Persistent match officials and sideline furniture:
@@ -28,6 +30,9 @@ class SPIKEELITE_API AMatchOfficialManager : public AActor
 public:
 	AMatchOfficialManager();
 	virtual void BeginPlay() override;
+	virtual void Tick(float DeltaSeconds) override;
+	void UpdateMatchVisuals(EMatchState Phase, EVolleyballTeam Serving, int32 TimeoutA, int32 TimeoutB, int32 SubsA, int32 SubsB);
+	void SignalPoint(EVolleyballTeam Winner);
 
 	/** Play the program-generated referee whistle (own sound, no external asset). */
 	void Whistle();
@@ -61,6 +66,11 @@ protected:
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UStaticMeshComponent> ScoreboardDevice;
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UStaticMeshComponent> ScoreboardPanel;
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UTextRenderComponent> ScoreboardText;
+	UPROPERTY() TObjectPtr<UTextRenderComponent> AllowanceText;
+	TMap<UStaticMeshComponent*,FTransform> RestTransforms;
+	EMatchState VisualPhase=EMatchState::PreMatch;
+	EVolleyballTeam SignalTeam=EVolleyballTeam::None;
+	float PointSignalSeconds=0.f;
 
 	// Benches (Team A / Team B) with lightweight substitutes
 	UPROPERTY(VisibleAnywhere) TObjectPtr<UStaticMeshComponent> BenchA;
@@ -68,6 +78,7 @@ protected:
 	UPROPERTY(VisibleAnywhere) TArray<TObjectPtr<UStaticMeshComponent>> Substitutes;
 
 	UPROPERTY() TObjectPtr<USoundWaveProcedural> WhistleSound;
+	UPROPERTY() TObjectPtr<UAudioComponent> WhistleAudio;
 	UPROPERTY() TArray<TObjectPtr<UStaticMeshComponent>> DetailMeshes;
 	void BuildDetailPeople();
 

@@ -31,6 +31,8 @@ public:
 	FOnPickMode OnPickCoach;
 	FOnPickMode OnPickTraining;
 	FOnPickMode OnBack;
+	DECLARE_DELEGATE_OneParam(FOnDrill,int32);
+	FOnDrill OnPickDrill;
 
 	void SetInitialFocus();
 
@@ -43,6 +45,8 @@ protected:
 	UPROPERTY() TObjectPtr<UButton> BtnCoach;
 	UPROPERTY() TObjectPtr<UButton> BtnTraining;
 	UPROPERTY() TObjectPtr<UButton> BtnBack;
+	UPROPERTY() TObjectPtr<UButton> BtnReceive;
+	UPROPERTY() TObjectPtr<UButton> BtnSetAttack;
 
 	void BuildWidgetTree();
 
@@ -52,4 +56,6 @@ protected:
 	UFUNCTION() void HandleCoach() { OnPickCoach.ExecuteIfBound(); }
 	UFUNCTION() void HandleTraining() { OnPickTraining.ExecuteIfBound(); }
 	UFUNCTION() void HandleBack() { OnBack.ExecuteIfBound(); }
+	UFUNCTION() void HandleReceive() { OnPickDrill.ExecuteIfBound(1); }
+	UFUNCTION() void HandleSetAttack() { OnPickDrill.ExecuteIfBound(2); }
 };

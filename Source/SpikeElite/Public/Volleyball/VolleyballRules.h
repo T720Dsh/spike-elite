@@ -288,7 +288,7 @@ namespace SEVolleyballRules
 		return State == EMatchState::BetweenRallies
 			|| State == EMatchState::ResettingPositions
 			|| State == EMatchState::AwaitingReady
-			|| State == EMatchState::ServiceAuthorized;
+			|| State == EMatchState::ServePresentation;
 	}
 
 	/** M11h-4: consume one timeout allowance (FIVB: 2 per set). Never negative. */
@@ -303,7 +303,7 @@ namespace SEVolleyballRules
 
 	/** M11h-5: substitutions — FIVB 15.2 allows 6 per set; requests only in the
 	 *  same dead-ball window as timeouts (before the service whistle). */
-	inline bool CanSubstituteInPhase(EMatchState State) { return CanRequestTimeoutInPhase(State); }
+	inline bool CanSubstituteInPhase(EMatchState State) { return CanRequestTimeoutInPhase(State) || State == EMatchState::Timeout; }
 	inline int32 SubstitutionsPerSet() { return 6; }
 	inline int32 SubstitutionsLeftAfter(int32 Left) { return Left > 0 ? Left - 1 : 0; }
 
@@ -317,6 +317,8 @@ namespace SEVolleyballRules
 		int32 Blocks = 0;    // block contacts
 		int32 ServeAces = 0;
 		int32 ServeErrors = 0;
+		int32 ServeAttempts = 0;
+		int32 BlockWins = 0;
 		int32 AttackWins = 0;
 		int32 AttackErrors = 0;
 	};
@@ -340,14 +342,13 @@ namespace SEVolleyballRules
 		const bool bServerWon = (ServingTeam == ScoringTeam && ServingTeam != EVolleyballTeam::None);
 		switch (LastTouchType)
 		{
-		case EBallTouchType::Receive: S.Receives++; break;
-		case EBallTouchType::Set:     S.Sets++;     break;
+		case EBallTouchType::Receive: break;
+		case EBallTouchType::Set:     break;
 		case EBallTouchType::Attack:
-			S.Attacks++;
 			if (LastTouchTeam == ScoringTeam) { S.AttackWins++; }
 			else { S.AttackErrors++; }
 			break;
-		case EBallTouchType::Block:   S.Blocks++;   break;
+		case EBallTouchType::Block: if (LastTouchTeam == ScoringTeam) { S.BlockWins++; } break;
 		case EBallTouchType::Serve:
 			if (bServerWon && TouchCount == 0) { S.ServeAces++; }
 			else if (!bServerWon) { S.ServeErrors++; }

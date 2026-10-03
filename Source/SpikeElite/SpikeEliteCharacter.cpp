@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include "SpikeEliteCharacter.h"
 #include "SpikeEliteGameMode.h"
+#include "SpikeElitePlayerController.h"
 #include "SEMaterials.h"
 #include "SEArtGeometry.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -372,7 +373,7 @@ void ASpikeEliteCharacter::Tick(float DeltaSeconds)
 	Super::Tick(DeltaSeconds);
 	const FVector Now = GetActorLocation();
 	AnimationMoveSpeed = GetVelocity().Size2D();
-	if (bIsBot && bAnimationLocationReady && DeltaSeconds > SMALL_NUMBER)
+	if ((bIsBot || bCeremonyWalking) && bAnimationLocationReady && DeltaSeconds > SMALL_NUMBER)
 	{
 		const float Travel = FVector::Dist2D(Now, PreviousAnimationLocation);
 		if (Travel < 100.f) { AnimationMoveSpeed = Travel / DeltaSeconds; }
@@ -381,6 +382,7 @@ void ASpikeEliteCharacter::Tick(float DeltaSeconds)
 
 	// M11b-3: procedural animation runs for bots and the human alike.
 	UpdateProceduralAnimation(DeltaSeconds);
+	if (bOffCourt || bCeremonyWalking) return;
 
 	if (bIsBot)
 	{
@@ -445,7 +447,9 @@ void ASpikeEliteCharacter::TickBot(float DeltaSeconds)
 	const float Dist = ToDest.Size();
 	// A dive is a fast lunge: the bot closes the last stretch quickly, then the
 	// GameMode grants an extended reach while bDiving is set.
-	const float BotSpeed = (AIBehavior == EAIBehavior::Dive) ? 640.0f : 450.0f;
+	const auto* Identity=GM->FindIdentity(TeamSide>0?EVolleyballTeam::TeamA:EVolleyballTeam::TeamB,this);
+	const float SkillSpeed=Identity?SEVolleyballRoster::MoveSpeedFactor(*Identity):1.f;
+	const float BotSpeed = ((AIBehavior == EAIBehavior::Dive) ? 640.0f : 450.0f)*SkillSpeed;
 	if (Dist > 30.0f)
 	{
 		// Direct, deterministic movement (no reliance on character-movement input
@@ -514,7 +518,7 @@ void ASpikeEliteCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInpu
 	PlayerInputComponent->BindAxis("Turn", this, &ASpikeEliteCharacter::TurnRate);
 	PlayerInputComponent->BindAxis("LookUp", this, &ASpikeEliteCharacter::LookUpRate);
 
-	PlayerInputComponent->BindAction("Jump", IE_Pressed, this, &ACharacter::Jump);
+	PlayerInputComponent->BindAction("Jump", IE_Pressed, this, &ASpikeEliteCharacter::PlayerJump);
 	PlayerInputComponent->BindAction("Jump", IE_Released, this, &ACharacter::StopJumping);
 
 	PlayerInputComponent->BindAction("ToggleFirstPerson", IE_Pressed, this, &ASpikeEliteCharacter::ToggleFirstPerson);
@@ -526,6 +530,7 @@ void ASpikeEliteCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInpu
 
 void ASpikeEliteCharacter::MoveForward(float Value)
 {
+	if (!CanUsePlayerInput()) return;
 	if (Controller && Value != 0.0f)
 	{
 		const FRotator YawRotation(0.0f, Controller->GetControlRotation().Yaw, 0.0f);
@@ -534,8 +539,16 @@ void ASpikeEliteCharacter::MoveForward(float Value)
 	}
 }
 
+bool ASpikeEliteCharacter::CanUsePlayerInput() const
+{
+	const auto* PC=Cast<ASpikeElitePlayerController>(Controller);
+	return !bIsBot && !bOffCourt && !bCeremonyWalking && PC && !PC->IsMenuOpen();
+}
+void ASpikeEliteCharacter::PlayerJump() { if(CanUsePlayerInput()) Jump(); }
+
 void ASpikeEliteCharacter::MoveRight(float Value)
 {
+	if (!CanUsePlayerInput()) return;
 	if (Controller && Value != 0.0f)
 	{
 		const FRotator YawRotation(0.0f, Controller->GetControlRotation().Yaw, 0.0f);
@@ -546,6 +559,7 @@ void ASpikeEliteCharacter::MoveRight(float Value)
 
 void ASpikeEliteCharacter::TurnRate(float Value)
 {
+	if (!CanUsePlayerInput()) return;
 	if (Controller)
 	{
 		AddControllerYawInput(Value * LookSensitivity * 100.f * GetWorld()->GetDeltaSeconds());
@@ -554,6 +568,7 @@ void ASpikeEliteCharacter::TurnRate(float Value)
 
 void ASpikeEliteCharacter::LookUpRate(float Value)
 {
+	if (!CanUsePlayerInput()) return;
 	if (Controller)
 	{
 		AddControllerPitchInput(Value * LookSensitivity * 100.f * GetWorld()->GetDeltaSeconds());
@@ -562,7 +577,7 @@ void ASpikeEliteCharacter::LookUpRate(float Value)
 
 void ASpikeEliteCharacter::ToggleFirstPerson()
 {
-	if (bIsBot) return;
+	if (!CanUsePlayerInput()) return;
 	bFirstPerson = !bFirstPerson;
 	UpdateCameraView();
 }
@@ -592,6 +607,7 @@ void ASpikeEliteCharacter::UpdateCameraView()
 
 void ASpikeEliteCharacter::HitBall()
 {
+	if (!CanUsePlayerInput()) return;
 	if (ASpikeEliteGameMode* GM = Cast<ASpikeEliteGameMode>(UGameplayStatics::GetGameMode(this)))
 	{
 		GM->TryTouchBall(this, EBallTouchType::Unknown);
@@ -600,6 +616,9 @@ void ASpikeEliteCharacter::HitBall()
 
 void ASpikeEliteCharacter::ServeBall()
 {
+	if (auto* GM=GetWorld()->GetAuthGameMode<ASpikeEliteGameMode>(); GM && GM->MatchState==EMatchState::Entrance)
+	{ GM->FinishEntrance(); return; }
+	if (!CanUsePlayerInput()) return;
 	if (ASpikeEliteGameMode* GM = Cast<ASpikeEliteGameMode>(UGameplayStatics::GetGameMode(this)))
 	{
 		// M11h-3: E during the server-intro card skips the presentation (to the
@@ -615,6 +634,7 @@ void ASpikeEliteCharacter::ServeBall()
 
 void ASpikeEliteCharacter::StartRaiseHands()
 {
+	if (!CanUsePlayerInput()) return;
 	RaiseHandsAmount = FMath::Clamp(RaiseHandsAmount + 1.f, 0.f, 1.f);
 }
 
@@ -975,6 +995,12 @@ void ASpikeEliteCharacter::ApplyPose(EAnimPose Pose, float DeltaSeconds)
 	}
 	}
 
+	if (bOffCourt && !bCeremonyWalking)
+	{
+		HL=HR=FRotator(90,0,0); KL=KR=FRotator(-90,0,0);
+		SL=SR=FRotator(0,0,0); EL=ER=FRotator(0,0,0);
+		TorsoLoc.Z-=48.f;
+	}
 	if (TorsoJoint) LerpLoc(TorsoJoint, TorsoLoc);
 	if (TorsoJoint) Lerp(TorsoJoint, T);
 	if (ArmL.Joint) Lerp(ArmL.Joint, SL);

@@ -3,6 +3,7 @@
 #include "Components/BoxComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/TextRenderComponent.h"
+#include "Components/AudioComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Sound/SoundWaveProcedural.h"
@@ -41,6 +42,8 @@ static USoundWaveProcedural* MakeWhistleSound(UObject* Outer)
 	W->SetSampleRate(SampleRate);
 	W->NumChannels = 1;
 	W->SampleByteSize = 2;
+	W->Duration=Dur;
+	W->bLooping=false;
 	W->QueueAudio(Bytes.GetData(), Bytes.Num());
 	return W;
 }
@@ -61,12 +64,15 @@ UStaticMeshComponent* AMatchOfficialManager::MakeBlock(const TCHAR* Name, const 
 
 AMatchOfficialManager::AMatchOfficialManager()
 {
-	PrimaryActorTick.bCanEverTick = false;
+	PrimaryActorTick.bCanEverTick = true;
 
 	Root = CreateDefaultSubobject<UBoxComponent>(TEXT("Root"));
 	Root->SetBoxExtent(FVector(100.f, 100.f, 10.f));
 	Root->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	RootComponent = Root;
+	WhistleAudio=CreateDefaultSubobject<UAudioComponent>(TEXT("WhistleAudio"));
+	WhistleAudio->SetupAttachment(Root); WhistleAudio->bAutoActivate=false;
+	WhistleAudio->bAllowSpatialization=false; WhistleAudio->bIsUISound=true;
 
 	BuildStand();
 	BuildScorer();
@@ -163,6 +169,10 @@ void AMatchOfficialManager::BuildScorer()
 	// English only: UTextRenderComponent uses the engine default font (Roboto)
 	// which has no CJK glyphs; the four-line format is SET / A:B / sets / serve.
 	ScoreboardText->SetText(FText::FromString(TEXT("SET 1\nA 0 : 0 B\nSETS A 0 : 0 B\nSERVE A")));
+	AllowanceText=CreateDefaultSubobject<UTextRenderComponent>(TEXT("AllowanceText"));
+	AllowanceText->SetupAttachment(Root); AllowanceText->SetRelativeLocation(TableLoc+FVector(0,21.f,105.f));
+	AllowanceText->SetRelativeRotation(FRotator(0,90,0)); AllowanceText->SetHorizontalAlignment(EHorizTextAligment::EHTA_Center);
+	AllowanceText->SetWorldSize(9.f); AllowanceText->SetTextRenderColor(FColor(180,225,255));
 }
 
 void AMatchOfficialManager::BuildBenches()
@@ -238,20 +248,19 @@ void AMatchOfficialManager::BuildDetailPeople()
 	Person(TEXT("Official2"),FVector(0,-720,0),90,FLinearColor(.78f,.84f,.91f),false);
 	ScorerBody->SetVisibility(false); ScorerHead->SetVisibility(false);
 	Person(TEXT("RecordOfficial"),FVector(0,-1310,0),90,FLinearColor(.12f,.19f,.27f),true);
-	for (int32 Team : {-1,1}) for(int32 I=-2;I<=2;++I)
+	for (int32 Team : {-1,1})
 	{
-		Person(FString::Printf(TEXT("BenchAthlete%d_%d"),Team,I),FVector(Team*420+I*60,-1330,0),90,
-			Team>0?FLinearColor(.10f,.42f,.8f):FLinearColor(.8f,.22f,.12f),true);
+		Person(FString::Printf(TEXT("Coach%d"),Team),FVector(Team*1050,-1130,0),90,FLinearColor(.10f,.15f,.22f),false);
 	}
 	// Table legs, writing equipment and proper chairs are purely visual, clear of the free zone.
 	for(int32 X : {-1,1}) for(int32 Y : {-1,1})
 		MakeBlock(*FString::Printf(TEXT("TableLeg%d%d"),X,Y),FVector(X*100,-1200+Y*30,35),FVector(.055f,.055f,.7f),FLinearColor(.1f,.12f,.15f));
 	MakeBlock(TEXT("ScorePad"),FVector(50,-1270,82),FVector(.35f,.45f,.025f),FLinearColor(.9f,.92f,.85f));
 	MakeBlock(TEXT("ScorerBackrest"),FVector(0,-1340,65),FVector(.52f,.055f,.58f),FLinearColor(.1f,.14f,.20f));
-	for(int32 Team : {-1,1}) for(int32 I=-2;I<=2;++I)
+	for(int32 Team : {-1,1}) for(int32 I=0;I<6;++I)
 	{
-		MakeBlock(*FString::Printf(TEXT("BenchSeat%d_%d"),Team,I),FVector(Team*420+I*60,-1330,43),FVector(.5f,.45f,.06f),FLinearColor(.08f,.12f,.19f));
-		MakeBlock(*FString::Printf(TEXT("BenchBack%d_%d"),Team,I),FVector(Team*420+I*60,-1350,65),FVector(.5f,.055f,.46f),FLinearColor(.08f,.12f,.19f));
+		MakeBlock(*FString::Printf(TEXT("BenchSeat%d_%d"),Team,I),FVector(Team*(400+I*90),-1320,43),FVector(.5f,.45f,.06f),FLinearColor(.08f,.12f,.19f));
+		MakeBlock(*FString::Printf(TEXT("BenchBack%d_%d"),Team,I),FVector(Team*(400+I*90),-1350,65),FVector(.5f,.055f,.46f),FLinearColor(.08f,.12f,.19f));
 	}
 }
 
@@ -261,6 +270,7 @@ void AMatchOfficialManager::BeginPlay()
 	using namespace SEArtGeometry;
 	for (UStaticMeshComponent* C : DetailMeshes)
 	{
+		RestTransforms.Add(C,C->GetRelativeTransform());
 		EProfile Profile = EProfile::Torso;
 		if(C->ComponentHasTag(TEXT("Round"))) continue;
 		if(C->ComponentHasTag(TEXT("Head"))) Profile=EProfile::Head;
@@ -275,8 +285,11 @@ void AMatchOfficialManager::BeginPlay()
 
 void AMatchOfficialManager::Whistle()
 {
-	if (!WhistleSound) { WhistleSound = MakeWhistleSound(this); }
-	if (WhistleSound) { UGameplayStatics::PlaySound2D(this, WhistleSound); }
+	// Procedural PCM queues are consumed by playback, not rewindable assets.
+	// A fresh finite queue per signal and one owned component avoid silent
+	// subsequent whistles and accumulating indefinitely-playing audio voices.
+	WhistleAudio->Stop(); WhistleSound=MakeWhistleSound(this);
+	WhistleAudio->SetSound(WhistleSound); WhistleAudio->Play(); WhistleAudio->StopDelayed(.4f);
 }
 
 void AMatchOfficialManager::SetScorerText(const FString& Line1, const FString& Line2, const FString& Line3, const FString& Line4)
@@ -284,4 +297,38 @@ void AMatchOfficialManager::SetScorerText(const FString& Line1, const FString& L
 	if (!ScoreboardText) return;
 	ScoreboardText->SetText(FText::FromString(FString::Printf(TEXT("%s\n%s\n%s\n%s"),
 		*Line1, *Line2, *Line3, *Line4)));
+}
+
+void AMatchOfficialManager::UpdateMatchVisuals(EMatchState Phase,EVolleyballTeam Serving,int32 TA,int32 TB,int32 SA,int32 SB)
+{
+	VisualPhase=Phase;
+	if(PointSignalSeconds<=0) SignalTeam=Serving;
+	if(AllowanceText) AllowanceText->SetText(FText::FromString(FString::Printf(TEXT("TIMEOUT A%d B%d   SUB A%d B%d"),TA,TB,SA,SB)));
+}
+
+void AMatchOfficialManager::SignalPoint(EVolleyballTeam Winner)
+{ SignalTeam=Winner; PointSignalSeconds=2.f; }
+
+void AMatchOfficialManager::Tick(float Dt)
+{
+	Super::Tick(Dt);
+	PointSignalSeconds=FMath::Max(0.f,PointSignalSeconds-Dt);
+	const bool bService=VisualPhase==EMatchState::ServiceAuthorized;
+	const bool bTimeout=VisualPhase==EMatchState::Timeout;
+	for(auto& Pair : RestTransforms)
+	{
+		UStaticMeshComponent* C=Pair.Key;
+		const FString N=C->GetName();
+		if(!N.StartsWith(TEXT("Official")) || (!N.Contains(TEXT("Arm")) && !N.Contains(TEXT("Hand")))) continue;
+		FTransform Target=Pair.Value;
+		const bool bRight=N.EndsWith(TEXT("R"));
+		if(bTimeout || ((bService || PointSignalSeconds>0) && bRight==(SignalTeam==EVolleyballTeam::TeamA)))
+		{
+			// Simplified directional/service and time-out cues; animation only, not rule authority.
+			FVector L=Target.GetLocation(); L.Z+=bTimeout?32.f:24.f; L.Y+=bRight?22.f:-22.f;
+			Target.SetLocation(L); Target.SetRotation((Target.Rotator()+FRotator(bTimeout?65.f:90.f,0,0)).Quaternion());
+		}
+		C->SetRelativeLocation(FMath::VInterpTo(C->GetRelativeLocation(),Target.GetLocation(),Dt,8.f));
+		C->SetRelativeRotation(FMath::RInterpTo(C->GetRelativeRotation(),Target.Rotator(),Dt,8.f));
+	}
 }

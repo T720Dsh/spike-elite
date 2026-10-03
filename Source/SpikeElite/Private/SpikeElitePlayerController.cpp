@@ -10,6 +10,8 @@
 #include "UI/ConfirmWidget.h"
 #include "UI/CoachPanelWidget.h"
 #include "UI/ServeIntroWidget.h"
+#include "UI/TeamRosterWidget.h"
+#include "UI/MatchEventWidget.h"
 #include "UI/RotationWidget.h"
 #include "UI/SEUiStyle.h"
 #include "Engine/UserInterfaceSettings.h"
@@ -67,6 +69,11 @@ void ASpikeElitePlayerController::BeginPlay()
 	}
 	GetMutableDefault<UUserInterfaceSettings>()->ApplicationScale = FMath::Clamp(SavedUIScale, 0.8f, 1.4f);
 	SEUiStyle::SetReducedMotion(bSavedReducedMotion);
+#if !UE_BUILD_SHIPPING
+	float DevScale=0.f;
+	if(FParse::Value(FCommandLine::Get(),TEXT("UIScale="),DevScale)) GetMutableDefault<UUserInterfaceSettings>()->ApplicationScale=FMath::Clamp(DevScale,.8f,1.4f);
+	if(FParse::Param(FCommandLine::Get(),TEXT("ReducedMotion"))) SEUiStyle::SetReducedMotion(true);
+#endif
 	UE_LOG(LogSEMenu, Log, TEXT("PC BeginPlay, sensitivity=%.2f, showing main menu"), MouseSensitivity);
 	ShowMainMenu();
 
@@ -138,6 +145,8 @@ void ASpikeElitePlayerController::DevViewPlayer()
 
 void ASpikeElitePlayerController::DevAutoStart()
 {
+	if(FParse::Param(FCommandLine::Get(),TEXT("CloseoutTest"))) { DevCloseoutTest(); return; }
+	if(FParse::Param(FCommandLine::Get(),TEXT("PerfSuite"))) { DevPerfSuite(); return; }
 	if (FParse::Param(FCommandLine::Get(), TEXT("ArtSuite")))
 	{
 		DevArtSuite();
@@ -354,6 +363,7 @@ void ASpikeElitePlayerController::DevRematchStress()
 			{
 				// One audit per finished run, then rematch (or quit after run 5).
 				GM->DevAuditActors(Run);
+				FString Why; PC->DevVerify(GM->ValidateRuntimeRoster(Why),TEXT("Rematch registered identities remain unique"));
 				// Run 5: capture the final rematch result screen (MatchOver with
 				// full set scores) as the acceptance screenshot for the stress loop.
 				if (Run == 5)
@@ -1454,6 +1464,7 @@ void ASpikeElitePlayerController::SetupInputComponent()
 	FInputActionBinding& CoachBind =
 		InputComponent->BindAction(TEXT("ToggleCoach"), IE_Pressed, this, &ASpikeElitePlayerController::ToggleCoachPanel);
 	CoachBind.bExecuteWhenPaused = true;
+	InputComponent->BindKey(EKeys::R,IE_Pressed,this,&ASpikeElitePlayerController::SwitchControlledPlayer);
 }
 
 void ASpikeElitePlayerController::OnToggleRotation()
@@ -1468,6 +1479,7 @@ void ASpikeElitePlayerController::OnToggleRotation()
 
 void ASpikeElitePlayerController::ToggleCoachPanel()
 {
+	if(RosterMenu) return; // roster selection is the sole live management modal
 	// The panel is a live-play tool: never open over the pause menu, confirm
 	// dialog or result screen (they own the input mode).
 	if (MenuState != EMenuState::Playing) { return; }
@@ -1495,17 +1507,14 @@ void ASpikeElitePlayerController::ToggleCoachPanel()
 	CoachPanel->OnCycleSetter.BindUObject(this, &ASpikeElitePlayerController::HandleCoachSetter);
 	CoachPanel->OnClosePanel.BindUObject(this, &ASpikeElitePlayerController::ToggleCoachPanel);
 	CoachPanel->AddToViewport(30);
-	CoachPanel->SetInitialFocus();
 	if (ASpikeEliteGameMode* GM = GetWorld()->GetAuthGameMode<ASpikeEliteGameMode>())
 	{
 		GM->bCoachPanelOpen = true;
 	}
 	// The panel is mouse-driven; keep the world running underneath (no pause).
-	FInputModeUIOnly Mode;
-	Mode.SetWidgetToFocus(CoachPanel->TakeWidget());
-	Mode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
-	SetInputMode(Mode);
-	bShowMouseCursor = true;
+	if (Tactical) { Tactical->CancelShot(); }
+	SetUIInputMode(CoachPanel);
+	CoachPanel->SetInitialFocus();
 	RefreshCoachPanel();
 }
 
@@ -1538,27 +1547,16 @@ void ASpikeElitePlayerController::HandleCoachTimeoutA()
 }
 void ASpikeElitePlayerController::HandleCoachTimeoutB()
 {
-	if (ASpikeEliteGameMode* GM = GetWorld()->GetAuthGameMode<ASpikeEliteGameMode>())
-	{
-		GM->RequestTeamTimeout(EVolleyballTeam::TeamB);
-		RefreshCoachPanel();
-	}
+	if(CoachPanel) CoachPanel->SetStatus(TEXT("你执教 A 队，不能替对手申请暂停。"));
 }
 void ASpikeElitePlayerController::HandleCoachSubA()
 {
-	if (ASpikeEliteGameMode* GM = GetWorld()->GetAuthGameMode<ASpikeEliteGameMode>())
-	{
-		GM->RequestSubstitution(EVolleyballTeam::TeamA, 0, TEXT("A07"));
-		RefreshCoachPanel();
-	}
+	ShowRoster(false);
 }
 void ASpikeElitePlayerController::HandleCoachSubB()
 {
-	if (ASpikeEliteGameMode* GM = GetWorld()->GetAuthGameMode<ASpikeEliteGameMode>())
-	{
-		GM->RequestSubstitution(EVolleyballTeam::TeamB, 0, TEXT("B07"));
-		RefreshCoachPanel();
-	}
+	// A human team manager cannot issue instructions to the opponent.
+	if(CoachPanel) CoachPanel->SetStatus(TEXT("你执教 A 队，无法为对手申请换人。"));
 }
 void ASpikeElitePlayerController::HandleCoachServeZone()
 {
@@ -1613,7 +1611,7 @@ void ASpikeElitePlayerController::ShowServeIntro(const FString& PlayerId, int32 
 		: (Team == EVolleyballTeam::TeamB) ? TEXT("TEAM B") : TEXT("-");
 	// Build the widget tree FIRST (AddToViewport triggers RebuildWidget), then
 	// populate: packaged builds otherwise hit SetServer before the tree exists.
-	ServeIntro->AddToViewport(25);
+	if(!ServeIntro->IsInViewport()) ServeIntro->AddToViewport(25);
 	ServeIntro->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
 	ServeIntro->SetServer(JerseyNumber, Name, TeamLabel, RoleText, bShortBar);
 }
@@ -1652,6 +1650,8 @@ FString ASpikeElitePlayerController::CoachSetterLabel(const FCoachPreferences& P
 
 void ASpikeElitePlayerController::OnPausePressed()
 {
+	if (RosterMenu) { CloseRoster(); return; }
+	if (CoachPanel) { ToggleCoachPanel(); return; }
 	// M11b-4: while the tactical planning UI is open, Esc cancels the tactical
 	// shot instead of opening the pause menu.
 	if (Tactical && Tactical->State == ETacticalState::TacticalPlanning)
@@ -1687,6 +1687,12 @@ void ASpikeElitePlayerController::OnPausePressed()
 
 void ASpikeElitePlayerController::SetGameInputMode()
 {
+	if (auto* GM=GetWorld()?GetWorld()->GetAuthGameMode<ASpikeEliteGameMode>():nullptr)
+		if (GM->GetMatchMode()==EGameModeChoice::Coach)
+		{
+			FInputModeGameAndUI Mode; Mode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+			Mode.SetHideCursorDuringCapture(false); SetInputMode(Mode); bShowMouseCursor=true; SetPause(false); return;
+		}
 	// GameOnly defaults to capturing the mouse permanently for look control.
 	FInputModeGameOnly Mode;
 	SetInputMode(Mode);
@@ -1735,6 +1741,11 @@ void ASpikeElitePlayerController::SetUIInputMode(UUserWidget* FocusWidget)
 
 void ASpikeElitePlayerController::HideAllMenus()
 {
+	if(EventHUD) { EventHUD->RemoveFromParent(); EventHUD=nullptr; }
+	if(RosterMenu) { RosterMenu->RemoveFromParent(); RosterMenu=nullptr; }
+	if(CoachPanel) { CoachPanel->RemoveFromParent(); CoachPanel=nullptr; }
+	if(ServeIntro) { ServeIntro->RemoveFromParent(); ServeIntro=nullptr; }
+	if(auto* GM=GetWorld()?GetWorld()->GetAuthGameMode<ASpikeEliteGameMode>():nullptr) GM->bCoachPanelOpen=false;
 	if (MainMenu)     { MainMenu->RemoveFromParent();     MainMenu = nullptr; }
 	if (ModeSelect)   { ModeSelect->RemoveFromParent();   ModeSelect = nullptr; }
 	if (PauseMenu)    { PauseMenu->RemoveFromParent();    PauseMenu = nullptr; }
@@ -1796,6 +1807,7 @@ void ASpikeElitePlayerController::ShowModeSelect()
 		ModeSelect->OnPickChallenge.BindLambda([this]() { StartMatchAs(EGameModeChoice::Challenge12, true, 0); });
 		ModeSelect->OnPickCoach.BindLambda([this]() { StartMatchAs(EGameModeChoice::Coach, false, 0); });
 		ModeSelect->OnPickTraining.BindLambda([this]() { StartMatchAs(EGameModeChoice::Training, false, 0); });
+		ModeSelect->OnPickDrill.BindUObject(this,&ASpikeElitePlayerController::ShowTrainingDrill);
 		ModeSelect->OnBack.BindUObject(this, &ASpikeElitePlayerController::ShowMainMenu);
 		ModeSelect->AddToViewport(10);
 		SetUIInputMode(ModeSelect);
@@ -1806,18 +1818,10 @@ void ASpikeElitePlayerController::ShowModeSelect()
 void ASpikeElitePlayerController::StartMatchAs(EGameModeChoice Mode, bool bShortSets, int32 ChallengeStage)
 {
 	UE_LOG(LogSEMenu, Log, TEXT("StartMatchAs mode=%d short=%d stage=%d"), (int32)Mode, bShortSets ? 1 : 0, ChallengeStage);
-	HideAllMenus();
-	MenuState = EMenuState::Playing;
-	SetGameInputMode();
-	if (ASpikeEliteGameMode* GM = Cast<ASpikeEliteGameMode>(UGameplayStatics::GetGameMode(this)))
-	{
-		FMatchModeConfig Cfg;
-		Cfg.Mode = Mode;
-		Cfg.bShortSets = bShortSets;
-		Cfg.ChallengeStage = ChallengeStage;
-		GM->SetMatchMode(Cfg);
-		GM->StartMatch();
-	}
+	PendingMode.Mode=Mode; PendingMode.bShortSets=bShortSets; PendingMode.ChallengeStage=ChallengeStage;
+	PendingMode.Drill=Mode==EGameModeChoice::Training?static_cast<ETrainingDrill>(FMath::Clamp(ChallengeStage,0,2)):ETrainingDrill::None;
+	if(Mode==EGameModeChoice::Training) StartPreparedMatch();
+	else ShowRoster(true);
 }
 
 void ASpikeElitePlayerController::ShowTrainingDrill(int32 Drill)
@@ -1829,6 +1833,14 @@ void ASpikeElitePlayerController::ShowTrainingDrill(int32 Drill)
 void ASpikeElitePlayerController::OnMatchStarted(UScoreboardWidget* InScoreboard)
 {
 	Scoreboard = InScoreboard;
+	if(!EventHUD) { EventHUD=CreateWidget<UMatchEventWidget>(this); if(EventHUD) EventHUD->AddToViewport(22); }
+	if(auto* GM=GetWorld()->GetAuthGameMode<ASpikeEliteGameMode>(); GM && GM->GetMatchMode()==EGameModeChoice::Coach)
+	{
+		if(!DevCam) DevCam=GetWorld()->SpawnActor<ACameraActor>();
+		if(auto* Camera=Cast<ACameraActor>(DevCam))
+		{ const FVector P(1450,-1750,720); Camera->SetActorLocationAndRotation(P,(FVector(0,0,160)-P).Rotation()); Camera->GetCameraComponent()->SetFieldOfView(75); SetViewTarget(Camera); }
+		SetGameInputMode(); return;
+	}
 	// The map's PlayerStart can carry a top-down rotation from the menu scene.
 	// Reset the actual controller (not just the spring arm) on EVERY new match.
 	if (ASpikeEliteCharacter* C = Cast<ASpikeEliteCharacter>(GetPawn()))

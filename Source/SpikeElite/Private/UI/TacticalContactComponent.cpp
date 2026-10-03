@@ -89,14 +89,15 @@ void UTacticalContactComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 	{
 		GM = Cast<ASpikeEliteGameMode>(UGameplayStatics::GetGameMode(this));
 	}
-	if (!Pawn.IsValid())
+	if (OwnerPC.IsValid() && Pawn.Get() != OwnerPC->GetPawn())
 	{
-		if (OwnerPC.IsValid()) { Pawn = Cast<ASpikeEliteCharacter>(OwnerPC->GetPawn()); }
+		CancelShot();
+		Pawn = Cast<ASpikeEliteCharacter>(OwnerPC->GetPawn());
 	}
 	if (!GM.IsValid() || !Pawn.IsValid()) { return; }
 
 	// Pause / menu / end-of-match must always drop out of any tactical phase.
-	const bool bGameplayLocked = (GM->MatchState != EMatchState::Rally) || (OwnerPC.IsValid() && OwnerPC->IsMenuOpen());
+	const bool bGameplayLocked = Pawn->bIsBot || Pawn->bOffCourt || (GM->MatchState != EMatchState::Rally) || (OwnerPC.IsValid() && OwnerPC->IsMenuOpen());
 	if (bGameplayLocked)
 	{
 		if (IsTacticalActive()) { CancelShot(); }

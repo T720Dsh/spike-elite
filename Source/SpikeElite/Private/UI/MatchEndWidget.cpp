@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "UI/MatchEndWidget.h"
+#include "Components/ScrollBox.h"
 #include "UI/SEUiStyle.h"
 #include "Components/TextBlock.h"
 #include "Components/Button.h"
@@ -95,11 +96,10 @@ void UMatchEndWidget::BuildWidgetTree()
 	}
 
 	UVerticalBox* Col = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass());
-	if (UCanvasPanelSlot* S = Root->AddChildToCanvas(Col))
+	UScrollBox* ResultsScroll=WidgetTree->ConstructWidget<UScrollBox>(); ResultsScroll->AddChild(Col);
+	if (UCanvasPanelSlot* S = Root->AddChildToCanvas(ResultsScroll))
 	{
-		S->SetAnchors(FAnchors(0.5f,0.5f,0.5f,0.5f));
-		S->SetAlignment(FVector2D(0.5f,0.5f));
-		S->SetAutoSize(true);
+		S->SetAnchors(FAnchors(.23f,.08f,.77f,.93f)); S->SetOffsets(FMargin(0));
 	}
 
 	Title = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
@@ -189,11 +189,11 @@ void UMatchEndWidget::SetResult(EVolleyballTeam Winner, const TArray<int32>& Sco
 			for (int32 i = 0; i < S.Num() && i < R.Num(); i++)
 			{
 				const SEVolleyballRules::FPlayerMatchStats& St = S[i];
-				if (St.Receives + St.Sets + St.Attacks + St.Digs + St.Blocks + St.ServeAces + St.ServeErrors == 0) { continue; }
-				Lines += FString::Printf(TEXT("#%d %s 一传%d 二传%d 扣球%d(%d分/%d失) 拦网%d 救球%d 发球%d分/%d失\n"),
+				if (St.Receives + St.Sets + St.Attacks + St.Digs + St.Blocks + St.ServeAttempts + St.ServeAces + St.ServeErrors == 0) { continue; }
+				Lines += FString::Printf(TEXT("#%d %s 一传%d 二传%d 扣球%d(%d分/%d失) 拦网%d(%d分) 救球%d 发球%d次(%d分/%d失)\n"),
 					R[i].JerseyNumber, *R[i].DisplayName,
 					St.Receives, St.Sets, St.Attacks, St.AttackWins, St.AttackErrors,
-					St.Blocks, St.Digs, St.ServeAces, St.ServeErrors);
+					St.Blocks, St.BlockWins, St.Digs, St.ServeAttempts, St.ServeAces, St.ServeErrors);
 			}
 		};
 		AddTeam(TEXT("TEAM A"), StatsA, RosterA);

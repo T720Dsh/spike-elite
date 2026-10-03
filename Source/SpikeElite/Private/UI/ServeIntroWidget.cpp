@@ -6,140 +6,51 @@
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
 #include "Blueprint/WidgetTree.h"
+#include "Kismet/GameplayStatics.h"
 
-UServeIntroWidget::UServeIntroWidget(const FObjectInitializer& OI) : Super(OI) {}
-
-static UImage* IntroMakeSolidImage(UWidgetTree* Tree, const FLinearColor& Color)
-{
-	UImage* Img = Tree->ConstructWidget<UImage>(UImage::StaticClass());
-	Img->SetBrush(SEUiStyle::SolidBrush(Color));
-	return Img;
-}
-
+UServeIntroWidget::UServeIntroWidget(const FObjectInitializer& OI):Super(OI) {}
 TSharedRef<SWidget> UServeIntroWidget::RebuildWidget()
 {
-	if (!WidgetTree->RootWidget)
-	{
-		BuildWidgetTree();
-	}
+	if(!WidgetTree->RootWidget) BuildWidgetTree();
 	return Super::RebuildWidget();
 }
-
 void UServeIntroWidget::BuildWidgetTree()
 {
-	UCanvasPanel* Root = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass());
-	WidgetTree->RootWidget = Root;
-
-	// Panel card: right half of the screen (~45-50% width), so the net and the
-	// receiving team stay visible on the left. Anchored to the right edge.
-	PanelBG = IntroMakeSolidImage(WidgetTree, FLinearColor(0.03f, 0.06f, 0.12f, 0.85f));
-	if (UCanvasPanelSlot* S = Root->AddChildToCanvas(PanelBG))
+	auto* Root=WidgetTree->ConstructWidget<UCanvasPanel>(); WidgetTree->RootWidget=Root;
+	auto* Card=WidgetTree->ConstructWidget<UCanvasPanel>();
+	PanelSlot=Root->AddChildToCanvas(Card); PanelSlot->SetAnchors(FAnchors(.52f,.28f,.99f,.62f)); PanelSlot->SetOffsets(FMargin(0));
+	PanelBG=WidgetTree->ConstructWidget<UImage>(); PanelBG->SetBrush(SEUiStyle::SolidBrush(FLinearColor(.03f,.06f,.12f,.90f)));
+	auto* Background=Card->AddChildToCanvas(PanelBG); Background->SetAnchors(FAnchors(0,0,1,1)); Background->SetOffsets(FMargin(0));
+	auto Text=[&](int32 Font,FLinearColor Color,FAnchors Bounds)
 	{
-		S->SetAnchors(FAnchors(1.f, 0.5f));
-		S->SetAlignment(FVector2D(1.f, 0.5f));
-		S->SetSize(FVector2D(560.f, 300.f));
-		PanelSlot = S;
-	}
-	PanelBG->SetRenderOpacity(0.f);
-
-	NumberText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
-	NumberText->SetFont(SEUiStyle::Font(72));
-	NumberText->SetColorAndOpacity(FSlateColor(SEUiStyle::Colors::Gold));
-	NumberText->SetJustification(ETextJustify::Center);
-	if (UCanvasPanelSlot* S = Root->AddChildToCanvas(NumberText))
-	{
-		S->SetAnchors(FAnchors(1.f, 0.5f));
-		S->SetAlignment(FVector2D(1.f, 0.5f));
-		S->SetPosition(FVector2D(-470.f, -96.f));
-		S->SetSize(FVector2D(120.f, 100.f));
-	}
-	NumberText->SetRenderOpacity(0.f);
-
-	NameText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
-	NameText->SetFont(SEUiStyle::Font(34));
-	NameText->SetColorAndOpacity(FSlateColor(SEUiStyle::Colors::White));
-	NameText->SetJustification(ETextJustify::Center);
-	if (UCanvasPanelSlot* S = Root->AddChildToCanvas(NameText))
-	{
-		S->SetAnchors(FAnchors(1.f, 0.5f));
-		S->SetAlignment(FVector2D(1.f, 0.5f));
-		S->SetPosition(FVector2D(-330.f, -70.f));
-		S->SetSize(FVector2D(300.f, 46.f));
-	}
-	NameText->SetRenderOpacity(0.f);
-
-	TeamRoleText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
-	TeamRoleText->SetFont(SEUiStyle::Font(18));
-	TeamRoleText->SetColorAndOpacity(FSlateColor(SEUiStyle::Colors::White * 0.8f));
-	TeamRoleText->SetJustification(ETextJustify::Center);
-	if (UCanvasPanelSlot* S = Root->AddChildToCanvas(TeamRoleText))
-	{
-		S->SetAnchors(FAnchors(1.f, 0.5f));
-		S->SetAlignment(FVector2D(1.f, 0.5f));
-		S->SetPosition(FVector2D(-330.f, -14.f));
-		S->SetSize(FVector2D(300.f, 28.f));
-	}
-	TeamRoleText->SetRenderOpacity(0.f);
+		auto* T=WidgetTree->ConstructWidget<UTextBlock>(); T->SetFont(SEUiStyle::Font(Font)); T->SetColorAndOpacity(Color);
+		T->SetAutoWrapText(true); auto* S=Card->AddChildToCanvas(T); S->SetAnchors(Bounds); S->SetOffsets(FMargin(12,0,12,0)); return T;
+	};
+	NumberText=Text(72,SEUiStyle::Colors::Gold,FAnchors(.02f,.12f,.26f,.75f));
+	NameText=Text(34,SEUiStyle::Colors::White,FAnchors(.28f,.20f,.98f,.46f));
+	TeamRoleText=Text(18,SEUiStyle::Colors::White,FAnchors(.28f,.51f,.98f,.78f));
+	Text(13,SEUiStyle::Colors::Gold,FAnchors(.04f,.84f,.98f,.99f))->SetText(FText::FromString(TEXT("E 跳过介绍 · 哨响后再发球")));
+	SetRenderOpacity(0);
 }
-
-void UServeIntroWidget::SetServer(int32 JerseyNumber, const FString& Name, const FString& TeamLabel,
-	const FString& Role, bool bShortBar)
+void UServeIntroWidget::SetServer(int32 Number,const FString& Name,const FString& Team,const FString& Role,bool bShortBar)
 {
-	// Packaged builds can reach SetServer before the widget tree exists (the
-	// UMG tree is built on AddToViewport); the controller now adds to viewport
-	// first, but keep the guard so a re-entrant call can never deref null.
-	if (!NumberText || !NameText || !TeamRoleText) { return; }
-	bShort = bShortBar;
-	const FString Number = FString::Printf(TEXT("%d"), JerseyNumber);
-	NumberText->SetText(FText::FromString(Number));
+	if(!NumberText || !NameText || !TeamRoleText) return;
+	bShort=bShortBar; NumberText->SetText(FText::FromString(FString::Printf(TEXT("#%d"),Number)));
+	NumberText->SetFont(SEUiStyle::Font(bShort?42:72)); NameText->SetFont(SEUiStyle::Font(bShort?26:34));
 	NameText->SetText(FText::FromString(Name));
-	TeamRoleText->SetText(FText::FromString(
-		bShortBar ? FString::Printf(TEXT("%s · 发球"), *TeamLabel)
-		          : FString::Printf(TEXT("%s · %s · 发球"), *TeamLabel, *Role)));
-
-	// Card height differs: full card vs short name bar.
-	if (PanelSlot)
-	{
-		PanelSlot->SetSize(FVector2D(560.f, bShortBar ? 160.f : 300.f));
-		PanelSlot->SetPosition(FVector2D(0.f, 0.f));
-	}
-	// Align number/name for the short bar layout.
-	NumberText->SetVisibility(bShortBar ? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
-
-	Alpha = 0.f;
-	bFadingIn = true;
-	bFadingOut = false;
-	bHidden = false;
+	TeamRoleText->SetText(FText::FromString(FString::Printf(TEXT("%s · %s · 发球"),*Team,*Role)));
+	if(PanelSlot) { PanelSlot->SetAnchors(bShort?FAnchors(.58f,.40f,.99f,.62f):FAnchors(.52f,.28f,.99f,.62f)); PanelSlot->SetOffsets(FMargin(0)); }
+	Alpha=0; bFadingIn=true; bFadingOut=false; bHidden=false;
+	SetRenderOpacity(0); SetVisibility(ESlateVisibility::HitTestInvisible);
 }
-
-void UServeIntroWidget::FadeOut()
+void UServeIntroWidget::FadeOut() { bFadingIn=false; bFadingOut=true; }
+void UServeIntroWidget::NativeTick(const FGeometry& G,float Dt)
 {
-	bFadingIn = false;
-	bFadingOut = true;
-}
-
-void UServeIntroWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
-{
-	Super::NativeTick(MyGeometry, InDeltaTime);
-	if (bHidden) { return; }
-
-	if (bFadingIn)
-	{
-		Alpha = FMath::Min(1.f, Alpha + InDeltaTime / 0.30f);
-	}
-	else if (bFadingOut)
-	{
-		Alpha = FMath::Max(0.f, Alpha - InDeltaTime / 0.25f);
-		if (Alpha <= 0.f)
-		{
-			Alpha = 0.f;
-			bHidden = true;
-			SetVisibility(ESlateVisibility::Collapsed);
-		}
-	}
-	const float Op = Alpha;
-	if (PanelBG) { PanelBG->SetRenderOpacity(Op * 0.85f); }
-	if (NumberText) { NumberText->SetRenderOpacity(Op); }
-	if (NameText) { NameText->SetRenderOpacity(Op); }
-	if (TeamRoleText) { TeamRoleText->SetRenderOpacity(Op); }
+	Super::NativeTick(G,Dt);
+	if(bHidden || UGameplayStatics::IsGamePaused(this)) return;
+	const float Duration=SEUiStyle::IsReducedMotion()?.05f:(bFadingOut?.25f:.30f);
+	Alpha=FMath::Clamp(Alpha+(bFadingIn?Dt:-Dt)/Duration,0.f,1.f);
+	SetRenderOpacity(Alpha);
+	SetRenderTranslation(FVector2D(SEUiStyle::IsReducedMotion()?0.f:(1.f-FMath::InterpEaseOut(0.f,1.f,Alpha,3.f))*G.GetLocalSize().X*.48f,0));
+	if(bFadingOut && Alpha<=0) { bHidden=true; SetVisibility(ESlateVisibility::Collapsed); }
 }

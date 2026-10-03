@@ -84,6 +84,12 @@ class SPIKEELITE_API ASpikeEliteCharacter : public ACharacter
 	GENERATED_BODY()
 
 public:
+	/** Stable registered identity; int PlayerId remains a legacy visual index. */
+	FString RosterPlayerId;
+	bool bOffCourt = false;
+	bool bCeremonyWalking = false;
+	bool CanUsePlayerInput() const;
+	void PlayerJump();
 	ASpikeEliteCharacter();
 
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;

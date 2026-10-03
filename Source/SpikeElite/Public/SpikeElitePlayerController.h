@@ -18,6 +18,8 @@ class UMatchEndWidget;
 class UConfirmWidget;
 class UCoachPanelWidget;
 class UServeIntroWidget;
+class UTeamRosterWidget;
+class UMatchEventWidget;
 
 UENUM(BlueprintType)
 enum class EMenuState : uint8
@@ -50,6 +52,11 @@ public:
 
 	virtual void BeginPlay() override;
 	virtual void SetupInputComponent() override;
+	virtual void Tick(float DeltaSeconds) override;
+	void ShowRoster(bool bPreMatch);
+	void CloseRoster();
+	void StartPreparedMatch();
+	void SwitchControlledPlayer();
 
 	/** Called by GameMode once the match world is ready (or nullptr on cleanup). */
 	void OnMatchStarted(UScoreboardWidget* InScoreboard);
@@ -100,7 +107,7 @@ public:
 	/** True while any menu / confirm dialog is on screen (gameplay input blocked). */
 	bool IsMenuOpen() const
 	{
-		return MenuState != EMenuState::Playing;
+		return MenuState != EMenuState::Playing || CoachPanel != nullptr || RosterMenu != nullptr;
 	}
 
 	/** M11h-6: toggle the coach / team-management panel (Tab). Requests are
@@ -157,6 +164,10 @@ public:
 	void SaveSettings();
 
 protected:
+	UPROPERTY() TObjectPtr<UTeamRosterWidget> RosterMenu;
+	UPROPERTY() TObjectPtr<UMatchEventWidget> EventHUD;
+	FMatchModeConfig PendingMode;
+	float ManagementRefreshTimer=0.f;
 	UPROPERTY() TObjectPtr<UMainMenuWidget> MainMenu;
 	UPROPERTY() TObjectPtr<UModeSelectWidget> ModeSelect;
 	UPROPERTY() TObjectPtr<UPauseMenuWidget> PauseMenu;	UPROPERTY() TObjectPtr<USettingsWidget> SettingsMenu;
@@ -223,6 +234,8 @@ protected:
 	/** -PoseSuite: pin each procedural pose and capture front/side/back + run frames. */
 	void DevPoseSuite();
 	void DevArtSuite();
+	void DevCloseoutTest();
+	void DevPerfSuite();
 	/** Request a named high-resolution screenshot (runs even while paused). */
 	void DevShot(const FString& Name);
 	/** Point the dev camera at a world transform, or back at the player pawn. */

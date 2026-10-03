@@ -111,7 +111,8 @@ void UTacticalHUDWidget::BuildAttackPanel()
 	TimingBar->SetPercent(0.f);
 	V->AddChild(TimingBar);
 	TimingLabel = MakeRowText(WidgetTree, V, TEXT(""), 15, SEUiStyle::Colors::White);
-	AttackHelp = MakeRowText(WidgetTree, V, TEXT("鼠标移动选点 · 滚轮/W/S 力度 · Q/E 弧线 · 左键确认 · 右键/Esc 取消"), 13, SEUiStyle::Colors::Grey);
+	AttackHelp = MakeRowText(WidgetTree, V, TEXT("鼠标选点 · 滚轮调力度 · Q/E 调弧线\n左键确认 · 右键/Esc 取消"), 13, SEUiStyle::Colors::Grey);
+	AttackHelp->SetAutoWrapText(true);
 }
 
 void UTacticalHUDWidget::BuildSetPanel()

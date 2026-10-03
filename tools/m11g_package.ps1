@@ -1,7 +1,9 @@
+param([string]$ArchiveDirectory = '')
 # Scoped build environment: local Zen requests must not pass through the user's
 # inherited HTTP proxy. Never change the user's persisted proxy/DDC settings.
 $ErrorActionPreference='Stop'
 $projectRoot=Split-Path $PSScriptRoot -Parent
+if(-not $ArchiveDirectory) { $ArchiveDirectory=Join-Path $projectRoot 'Dist\M11g' }
 $uat='D:\Epic\UE_5.8\Engine\Build\BatchFiles\RunUAT.bat'
 $savedNoProxy=$env:NO_PROXY
 $savedHttpProxy=$env:HTTP_PROXY
@@ -16,7 +18,7 @@ try {
     [Environment]::SetEnvironmentVariable('HTTPS_PROXY',$null,'Process')
     [Environment]::SetEnvironmentVariable('ALL_PROXY',$null,'Process')
     # Windows environment names are case-insensitive; this also supplies no_proxy.
-    & $uat BuildCookRun "-project=$projectRoot\SpikeElite.uproject" -noP4 -platform=Win64 -clientconfig=Development -cook -allmaps -build -stage -pak -archive "-archivedirectory=$projectRoot\Dist\M11g"
+    & $uat BuildCookRun "-project=$projectRoot\SpikeElite.uproject" -noP4 -platform=Win64 -clientconfig=Development -cook -allmaps -build -stage -pak -archive "-archivedirectory=$ArchiveDirectory"
     if($LASTEXITCODE -ne 0){throw "BuildCookRun failed: $LASTEXITCODE"}
 } finally {
     [Environment]::SetEnvironmentVariable('NO_PROXY',$savedNoProxy,'Process')

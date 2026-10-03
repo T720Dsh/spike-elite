@@ -116,6 +116,10 @@ struct FTeamRosterState
 		}
 		return nullptr;
 	}
+	int32 RegisteredIndex(const FString& Id) const
+	{
+		return Registered.IndexOfByPredicate([&Id](const FPlayerIdentity& P) { return P.PlayerId == Id; });
+	}
 
 	/** Identity of the player currently in court index i (0..5), or nullptr. */
 	const FPlayerIdentity* CourtPlayer(int32 CourtIndex) const
@@ -123,6 +127,18 @@ struct FTeamRosterState
 		if (!OnCourtLineup.IsValidIndex(CourtIndex)) { return nullptr; }
 		return FindById(OnCourtLineup[CourtIndex]);
 	}
+};
+
+/** Per-set normal-substitution ledger. Pairing is established on first use. */
+struct FTeamRosterState;
+struct SPIKEELITE_API FSubstitutionLedger
+{
+	TMap<FString, FString> SubstituteToStarter;
+	TSet<FString> ExitedStarters, ReturnedStarters;
+	int32 Remaining = 6;
+	int32 LastRequestRally = INDEX_NONE;
+	bool Validate(const FTeamRosterState& Roster, int32 Slot, const FString& Incoming, FString& Reason) const;
+	void Apply(FTeamRosterState& Roster, int32 Slot, const FString& Incoming);
 };
 
 /** Roster helpers: default squads, validation, bounded attribute formulas. */

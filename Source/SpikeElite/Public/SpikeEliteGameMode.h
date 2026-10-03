@@ -18,6 +18,7 @@ class AMatchOfficialManager;
 class URotationWidget;
 class ASpikeEliteCharacter;
 class UScoreboardWidget;
+class UInstancedStaticMeshComponent;
 
 /**
  * Default game mode for SPIKE ELITE.
@@ -62,6 +63,36 @@ public:
 	 *  Rotation/substitution change slots, never PlayerId/identity/stats owner. */
 	FTeamRosterState RosterA;
 	FTeamRosterState RosterB;
+	FSubstitutionLedger SubLedgerA, SubLedgerB;
+	int32 CompletedRallies = 0;
+	TArray<FString> SavedLineupA, SavedLineupB;
+	UPROPERTY() TArray<TObjectPtr<ASpikeEliteCharacter>> BenchPlayers;
+	FString LastManagementMessage;
+	void SynchronizeCourtIdentities();
+	void RefreshRegisteredBench();
+	bool SetStartingLineup(EVolleyballTeam Team, const TArray<FString>& Lineup, FString& Reason);
+	void LoadLineups();
+	bool SaveLineups() const;
+	float EntranceRemaining=0.f;
+	void BeginEntrance();
+	void FinishEntrance();
+	void TickEntrance(float DeltaSeconds);
+	int32 TrainingAttempts=0, TrainingSuccesses=0, TrainingPlayerTouches=0;
+	float TrainingTimer=0.f;
+	bool bTrainingWaiting=false;
+	FVector TrainingGoal=FVector::ZeroVector;
+	FString TrainingFeedback;
+	UPROPERTY() TObjectPtr<AActor> TrainingMarker;
+	UPROPERTY() TObjectPtr<UInstancedStaticMeshComponent> TrainingPreview;
+	void StartTrainingAttempt();
+	void FinishTrainingAttempt(bool bSuccess, const FString& Reason);
+	void TickTraining(float DeltaSeconds);
+	FString GetPracticeStatus() const;
+	bool ValidateRuntimeRoster(FString& Reason) const;
+	#if !UE_BUILD_SHIPPING
+	bool DevManagementChecks(FString& Failures);
+	#endif
+	void ResetFlightTracking();
 
 	/** M11h-1: identity of the character's court player (or nullptr for bench/
 	 *  non-roster actors). Team decided from the character's TeamSide. */
@@ -98,7 +129,7 @@ public:
 	float TimeoutPausedSeconds = 0.f;
 
 	/** Request a team timeout. Legal only on a dead ball BEFORE the service
-	 *  whistle (BetweenRallies/ResettingPositions/AwaitingReady/ServiceAuthorized),
+	 *  whistle (BetweenRallies/ResettingPositions/AwaitingReady/ServePresentation),
 	 *  never during ServingToss/Rally/SetOver/MatchOver, with >=1 remaining. */
 	UFUNCTION(BlueprintCallable, Category = "Volleyball|Flow")
 	bool RequestTeamTimeout(EVolleyballTeam Team);
@@ -174,14 +205,14 @@ public:
 	}
 
 	// ---------------- M11h-8: per-player match stats ----------------
-	/** Per-court-slot stats (indexed like TeamAPlayers, 0..5). Reset per match,
+	/** Per-registered-player stats (stable Registered index, 0..11). Reset per match,
 	 *  accumulate across sets. Attributed from real touch/point events only.
 	 *  (Plain C++ members: the stat struct is a non-reflected namespace type.) */
 	TArray<SEVolleyballRules::FPlayerMatchStats> StatsA;
 	TArray<SEVolleyballRules::FPlayerMatchStats> StatsB;
-	/** Reset StatsA/StatsB to 6 empty slots (match start / rematch). */
+	/** Reset StatsA/StatsB to 12 empty entries (match start / rematch). */
 	void ResetMatchStats();
-	/** The stats array for a team (indexed by court slot). */
+	/** The stats array for a team (indexed by stable registered identity). */
 	TArray<SEVolleyballRules::FPlayerMatchStats>& StatsFor(EVolleyballTeam Team)
 	{
 		return (Team == EVolleyballTeam::TeamA) ? StatsA : StatsB;

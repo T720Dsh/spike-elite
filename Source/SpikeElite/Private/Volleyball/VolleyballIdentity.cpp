@@ -163,15 +163,50 @@ bool ValidateRoster(const FTeamRosterState& R, FString& OutProblem)
 		}
 		StartSet.Add(Id);
 	}
+	TSet<FString> CourtSet;
 	for (const FString& Id : R.OnCourtLineup)
 	{
-		if (!R.FindById(Id))
+		if (!R.FindById(Id) || CourtSet.Contains(Id))
 		{
 			OutProblem = FString::Printf(TEXT("oncourt id %s not registered"), *Id);
 			return false;
 		}
+		CourtSet.Add(Id);
 	}
 	return true;
 }
 
 } // namespace SEVolleyballRoster
+
+bool FSubstitutionLedger::Validate(const FTeamRosterState& R, int32 Slot, const FString& Incoming, FString& Reason) const
+{
+	if (Remaining <= 0) { Reason = TEXT("本局换人次数已用完"); return false; }
+	if (!R.OnCourtLineup.IsValidIndex(Slot) || !R.FindById(Incoming)) { Reason = TEXT("球员或位置无效"); return false; }
+	if (R.OnCourtLineup.Contains(Incoming)) { Reason = TEXT("该球员已在场上"); return false; }
+	const FString& Outgoing = R.OnCourtLineup[Slot];
+	if (R.StartingLineup.Contains(Outgoing))
+	{
+		if (ExitedStarters.Contains(Outgoing) || R.StartingLineup.Contains(Incoming))
+		{ Reason = TEXT("首发本局只能下场一次，不能由另一名首发替换"); return false; }
+		if (const FString* Paired = SubstituteToStarter.Find(Incoming); Paired && *Paired != Outgoing)
+		{ Reason = TEXT("替补已与另一名首发配对"); return false; }
+	}
+	else
+	{
+		const FString* Paired = SubstituteToStarter.Find(Outgoing);
+		if (!Paired || *Paired != Incoming || ReturnedStarters.Contains(Incoming))
+		{ Reason = TEXT("替补只能由对应首发换回一次"); return false; }
+	}
+	Reason.Empty(); return true;
+}
+
+void FSubstitutionLedger::Apply(FTeamRosterState& R, int32 Slot, const FString& Incoming)
+{
+	const FString Outgoing = R.OnCourtLineup[Slot];
+	if (R.StartingLineup.Contains(Outgoing))
+	{
+		SubstituteToStarter.Add(Incoming, Outgoing); ExitedStarters.Add(Outgoing);
+	}
+	else { ReturnedStarters.Add(Incoming); }
+	R.OnCourtLineup[Slot] = Incoming; --Remaining;
+}

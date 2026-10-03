@@ -31,6 +31,7 @@ UENUM(BlueprintType)
 enum class EMatchState : uint8
 {
 	PreMatch           UMETA(DisplayName = "Pre-match"),
+	Entrance           UMETA(DisplayName = "Player entrance ceremony"),
 	BetweenRallies     UMETA(DisplayName = "Post-rally result display"),
 	ResettingPositions UMETA(DisplayName = "Players returning to formation"),
 	AwaitingReady      UMETA(DisplayName = "2nd referee checking readiness"),
@@ -63,4 +64,3 @@ enum class EVolleyballDefensePlan : uint8
 	DiveDig        UMETA(DisplayName = "Dive dig"),
 	None           UMETA(Hidden)
 };
-

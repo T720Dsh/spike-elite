@@ -1565,7 +1565,7 @@ bool FSEITimeoutLegalWindows::RunTest(const FString& Parameters)
 	TestTrue(TEXT("between rallies"),  SEVolleyballRules::CanRequestTimeoutInPhase(EMatchState::BetweenRallies));
 	TestTrue(TEXT("resetting"),        SEVolleyballRules::CanRequestTimeoutInPhase(EMatchState::ResettingPositions));
 	TestTrue(TEXT("awaiting ready"),   SEVolleyballRules::CanRequestTimeoutInPhase(EMatchState::AwaitingReady));
-	TestTrue(TEXT("service authorized"), SEVolleyballRules::CanRequestTimeoutInPhase(EMatchState::ServiceAuthorized));
+	TestFalse(TEXT("after whistle rejected"), SEVolleyballRules::CanRequestTimeoutInPhase(EMatchState::ServiceAuthorized));
 	TestFalse(TEXT("serving toss"),    SEVolleyballRules::CanRequestTimeoutInPhase(EMatchState::ServingToss));
 	TestFalse(TEXT("rally live"),      SEVolleyballRules::CanRequestTimeoutInPhase(EMatchState::Rally));
 	TestFalse(TEXT("timeout"),         SEVolleyballRules::CanRequestTimeoutInPhase(EMatchState::Timeout));
@@ -1574,7 +1574,7 @@ bool FSEITimeoutLegalWindows::RunTest(const FString& Parameters)
 	TestFalse(TEXT("pre match"),       SEVolleyballRules::CanRequestTimeoutInPhase(EMatchState::PreMatch));
 	// M11h-3: the server-intro card is NOT a legal timeout/substitution window
 	// and never allows touches or serves (it only plays before the whistle).
-	TestFalse(TEXT("serve presentation no timeout"),
+	TestTrue(TEXT("serve presentation before whistle allows timeout"),
 		SEVolleyballRules::CanRequestTimeoutInPhase(EMatchState::ServePresentation));
 	TestFalse(TEXT("serve presentation no touch"),
 		SEVolleyballRules::IsTouchLegalInPhase(EMatchState::ServePresentation, false));
@@ -1612,10 +1612,10 @@ bool FSEISubstitutionLegalWindows::RunTest(const FString& Parameters)
 	// FIVB 15.2: substitutions only on a dead ball before the service whistle —
 	// the same window as team timeouts.
 	TestTrue(TEXT("between rallies"),  SEVolleyballRules::CanSubstituteInPhase(EMatchState::BetweenRallies));
-	TestTrue(TEXT("service authorized"), SEVolleyballRules::CanSubstituteInPhase(EMatchState::ServiceAuthorized));
+	TestFalse(TEXT("after whistle rejected"), SEVolleyballRules::CanSubstituteInPhase(EMatchState::ServiceAuthorized));
 	TestFalse(TEXT("rally live"),      SEVolleyballRules::CanSubstituteInPhase(EMatchState::Rally));
 	TestFalse(TEXT("serving toss"),    SEVolleyballRules::CanSubstituteInPhase(EMatchState::ServingToss));
-	TestFalse(TEXT("timeout"),         SEVolleyballRules::CanSubstituteInPhase(EMatchState::Timeout));
+	TestTrue(TEXT("timeout permits substitution"), SEVolleyballRules::CanSubstituteInPhase(EMatchState::Timeout));
 	TestFalse(TEXT("set over"),        SEVolleyballRules::CanSubstituteInPhase(EMatchState::SetOver));
 	TestFalse(TEXT("match over"),      SEVolleyballRules::CanSubstituteInPhase(EMatchState::MatchOver));
 	TestEqual(TEXT("per set"),         SEVolleyballRules::SubstitutionsPerSet(), 6);
@@ -1702,7 +1702,7 @@ bool FSEIStatsAttribution::RunTest(const FString& Parameters)
 	SEVolleyballRules::AttachStatsForRally(S, EBallTouchType::Attack, 2, 3,
 		EVolleyballTeam::TeamA, EVolleyballTeam::TeamA, EVolleyballTeam::TeamA);
 	TestEqual(TEXT("attack win"), S[2].AttackWins, 1);
-	TestEqual(TEXT("attack counted"), S[2].Attacks, 1);
+	TestEqual(TEXT("outcome does not duplicate attack contact"), S[2].Attacks, 0);
 
 	// Attack by the rally loser -> AttackErrors.
 	SEVolleyballRules::AttachStatsForRally(S, EBallTouchType::Attack, 3, 2,
@@ -1722,17 +1722,39 @@ bool FSEIStatsAttribution::RunTest(const FString& Parameters)
 	// Block by the rally loser counts as a block contact.
 	SEVolleyballRules::AttachStatsForRally(S, EBallTouchType::Block, 1, 2,
 		EVolleyballTeam::TeamA, EVolleyballTeam::TeamB, EVolleyballTeam::TeamB);
-	TestEqual(TEXT("block contact"), S[1].Blocks, 1);
+	TestEqual(TEXT("outcome does not duplicate block contact"), S[1].Blocks, 0);
 	// Receive / Set type counters.
 	SEVolleyballRules::AttachStatsForRally(S, EBallTouchType::Receive, 4, 1,
 		EVolleyballTeam::TeamB, EVolleyballTeam::TeamB, EVolleyballTeam::TeamB);
 	SEVolleyballRules::AttachStatsForRally(S, EBallTouchType::Set, 5, 2,
 		EVolleyballTeam::TeamB, EVolleyballTeam::TeamB, EVolleyballTeam::TeamB);
-	TestEqual(TEXT("receive"), S[4].Receives, 1);
-	TestEqual(TEXT("set"), S[5].Sets, 1);
+	TestEqual(TEXT("no duplicate receive"), S[4].Receives, 0);
+	TestEqual(TEXT("no duplicate set"), S[5].Sets, 0);
 	return true;
 }
 
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSESubstitutionLifecycle,
+	"SpikeElite.Tests.SubstitutionLifecycle", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FSESubstitutionLifecycle::RunTest(const FString& Parameters)
+{
+	FTeamRosterState R; SEVolleyballRoster::BuildDefaultRoster(EVolleyballTeam::TeamA,R);
+	FSubstitutionLedger L; FString Why;
+	const FString Original=R.OnCourtLineup[0];
+	const FString Bench=R.GetBench()[0], Another=R.GetBench()[1];
+	TestTrue(TEXT("first substitution legal"),L.Validate(R,0,Bench,Why)); L.Apply(R,0,Bench);
+	TestEqual(TEXT("first count"),L.Remaining,5);
+	TestFalse(TEXT("cannot swap two bench players"),L.Validate(R,0,Another,Why));
+	TestFalse(TEXT("cannot replace another starter with paired bench"),L.Validate(R,1,Original,Why));
+	TestTrue(TEXT("original starter can return"),L.Validate(R,0,Original,Why)); L.Apply(R,0,Original);
+	TestEqual(TEXT("return consumes count"),L.Remaining,4);
+	TestFalse(TEXT("starter cannot exit again in same set"),L.Validate(R,0,Bench,Why));
+	L=FSubstitutionLedger();
+	TestTrue(TEXT("next set resets exit rights"),L.Validate(R,0,Bench,Why));
+	R.OnCourtLineup[1]=R.OnCourtLineup[0];
+	TestFalse(TEXT("duplicate on-court identity rejected"),SEVolleyballRoster::ValidateRoster(R,Why));
+	return true;
+}
 
 #endif // WITH_DEV_AUTOMATION_TESTS
 

@@ -3,13 +3,16 @@ param(
     [string]$Executable = 'D:\Epic\UE_5.8\Engine\Binaries\Win64\UnrealEditor.exe',
     [switch]$Packaged,
     [string]$Label = 'final',
+    [int]$Width = 1280,
+    [int]$Height = 720,
     [string]$AdditionalArguments = ''
 )
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path $PSScriptRoot -Parent
 $logRoot = Join-Path $projectRoot 'Saved\Logs'
 $shotRoot = if ($Packaged) { Join-Path (Split-Path $Executable -Parent) 'SpikeElite\Saved\Screenshots\Windows' } else { Join-Path $projectRoot 'Saved\Screenshots\WindowsEditor' }
-$common = '-game -devauto -windowed -ResX=1280 -ResY=720 -unattended -nosplash'
+if ($Width -le 0 -or $Height -le 0) { throw 'Resolution must be positive' }
+$common = "-game -devauto -windowed -ResX=$Width -ResY=$Height -unattended -nosplash"
 foreach ($suite in $Suites) {
     $extra = switch ($suite) {
         'Automation' { '-NullRHI -unattended -nopause -nosplash -ExecCmds="Automation RunTests SpikeElite.Tests; Quit"' }
@@ -20,6 +23,8 @@ foreach ($suite in $Suites) {
         'Quick4242' { "$common -QuickMatch -FastFlow -SEED=4242" }
         'Tactical' { "$common -TacticalTest -QuickMatch -FastFlow -SEED=42" }
         'FiveSet' { "$($common.Replace('-devauto ','')) -FiveSetTest -FastFlow -SEED=42" }
+        'Closeout' { "$common -CloseoutTest -SEED=42" }
+        'Perf' { "$common -PerfSuite -SEED=42" }
         'Rematch' { "$common -RematchStress -QuickMatch -FastFlow -SEED=42" }
         default { throw "Unknown suite $suite" }
     }
@@ -43,10 +48,13 @@ foreach ($suite in $Suites) {
         'Pose' { $contents -match 'DEV POSE SUITE: done' }
         'Tactical' { $contents -match 'DEV TACTICAL TEST: PASS \(failures=0\)' }
         'FiveSet' { $contents -match 'FIVE SET TEST: RESULT=PASS' }
+        'Closeout' { $contents -match 'CLOSEOUT TEST: PASS failures=0' }
+        'Perf' { $contents -match 'PERF SUITE: PASS' }
         'Rematch' { $contents -match 'STRESS.*PASS|Stress.*PASS|REMATCH STRESS:.*done' }
         default { $contents -match 'quitting \(DevVerifyFailures=0\)' }
     }
     $fatal = $contents -match 'Fatal error:|Assertion failed:|Ensure condition failed:'
+    if($suite -eq 'Rematch' -and $contents -match '\[RosterAudit\].*identityValid=0') { $evidence=$false }
     $passed = -not $timeout -and $exitCode -eq 0 -and $evidence -and -not $fatal
     $shots = @(Get-ChildItem -LiteralPath $shotRoot -Filter *.png -ErrorAction SilentlyContinue | Where-Object { $_.LastWriteTime -ge $began } | ForEach-Object { $_.FullName })
     Write-Output "END $suite exit=$exitCode timeout=$timeout evidence=$evidence fatal=$fatal result=$passed shots=$($shots.Count)"
