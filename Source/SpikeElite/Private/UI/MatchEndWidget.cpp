@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: MIT
 #include "UI/MatchEndWidget.h"
 #include "Components/ScrollBox.h"
+#include "Components/HorizontalBox.h"
+#include "Components/HorizontalBoxSlot.h"
 #include "UI/SEUiStyle.h"
 #include "Components/TextBlock.h"
 #include "Components/Button.h"
+#include "Components/ButtonSlot.h"
 #include "Components/Image.h"
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
@@ -74,9 +77,7 @@ void UMatchEndWidget::BuildWidgetTree()
 	Card->SetBrush(SEUiStyle::SolidBrush(FLinearColor(0.025f, 0.055f, 0.10f, 0.90f)));
 	if (UCanvasPanelSlot* S = Root->AddChildToCanvas(Card))
 	{
-		S->SetAnchors(FAnchors(0.5f,0.5f,0.5f,0.5f));
-		S->SetAlignment(FVector2D(0.5f,0.5f));
-		S->SetSize(FVector2D(560.f, 590.f));
+		S->SetAnchors(FAnchors(.09f,.04f,.91f,.96f)); S->SetOffsets(FMargin(0));
 	}
 
 	// Team-colour bands framing the result (M11d-2 victory hierarchy).
@@ -99,24 +100,24 @@ void UMatchEndWidget::BuildWidgetTree()
 	UScrollBox* ResultsScroll=WidgetTree->ConstructWidget<UScrollBox>(); ResultsScroll->AddChild(Col);
 	if (UCanvasPanelSlot* S = Root->AddChildToCanvas(ResultsScroll))
 	{
-		S->SetAnchors(FAnchors(.23f,.08f,.77f,.93f)); S->SetOffsets(FMargin(0));
+		S->SetAnchors(FAnchors(.12f,.06f,.88f,.78f)); S->SetOffsets(FMargin(0));
 	}
 
 	Title = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
 	Title->SetText(FText::FromString(TEXT("比赛结束")));
-	Title->SetFont(SEUiStyle::FontBold(56));
+	Title->SetFont(SEUiStyle::FontBold(32));
 	Title->SetColorAndOpacity(FSlateColor(SEUiStyle::Colors::Gold));
 	Title->SetJustification(ETextJustify::Center);
 	Col->AddChildToVerticalBox(Title);
 
 	WinnerText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
-	WinnerText->SetFont(SEUiStyle::FontBold(38));
+	WinnerText->SetFont(SEUiStyle::FontBold(28));
 	WinnerText->SetColorAndOpacity(FSlateColor(SEUiStyle::Colors::TeamA));
 	WinnerText->SetJustification(ETextJustify::Center);
 	Col->AddChildToVerticalBox(WinnerText);
 
 	SetScoresText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
-	SetScoresText->SetFont(SEUiStyle::Font(20));
+	SetScoresText->SetFont(SEUiStyle::Font(17));
 	SetScoresText->SetColorAndOpacity(FSlateColor(FLinearColor(0.85f, 0.85f, 0.9f)));
 	SetScoresText->SetJustification(ETextJustify::Center);
 	SetScoresText->SetAutoWrapText(true);
@@ -134,9 +135,25 @@ void UMatchEndWidget::BuildWidgetTree()
 	Sp->SetText(FText::FromString(TEXT(" ")));
 	Col->AddChildToVerticalBox(Sp);
 
-	BtnRematch  = MakeMatchEndBtn(WidgetTree, Col, TEXT("再来一场"), SEUiStyle::PrimaryButton(), 26);
-	BtnMainMenu = MakeMatchEndBtn(WidgetTree, Col, TEXT("返回主菜单"), SEUiStyle::SecondaryButton(), 22);
-	BtnQuit     = MakeMatchEndBtn(WidgetTree, Col, TEXT("退出到桌面"), SEUiStyle::DangerButton(), 22);
+	// Actions stay visible even when all 24 players have statistics.
+	auto* Footer=WidgetTree->ConstructWidget<UHorizontalBox>();
+	if(auto* S=Root->AddChildToCanvas(Footer)) { S->SetAnchors(FAnchors(.12f,.81f,.88f,.94f)); S->SetOffsets(FMargin(0)); }
+	auto AddAction=[&](const TCHAR* Label,const FButtonStyle& Style)
+	{
+		auto* B=WidgetTree->ConstructWidget<UButton>(); B->SetStyle(Style);
+		auto* T=WidgetTree->ConstructWidget<UTextBlock>(); T->SetText(FText::FromString(Label)); T->SetFont(SEUiStyle::Font(18)); T->SetAutoWrapText(true); T->SetJustification(ETextJustify::Center); T->SetColorAndOpacity(FLinearColor::White); B->AddChild(T);
+		if(auto* ContentSlot=Cast<UButtonSlot>(T->Slot)) ContentSlot->SetHorizontalAlignment(HAlign_Fill);
+		auto* S=Footer->AddChildToHorizontalBox(B); S->SetSize(FSlateChildSize(ESlateSizeRule::Fill)); S->SetPadding(FMargin(4)); return B;
+	};
+	BtnRematch=AddAction(TEXT("再来一场"),SEUiStyle::PrimaryButton()); BtnMainMenu=AddAction(TEXT("返回主菜单"),SEUiStyle::SecondaryButton()); BtnQuit=AddAction(TEXT("退出到桌面"),SEUiStyle::DangerButton());
+}
+
+void UMatchEndWidget::NativeTick(const FGeometry& G,float Dt)
+{
+	Super::NativeTick(G,Dt);
+	const float W=FMath::Max(100.f,G.GetLocalSize().X*.76f-30.f);
+	if(StatsText) StatsText->SetWrapTextAt(W);
+	if(SetScoresText) SetScoresText->SetWrapTextAt(W);
 }
 
 void UMatchEndWidget::NativeConstruct()
@@ -190,7 +207,7 @@ void UMatchEndWidget::SetResult(EVolleyballTeam Winner, const TArray<int32>& Sco
 			{
 				const SEVolleyballRules::FPlayerMatchStats& St = S[i];
 				if (St.Receives + St.Sets + St.Attacks + St.Digs + St.Blocks + St.ServeAttempts + St.ServeAces + St.ServeErrors == 0) { continue; }
-				Lines += FString::Printf(TEXT("#%d %s 一传%d 二传%d 扣球%d(%d分/%d失) 拦网%d(%d分) 救球%d 发球%d次(%d分/%d失)\n"),
+				Lines += FString::Printf(TEXT("#%d %s\n一传%d  二传%d  扣球%d（%d分/%d失）\n拦网%d（%d分）  救球%d  发球%d（%d分/%d失）\n\n"),
 					R[i].JerseyNumber, *R[i].DisplayName,
 					St.Receives, St.Sets, St.Attacks, St.AttackWins, St.AttackErrors,
 					St.Blocks, St.BlockWins, St.Digs, St.ServeAttempts, St.ServeAces, St.ServeErrors);

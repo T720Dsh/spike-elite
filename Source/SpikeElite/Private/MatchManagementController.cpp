@@ -10,6 +10,7 @@
 void ASpikeElitePlayerController::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+	RefreshMatchInteraction();
 	ManagementRefreshTimer+=DeltaSeconds;
 	if(ManagementRefreshTimer>.25f) { ManagementRefreshTimer=0; RefreshCoachPanel(); }
 }

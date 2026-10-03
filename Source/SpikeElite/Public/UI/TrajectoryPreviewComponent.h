@@ -23,7 +23,9 @@ public:
 	UTrajectoryPreviewComponent();
 
 	/** Recompute and lay out the dotted flight for the given intent. */
-	void ShowPreview(const FVector& Start, const FVector& InitialVelocity);
+	void ShowPreview(const FVector& Start, const FVector& InitialVelocity, bool bWhiteServe = false);
+	int32 GetVisibleDotCount() const;
+	int32 GetRenderedDotCount() const;
 
 	/** Hide all pooled dots and the landing marker. */
 	void HidePreview();
@@ -36,9 +38,10 @@ protected:
 
 	UPROPERTY()
 	TObjectPtr<UStaticMeshComponent> LandingMarker;
+	UPROPERTY() TObjectPtr<UStaticMeshComponent> DirectionArrow;
 
 	UPROPERTY()
 	TObjectPtr<UMaterialInstanceDynamic> DotMID;
 
-	int32 MaxDots = 15;
+	int32 MaxDots = 40;
 };

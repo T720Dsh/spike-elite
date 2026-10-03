@@ -24,6 +24,7 @@ foreach ($suite in $Suites) {
         'Tactical' { "$common -TacticalTest -QuickMatch -FastFlow -SEED=42" }
         'FiveSet' { "$($common.Replace('-devauto ','')) -FiveSetTest -FastFlow -SEED=42" }
         'Closeout' { "$common -CloseoutTest -SEED=42" }
+        'Playability' { "$common -PlayabilityTest -SEED=42" }
         'Perf' { "$common -PerfSuite -SEED=42" }
         'Rematch' { "$common -RematchStress -QuickMatch -FastFlow -SEED=42" }
         default { throw "Unknown suite $suite" }
@@ -49,6 +50,7 @@ foreach ($suite in $Suites) {
         'Tactical' { $contents -match 'DEV TACTICAL TEST: PASS \(failures=0\)' }
         'FiveSet' { $contents -match 'FIVE SET TEST: RESULT=PASS' }
         'Closeout' { $contents -match 'CLOSEOUT TEST: PASS failures=0' }
+        'Playability' { $contents -match 'PLAYABILITY TEST: PASS failures=0' }
         'Perf' { $contents -match 'PERF SUITE: PASS' }
         'Rematch' { $contents -match 'STRESS.*PASS|Stress.*PASS|REMATCH STRESS:.*done' }
         default { $contents -match 'quitting \(DevVerifyFailures=0\)' }

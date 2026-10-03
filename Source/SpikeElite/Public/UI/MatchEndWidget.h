@@ -26,6 +26,7 @@ public:
 	UMatchEndWidget(const FObjectInitializer& ObjectInitializer);
 	virtual TSharedRef<SWidget> RebuildWidget() override;
 	virtual void NativeConstruct() override;
+	virtual void NativeTick(const FGeometry& Geometry, float DeltaTime) override;
 
 	DECLARE_DELEGATE(FOnMenuAction);
 	FOnMenuAction OnRematch;

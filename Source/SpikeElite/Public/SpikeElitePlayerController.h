@@ -20,6 +20,7 @@ class UCoachPanelWidget;
 class UServeIntroWidget;
 class UTeamRosterWidget;
 class UMatchEventWidget;
+class UMatchActionWidget;
 
 UENUM(BlueprintType)
 enum class EMenuState : uint8
@@ -57,6 +58,17 @@ public:
 	void CloseRoster();
 	void StartPreparedMatch();
 	void SwitchControlledPlayer();
+	void ToggleMatchMouse();
+	void RefreshMatchInteraction();
+	void RestoreGameplayInput();
+	bool IsServeAiming() const { return bServeAiming; }
+	bool IsMatchMouseActive() const { return bMatchMouse || bServeAiming; }
+	FVector GetServeAimVelocity(const FVector& Start, int32 TeamSide) const;
+	void DragServeAim(const FVector2D& Delta);
+	void PickServeTarget(const FVector2D& ScreenPosition);
+	void PerformMatchAction(int32 Action);
+	float ServeArc = 220.f;
+	FVector ServeTarget = FVector(-600,0,0);
 
 	/** Called by GameMode once the match world is ready (or nullptr on cleanup). */
 	void OnMatchStarted(UScoreboardWidget* InScoreboard);
@@ -166,6 +178,14 @@ public:
 protected:
 	UPROPERTY() TObjectPtr<UTeamRosterWidget> RosterMenu;
 	UPROPERTY() TObjectPtr<UMatchEventWidget> EventHUD;
+	UPROPERTY() TObjectPtr<UMatchActionWidget> MatchActions;
+	UPROPERTY() TObjectPtr<UTrajectoryPreviewComponent> ServePreview;
+	UPROPERTY() TObjectPtr<class ACameraActor> ServeAimCamera;
+	UPROPERTY() TObjectPtr<AActor> BeforeServeView;
+	void ReleaseServeCamera();
+	bool bMatchMouse = false;
+	bool bServeAiming = false;
+	bool bServeMouseHidden = false;
 	FMatchModeConfig PendingMode;
 	float ManagementRefreshTimer=0.f;
 	UPROPERTY() TObjectPtr<UMainMenuWidget> MainMenu;
@@ -235,6 +255,7 @@ protected:
 	void DevPoseSuite();
 	void DevArtSuite();
 	void DevCloseoutTest();
+	void DevPlayabilityTest();
 	void DevPerfSuite();
 	/** Request a named high-resolution screenshot (runs even while paused). */
 	void DevShot(const FString& Name);

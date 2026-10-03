@@ -2,6 +2,8 @@
 #include "SpikeEliteCharacter.h"
 #include "SpikeEliteGameMode.h"
 #include "SpikeElitePlayerController.h"
+#include "Volleyball/VolleyballBall.h"
+#include "Volleyball/ContactAnimation.h"
 #include "SEMaterials.h"
 #include "SEArtGeometry.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -560,6 +562,7 @@ void ASpikeEliteCharacter::MoveRight(float Value)
 void ASpikeEliteCharacter::TurnRate(float Value)
 {
 	if (!CanUsePlayerInput()) return;
+	if(const auto* PC=Cast<ASpikeElitePlayerController>(Controller); PC && PC->bShowMouseCursor) return;
 	if (Controller)
 	{
 		AddControllerYawInput(Value * LookSensitivity * 100.f * GetWorld()->GetDeltaSeconds());
@@ -569,6 +572,7 @@ void ASpikeEliteCharacter::TurnRate(float Value)
 void ASpikeEliteCharacter::LookUpRate(float Value)
 {
 	if (!CanUsePlayerInput()) return;
+	if(const auto* PC=Cast<ASpikeElitePlayerController>(Controller); PC && PC->bShowMouseCursor) return;
 	if (Controller)
 	{
 		AddControllerPitchInput(Value * LookSensitivity * 100.f * GetWorld()->GetDeltaSeconds());
@@ -646,7 +650,8 @@ void ASpikeEliteCharacter::StopRaiseHands()
 void ASpikeEliteCharacter::NotifyContact(EBallTouchType Type)
 {
 	LastContactType = Type;
-	ContactPoseTimer = (Type == EBallTouchType::Attack) ? 0.5f : 0.45f;
+	ContactPoseTimer = SEContactAnimation::Duration;
+	ContactPreparation = 0.f;
 }
 
 // ---------------- M11b-3: procedural animation ----------------
@@ -678,6 +683,22 @@ void ASpikeEliteCharacter::UpdateProceduralAnimation(float DeltaSeconds)
 		ContactPoseTimer -= DeltaSeconds;
 		if (ContactPoseTimer < 0.f) ContactPoseTimer = 0.f;
 	}
+	// Anticipation is visual only: never touches the ball or changes reach/physics.
+	float Ready=0.f;
+	if(!bOffCourt && !bCeremonyWalking && ContactPoseTimer<=0 && !IsDiving() && !IsDiveRecovering())
+	{
+		if(auto* GM=GetWorld()->GetAuthGameMode<ASpikeEliteGameMode>(); GM && GM->GetBall())
+		{
+			if(bServiceZoneActive && GM->MatchState==EMatchState::ServingToss) { PreparationType=EBallTouchType::Serve; Ready=1.f; }
+			else if(GM->MatchState==EMatchState::Rally && GM->CanTouchBall(this))
+			{
+				const float Distance=FVector::Dist(GetActorLocation()+FVector(0,0,65),GM->GetBall()->GetActorLocation());
+				Ready=FMath::Clamp((400.f-Distance)/250.f,0.f,1.f);
+				PreparationType=GM->GetTouchCount()==0?EBallTouchType::Receive:GM->GetTouchCount()==1?EBallTouchType::Set:EBallTouchType::Attack;
+			}
+		}
+	}
+	ContactPreparation=FMath::FInterpTo(ContactPreparation,Ready,DeltaSeconds,12.f);
 
 	// Walk/run cycle phase advances with speed.
 	const float Speed = AnimationMoveSpeed;
@@ -721,6 +742,10 @@ EAnimPose ASpikeEliteCharacter::ResolvePose(float DeltaSeconds)
 	const float Speed = AnimationMoveSpeed;
 
 	// Contact poses (short window after a real touch) beat locomotion.
+	// A dive save must still finish its grounded recovery, rather than being
+	// replaced by an upright receiving animation after the ball has left.
+	if(DiveState.IsActive() || DiveState.Phase==SEVolleyballRules::FVolleyballDiveState::EPhase::Approach) return EAnimPose::Dive;
+	if(DiveState.IsRecovering()) return EAnimPose::Recover;
 	if (ContactPoseTimer > 0.f)
 	{
 		switch (LastContactType)
@@ -742,6 +767,10 @@ EAnimPose ASpikeEliteCharacter::ResolvePose(float DeltaSeconds)
 		return EAnimPose::Dive;
 	}
 	if (DiveState.IsRecovering()) return EAnimPose::Recover;
+	if(ContactPreparation>.05f)
+	{
+		switch(PreparationType) { case EBallTouchType::Serve:return EAnimPose::Serve; case EBallTouchType::Attack:return EAnimPose::Spike; case EBallTouchType::Set:return EAnimPose::Set; default:return EAnimPose::Receive; }
+	}
 
 	// Raise hands: overhead while airborne (block prep), high otherwise.
 	if (RaiseHandsAmount > 0.05f)
@@ -757,7 +786,7 @@ EAnimPose ASpikeEliteCharacter::ResolvePose(float DeltaSeconds)
 void ASpikeEliteCharacter::ApplyPose(EAnimPose Pose, float DeltaSeconds)
 {
 	// Smoothing rate so poses never snap (walks back to idle naturally).
-	const float Blend = FMath::Clamp(DeltaSeconds * 10.f, 0.f, 1.f);
+	const float Blend = 1.f-FMath::Exp(-DeltaSeconds*18.f);
 	const float Slow = FMath::Clamp(DeltaSeconds * 6.f, 0.f, 1.f);
 
 	auto Lerp = [Blend](USceneComponent* Comp, const FRotator& Target)
@@ -776,7 +805,7 @@ void ASpikeEliteCharacter::ApplyPose(EAnimPose Pose, float DeltaSeconds)
 	auto LerpLoc = [Blend](USceneComponent* Comp, const FVector& Target)
 	{
 		if (!Comp) return;
-		Comp->SetRelativeLocation(FMath::VInterpTo(Comp->GetRelativeLocation(), Target, 1.f, Blend * 8.f));
+		Comp->SetRelativeLocation(FMath::Lerp(Comp->GetRelativeLocation(), Target, Blend));
 	};
 
 	const FVector StandHeight(0.f, 0.f, 20.f);
@@ -995,6 +1024,36 @@ void ASpikeEliteCharacter::ApplyPose(EAnimPose Pose, float DeltaSeconds)
 	}
 	}
 
+	// Continuous preparation -> impact -> follow-through -> recovery. Contact starts
+	// at impact (not at wind-up); development static pose pins remain unchanged.
+	bool bAnimateContact=ContactPoseTimer>0 || ContactPreparation>.05f;
+#if WITH_DEV_AUTOMATION_TESTS
+	if(bDevPoseOverride) bAnimateContact=false;
+#endif
+	if(bAnimateContact && (Pose==EAnimPose::Receive || Pose==EAnimPose::Set || Pose==EAnimPose::Spike || Pose==EAnimPose::Serve))
+	{
+		const float P=ContactPoseTimer>0 ? SEContactAnimation::ProgressAfterContact(ContactPoseTimer) : ContactPreparation*.28f;
+		auto C=[P](float A,float B,float D,float E){return SEContactAnimation::Curve(P,A,B,D,E);};
+		if(Pose==EAnimPose::Receive)
+		{
+			SL=SR=FRotator(C(65,100,112,5),0,0); EL=ER=FRotator(C(-18,0,0,3),0,0);
+			HL=HR=FRotator(C(38,30,16,0),0,0); KL=KR=FRotator(C(-55,-40,-18,0),0,0); T=FRotator(C(-24,-15,-5,0),0,0);
+			TorsoLoc.Z=C(4,10,18,20);
+		}
+		else if(Pose==EAnimPose::Set)
+		{
+			SL=SR=FRotator(C(135,170,180,5),0,0); EL=ER=FRotator(C(35,10,0,3),0,0);
+			HL=HR=FRotator(C(20,12,0,0),0,0); KL=KR=FRotator(C(-38,-20,0,0),0,0); T=FRotator(C(-8,-3,3,0),0,0); TorsoLoc.Z=C(8,18,22,20);
+		}
+		else
+		{
+			// Raising along the forward half-circle avoids quaternion shortest-path
+			// flips caused by switching directly from -110 to +150 degrees.
+			SR=FRotator(C(225,170,70,5),0,0); ER=FRotator(C(-65,0,-20,3),0,0);
+			SL=FRotator(C(110,70,25,5),0,0); EL=FRotator(C(-20,-10,-15,3),0,0);
+			T=FRotator(C(12,-4,-16,0),0,0); HL=HR=FRotator(C(-12,0,12,0),0,0); KL=KR=FRotator(C(-25,-15,-12,0),0,0);
+		}
+	}
 	if (bOffCourt && !bCeremonyWalking)
 	{
 		HL=HR=FRotator(90,0,0); KL=KR=FRotator(-90,0,0);

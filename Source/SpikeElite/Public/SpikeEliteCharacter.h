@@ -251,6 +251,8 @@ protected:
 
 	/** Seconds since the last successful touch (drives short contact poses). */
 	float ContactPoseTimer = 0.f;
+	float ContactPreparation = 0.f;
+	EBallTouchType PreparationType = EBallTouchType::Unknown;
 	/** Local swing phase for the run cycle (radians). */
 	float RunPhase = 0.f;
 

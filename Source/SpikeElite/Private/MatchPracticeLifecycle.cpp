@@ -72,7 +72,7 @@ void ASpikeEliteGameMode::StartTrainingAttempt()
 	{ if(PC->Tactical) { PC->Tactical->CancelShot(); PC->Tactical->TacticalMode=2; } PC->HideServeIntro(); }
 	++TrainingAttempts; TrainingPlayerTouches=0; bTrainingWaiting=false; TrainingTimer=16.f;
 	TrainingFeedback=TEXT("完成触球并把球送入金色目标区；R 重试，Esc 退出/暂停。");
-	if(MatchModeConfig.Drill==ETrainingDrill::ServePlacement) TrainingFeedback=TEXT("鼠标左右调整落点、上下调整深度；白色虚线为预览，E 跳过介绍/发球，R 重试。");
+	if(MatchModeConfig.Drill==ETrainingDrill::ServePlacement) TrainingFeedback=TEXT("点击对方场地选落点，左键上下拖动调弧度；E 发球，Alt 鼠标操作，R 重试。");
 	RespawnPlayersToPositions();
 	for(auto& C : TeamAPlayers) if(C) { C->bTouchArmed=true; C->bIsPrimaryHandler=false; C->AIBehavior=EAIBehavior::Wait; }
 	for(auto& C : TeamBPlayers) if(C) { C->bTouchArmed=true; C->bIsPrimaryHandler=false; C->AIBehavior=EAIBehavior::Wait; }
@@ -83,10 +83,6 @@ void ASpikeEliteGameMode::StartTrainingAttempt()
 		TrainingMarker=GetWorld()->SpawnActor<AActor>();
 		auto* Root=NewObject<USceneComponent>(TrainingMarker); TrainingMarker->SetRootComponent(Root); Root->RegisterComponent();
 		UStaticMesh* Cube=LoadObject<UStaticMesh>(nullptr,TEXT("/Engine/BasicShapes/Cube.Cube"));
-		TrainingPreview=NewObject<UInstancedStaticMeshComponent>(TrainingMarker); TrainingPreview->SetupAttachment(Root);
-		TrainingPreview->SetStaticMesh(LoadObject<UStaticMesh>(nullptr,TEXT("/Engine/BasicShapes/Sphere.Sphere")));
-		TrainingPreview->SetCollisionEnabled(ECollisionEnabled::NoCollision); TrainingPreview->SetCastShadow(false);
-		TrainingPreview->SetMaterial(0,SEMaterials::MakeSurface(TrainingPreview,FLinearColor(.95f,.98f,1.f),.9f)); TrainingPreview->RegisterComponent();
 		for(int32 I=0;I<4;++I)
 		{
 			auto* Bar=NewObject<UStaticMeshComponent>(TrainingMarker); Bar->SetupAttachment(Root); Bar->SetStaticMesh(Cube);
@@ -135,18 +131,7 @@ void ASpikeEliteGameMode::FinishTrainingAttempt(bool bSuccess,const FString& Rea
 
 void ASpikeEliteGameMode::TickTraining(float Dt)
 {
-	if(TrainingPreview)
-	{
-		TrainingPreview->ClearInstances();
-		if(MatchModeConfig.Drill==ETrainingDrill::ServePlacement && MatchState==EMatchState::ServiceAuthorized)
-		{
-			const auto* PC=UGameplayStatics::GetPlayerController(this,0);
-			const FVector Start=Ball->GetActorLocation();
-			const FVector Velocity=SEPractice::ServeVelocity(Start,PC?PC->GetControlRotation():FRotator(-12,180,0));
-			const auto Preview=SEVolleyballTrajectory::Predict(Start,Velocity);
-			for(int32 I=0;I<Preview.Points.Num();I+=4) TrainingPreview->AddInstance(FTransform(FQuat::Identity,Preview.Points[I].Location,FVector(.04f)),true);
-		}
-	}
+	// Serve trajectory is pooled by the controller and shared with normal matches.
 	TrainingTimer-=Dt;
 	if(TrainingTimer<=0)
 	{

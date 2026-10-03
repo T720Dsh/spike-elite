@@ -13,6 +13,9 @@ UTrajectoryPreviewComponent::UTrajectoryPreviewComponent()
 void UTrajectoryPreviewComponent::BeginPlay()
 {
 	Super::BeginPlay();
+	// Controllers are hidden actors by default. Pooled mesh components owned by
+	// a controller must not inherit that flag (component visibility alone is insufficient).
+	if(AActor* Owner=GetOwner()) Owner->SetActorHiddenInGame(false);
 
 	// Runtime load (BeginPlay is outside any constructor, so ConstructorHelpers
 	// object finders are not allowed here).
@@ -20,6 +23,7 @@ void UTrajectoryPreviewComponent::BeginPlay()
 	UStaticMesh* CylinderMesh = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
 
 	const FLinearColor White(1.f, 1.f, 1.f, 1.f);
+	DotMID = SEMaterials::MakeTint(this, White);
 
 	// Pool the dots once.
 	for (int32 i = 0; i < MaxDots; ++i)
@@ -29,8 +33,8 @@ void UTrajectoryPreviewComponent::BeginPlay()
 		Dot->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 		Dot->SetRelativeScale3D(FVector(0.07f, 0.07f, 0.07f));
 		if (SphereMesh) { Dot->SetStaticMesh(SphereMesh); }
-		UMaterialInstanceDynamic* MID = SEMaterials::MakeTint(this, White);
-		if (MID) { Dot->SetMaterial(0, MID); DotMID = MID; }
+		if (DotMID) { Dot->SetMaterial(0, DotMID); }
+		Dot->SetCastShadow(false);
 		Dot->RegisterComponent();
 		Dot->SetVisibility(false);
 		Dots.Add(Dot);
@@ -47,9 +51,17 @@ void UTrajectoryPreviewComponent::BeginPlay()
 	}
 	LandingMarker->RegisterComponent();
 	LandingMarker->SetVisibility(false);
+	DirectionArrow = NewObject<UStaticMeshComponent>(this);
+	DirectionArrow->SetupAttachment(this);
+	DirectionArrow->SetStaticMesh(LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cone.Cone")));
+	DirectionArrow->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	DirectionArrow->SetCastShadow(false);
+	DirectionArrow->SetMaterial(0, DotMID);
+	DirectionArrow->RegisterComponent();
+	DirectionArrow->SetVisibility(false);
 }
 
-void UTrajectoryPreviewComponent::ShowPreview(const FVector& Start, const FVector& InitialVelocity)
+void UTrajectoryPreviewComponent::ShowPreview(const FVector& Start, const FVector& InitialVelocity, bool bWhiteServe)
 {
 	const SEVolleyballTrajectory::FTrajectoryResult Result = SEVolleyballTrajectory::Predict(Start, InitialVelocity);
 
@@ -65,6 +77,7 @@ void UTrajectoryPreviewComponent::ShowPreview(const FVector& Start, const FVecto
 		Color = FLinearColor(0.95f, 0.65f, 0.1f);
 	}
 
+	if (bWhiteServe) Color = FLinearColor::White;
 	if (DotMID)
 	{
 		DotMID->SetVectorParameterValue(TEXT("Color"), Color);
@@ -73,7 +86,7 @@ void UTrajectoryPreviewComponent::ShowPreview(const FVector& Start, const FVecto
 	// Lay dots along the sampled points (skip some for readability).
 	const int32 Total = Result.Points.Num();
 	const int32 Count = FMath::Min(MaxDots, Total);
-	int32 ShowIdx = 0;
+	int32 ShowIdx = -1;
 	for (int32 i = 0; i < Count; ++i)
 	{
 		const int32 Idx = (Total > 1) ? (i * (Total - 1)) / FMath::Max(1, Count - 1) : 0;
@@ -81,6 +94,12 @@ void UTrajectoryPreviewComponent::ShowPreview(const FVector& Start, const FVecto
 		if (Dots.IsValidIndex(i) && Result.Points.IsValidIndex(Idx))
 		{
 			Dots[i]->SetWorldLocation(Result.Points[Idx].Location);
+			Dots[i]->SetWorldScale3D(bWhiteServe ? FVector(.065f,.065f,.24f) : FVector(.07f));
+			if(bWhiteServe && Total>1)
+			{
+				const int32 Next=FMath::Min(Idx+1,Total-1),Previous=FMath::Max(0,Idx-1);
+				Dots[i]->SetWorldRotation(FRotationMatrix::MakeFromZ(Result.Points[Next].Location-Result.Points[Previous].Location).Rotator());
+			}
 			Dots[i]->SetVisibility(true);
 		}
 	}
@@ -95,6 +114,31 @@ void UTrajectoryPreviewComponent::ShowPreview(const FVector& Start, const FVecto
 		LandingMarker->SetWorldLocation(FVector(Result.Landing.X, Result.Landing.Y, SEVolleyballTrajectory::GroundZ + 2.f));
 		LandingMarker->SetVisibility(true);
 	}
+	if (DirectionArrow)
+	{
+		DirectionArrow->SetVisibility(bWhiteServe && Total > 2);
+		if (Total > 2)
+		{
+			const int32 Tip = FMath::Max(2, Total - 4);
+			const FVector Direction = (Result.Points[Tip].Location - Result.Points[Tip-2].Location).GetSafeNormal();
+			DirectionArrow->SetWorldLocation(Result.Points[Tip].Location);
+			DirectionArrow->SetWorldRotation(FRotationMatrix::MakeFromZ(Direction).Rotator());
+			DirectionArrow->SetWorldScale3D(FVector(.32f,.32f,.65f));
+		}
+	}
+}
+
+int32 UTrajectoryPreviewComponent::GetVisibleDotCount() const
+{
+	if(GetOwner() && GetOwner()->IsHidden()) return 0;
+	int32 Count=0; for (const auto& Dot : Dots) if (Dot && Dot->IsVisible()) ++Count;
+	return Count;
+}
+
+int32 UTrajectoryPreviewComponent::GetRenderedDotCount() const
+{
+	int32 Count=0; for(const auto& Dot:Dots) if(Dot && Dot->IsVisible() && Dot->WasRecentlyRendered(.5f)) ++Count;
+	return Count;
 }
 
 void UTrajectoryPreviewComponent::HidePreview()
@@ -104,5 +148,6 @@ void UTrajectoryPreviewComponent::HidePreview()
 		if (Dot) Dot->SetVisibility(false);
 	}
 	if (LandingMarker) LandingMarker->SetVisibility(false);
+	if (DirectionArrow) DirectionArrow->SetVisibility(false);
 }
 

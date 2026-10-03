@@ -1368,10 +1368,14 @@ bool ASpikeEliteGameMode::RequestServe(ASpikeEliteCharacter* Server)
 		}
 	}
 	TossTimer = 0.6f;
-	if(MatchModeConfig.Mode==EGameModeChoice::Training && MatchModeConfig.Drill==ETrainingDrill::ServePlacement && !Server->bIsBot)
+	if(!Server->bIsBot)
 	{
-		const FVector Velocity=SEPractice::ServeVelocity(Ball->GetActorLocation(),Server->GetControlRotation());
-		TossDir=Velocity.GetSafeNormal(); TossPower=Velocity.Size();
+		if(const auto* PC=Cast<ASpikeElitePlayerController>(Server->GetController()))
+		{
+			// Freeze the exact preview solution at toss start. No second solver or hidden random error.
+			const FVector Velocity=PC->GetServeAimVelocity(Ball->GetActorLocation(),Server->TeamSide);
+			TossDir=Velocity.GetSafeNormal(); TossPower=Velocity.Size();
+		}
 	}
 	bInToss = true;
 	ServerPlayerIndex = GetPlayerIndex(Team, Server);

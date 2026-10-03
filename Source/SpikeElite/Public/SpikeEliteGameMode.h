@@ -91,6 +91,7 @@ public:
 	bool ValidateRuntimeRoster(FString& Reason) const;
 	#if !UE_BUILD_SHIPPING
 	bool DevManagementChecks(FString& Failures);
+	void DevPrepareHumanServe();
 	#endif
 	void ResetFlightTracking();
 

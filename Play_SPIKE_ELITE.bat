@@ -1,12 +1,13 @@
 @echo off
 REM ============================================================
 REM  SPIKE ELITE - launcher
-REM  Prefer the verified M11h Codex gameplay build; retain older fallbacks.
+REM  Prefer the verified M11i playability build; retain older fallbacks.
 REM  --editor opts into Unreal Editor game mode (developer).
 REM ============================================================
 cd /d "%~dp0"
 
-set "PACKAGED=%~dp0Dist\M11h-Codex\Windows\SpikeElite.exe"
+set "PACKAGED=%~dp0Dist\M11i-Codex\Windows\SpikeElite.exe"
+if not exist "%PACKAGED%" set "PACKAGED=%~dp0Dist\M11h-Codex\Windows\SpikeElite.exe"
 if not exist "%PACKAGED%" set "PACKAGED=%~dp0Dist\M11h\Windows\SpikeElite.exe"
 if not exist "%PACKAGED%" set "PACKAGED=%~dp0Dist\M11g\Windows\SpikeElite.exe"
 if not exist "%PACKAGED%" set "PACKAGED=%~dp0Dist\Windows\SpikeElite.exe"

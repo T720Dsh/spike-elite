@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include "SpikeElitePlayerController.h"
+#include "UI/MatchActionWidget.h"
+#include "UI/TrajectoryPreviewComponent.h"
 #include "Volleyball/VolleyballBall.h"
 #include "UI/MainMenuWidget.h"
 #include "UI/ModeSelectWidget.h"
@@ -145,6 +147,7 @@ void ASpikeElitePlayerController::DevViewPlayer()
 
 void ASpikeElitePlayerController::DevAutoStart()
 {
+	if(FParse::Param(FCommandLine::Get(),TEXT("PlayabilityTest"))) { DevPlayabilityTest(); return; }
 	if(FParse::Param(FCommandLine::Get(),TEXT("CloseoutTest"))) { DevCloseoutTest(); return; }
 	if(FParse::Param(FCommandLine::Get(),TEXT("PerfSuite"))) { DevPerfSuite(); return; }
 	if (FParse::Param(FCommandLine::Get(), TEXT("ArtSuite")))
@@ -1465,6 +1468,8 @@ void ASpikeElitePlayerController::SetupInputComponent()
 		InputComponent->BindAction(TEXT("ToggleCoach"), IE_Pressed, this, &ASpikeElitePlayerController::ToggleCoachPanel);
 	CoachBind.bExecuteWhenPaused = true;
 	InputComponent->BindKey(EKeys::R,IE_Pressed,this,&ASpikeElitePlayerController::SwitchControlledPlayer);
+	InputComponent->BindKey(EKeys::LeftAlt,IE_Pressed,this,&ASpikeElitePlayerController::ToggleMatchMouse);
+	InputComponent->BindKey(EKeys::RightAlt,IE_Pressed,this,&ASpikeElitePlayerController::ToggleMatchMouse);
 }
 
 void ASpikeElitePlayerController::OnToggleRotation()
@@ -1741,6 +1746,11 @@ void ASpikeElitePlayerController::SetUIInputMode(UUserWidget* FocusWidget)
 
 void ASpikeElitePlayerController::HideAllMenus()
 {
+	ReleaseServeCamera();
+	bMatchMouse=false; bServeAiming=false; bServeMouseHidden=false;
+	ServeTarget=FVector(-600,0,0); ServeArc=220.f;
+	if(MatchActions) { MatchActions->RemoveFromParent(); MatchActions=nullptr; }
+	if(ServePreview) ServePreview->HidePreview();
 	if(EventHUD) { EventHUD->RemoveFromParent(); EventHUD=nullptr; }
 	if(RosterMenu) { RosterMenu->RemoveFromParent(); RosterMenu=nullptr; }
 	if(CoachPanel) { CoachPanel->RemoveFromParent(); CoachPanel=nullptr; }
@@ -1867,6 +1877,7 @@ void ASpikeElitePlayerController::PauseGame()
 {
 	if (MenuState != EMenuState::Playing) return;
 	MenuState = EMenuState::Paused;
+	RefreshMatchInteraction();
 	SetPause(true);
 	BuildPauseMenu();
 	SetUIInputMode(PauseMenu);
@@ -1917,6 +1928,7 @@ void ASpikeElitePlayerController::OnMatchOver(const TArray<int32>& ScoresA, cons
 	// (buttons/mouse/keyboard are driven by this controller, not the world tick).
 	SetPause(true);
 	MenuState = EMenuState::MatchOver;
+	RefreshMatchInteraction();
 	// The result card is a final broadcast state, not another modal stacked on
 	// top of live match instrumentation.  Hiding these also prevents a stale
 	// score/rotation readout from competing with the final per-set result.

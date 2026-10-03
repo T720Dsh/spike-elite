@@ -3,6 +3,7 @@
 #include "UI/SEUiStyle.h"
 #include "UI/FocusableButton.h"
 #include "Components/TextBlock.h"
+#include "Components/ScrollBox.h"
 #include "Components/Button.h"
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
@@ -34,11 +35,10 @@ void UPauseMenuWidget::BuildWidgetTree()
 	if (auto* S = Root->AddChildToCanvas(Dim)) { S->SetAnchors(FAnchors(0,0,1,1)); S->SetOffsets(FMargin(0)); }
 
 	UVerticalBox* Col = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass());
-	if (auto* S = Root->AddChildToCanvas(Col))
+	auto* Scroll=WidgetTree->ConstructWidget<UScrollBox>(); Scroll->AddChild(Col);
+	if (auto* S = Root->AddChildToCanvas(Scroll))
 	{
-		S->SetAnchors(FAnchors(0.5f,0.5f,0.5f,0.5f));
-		S->SetAlignment(FVector2D(0.5f,0.5f));
-		S->SetAutoSize(true);
+		S->SetAnchors(FAnchors(.12f,.08f,.88f,.94f)); S->SetOffsets(FMargin(0));
 	}
 
 	UTextBlock* Title = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
@@ -84,14 +84,21 @@ void UPauseMenuWidget::BuildWidgetTree()
 	HelpText->SetFont(SEUiStyle::Font(16));
 	HelpText->SetColorAndOpacity(FSlateColor(FLinearColor(0.8f,0.85f,0.9f)));
 	HelpText->SetJustification(ETextJustify::Center);
+	HelpText->SetAutoWrapText(true);
 	HelpText->SetText(FText::FromString(
-		TEXT("WASD 移动 · 空格 跳 · 左键 击球 · 右键 抬手 · E 发球 · C/V 切视角 · Esc 暂停")));
+		TEXT("WASD 移动 · 空格 跳跃 · 左键 击球 · 右键 抬手\nE 发球/跳过介绍 · C/V 切视角 · R 切换球员\nAlt 显示/收起鼠标操作面板 · Tab 教练与换人 · Esc 暂停\n发球：点击对方场地选择落点，左键上下拖动调整弧度。\n战术慢动作：鼠标选择球路与战术，确认后择机击球。")));
 	HelpText->SetVisibility(ESlateVisibility::Collapsed);
 	if (UVerticalBoxSlot* V = Col->AddChildToVerticalBox(HelpText))
 	{
 		V->SetPadding(FMargin(0.f, 10.f));
-		V->SetHorizontalAlignment(HAlign_Center);
+		V->SetHorizontalAlignment(HAlign_Fill);
 	}
+}
+
+void UPauseMenuWidget::NativeTick(const FGeometry& G,float Dt)
+{
+	Super::NativeTick(G,Dt);
+	if(HelpText) HelpText->SetWrapTextAt(FMath::Max(100.f,G.GetLocalSize().X*.76f-30.f));
 }
 
 void UPauseMenuWidget::NativeConstruct()

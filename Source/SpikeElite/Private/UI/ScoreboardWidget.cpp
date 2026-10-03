@@ -118,6 +118,8 @@ void UScoreboardWidget::BuildWidgetTree()
 
 	Text_ServeHint = MakeText(WidgetTree, Root, 14, SEUiStyle::Colors::Gold,
 		FAnchors(0.5f, 0.f, 0.5f, 0.f), FVector2D(0.f, 139.f), FVector2D(0.5f, 0.f));
+	Text_ServeHint->SetAutoWrapText(true);
+	if(auto* S=Cast<UCanvasPanelSlot>(Text_ServeHint->Slot)) { S->SetAutoSize(false); S->SetAnchors(FAnchors(.18f,0,.82f,0)); S->SetOffsets(FMargin(0,139,0,70)); S->SetAlignment(FVector2D::ZeroVector); }
 
 	// --- rally-result centre banner ----------------------------------------------
 	Banner = MakeImage(WidgetTree, Root, FLinearColor(0.02f, 0.03f, 0.05f, 0.78f),
@@ -131,6 +133,8 @@ void UScoreboardWidget::BuildWidgetTree()
 	Text_Help = MakeText(WidgetTree, Root, SEUiStyle::Type::Tiny(), FLinearColor(0.75f, 0.78f, 0.82f),
 		FAnchors(0.5f, 1.f, 0.5f, 1.f), FVector2D(0.f, -34.f), FVector2D(0.5f, 0.f));
 	Text_Help->SetText(FText::FromString(TEXT("WASD移动 · 空格跳 · 左键击球 · 右键抬手 · E发球 · C切视角 · Esc暂停")));
+	Text_Help->SetAutoWrapText(true);
+	if(auto* S=Cast<UCanvasPanelSlot>(Text_Help->Slot)) { S->SetAutoSize(false); S->SetAnchors(FAnchors(.06f,.90f,.94f,.99f)); S->SetOffsets(FMargin(0)); S->SetAlignment(FVector2D::ZeroVector); }
 	LastHelp = TEXT("WASD移动 · 空格跳 · 左键击球 · 右键抬手 · E发球 · C切视角 · Esc暂停");
 	HelpTimer = 5.0f;
 	bHelpCollapsed = false;
@@ -270,6 +274,7 @@ void UScoreboardWidget::UpdateBanner(float InDeltaTime)
 void UScoreboardWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 {
 	Super::NativeTick(MyGeometry, InDeltaTime);
+	if(Text_Help) Text_Help->SetWrapTextAt(FMath::Max(100.f,MyGeometry.GetLocalSize().X*.88f));
 
 	if (!bHelpCollapsed)
 	{
@@ -277,7 +282,7 @@ void UScoreboardWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTim
 		if (HelpTimer <= 0.0f)
 		{
 			bHelpCollapsed = true;
-			const FString Collapsed = TEXT("ESC：暂停 / 释放鼠标");
+			const FString Collapsed = TEXT("Alt：鼠标操作 / 发球拖拽    Esc：暂停 / 释放鼠标");
 			if (Text_Help && LastHelp != Collapsed)
 			{
 				Text_Help->SetText(FText::FromString(Collapsed));

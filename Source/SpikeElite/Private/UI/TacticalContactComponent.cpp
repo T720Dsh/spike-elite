@@ -521,8 +521,7 @@ void UTacticalContactComponent::RestoreWorldState()
 	if (Pawn.IsValid() && OwnerPC.IsValid())
 	{
 		Pawn->EnableInput(OwnerPC.Get());
-		OwnerPC->SetShowMouseCursor(false);
-		OwnerPC->SetInputMode(FInputModeGameOnly());
+		OwnerPC->RestoreGameplayInput();
 	}
 	if (Preview) { Preview->HidePreview(); }
 	if (HintText) { HintText->SetVisibility(false); }
