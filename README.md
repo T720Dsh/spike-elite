@@ -27,9 +27,9 @@
 
 ## 核心体验
 
-以下列出产品愿景，**不是全部已实现功能**。当前仍使用原创程序化角色；自由人、入场列队动画、裁判动作手势、训练模式完整项目、名单编辑 UI 与商业级写实资产未完成。M11h 玩法轮（模式选择/12 人名单/球队暂停/合法换人/教练操控/发球员介绍/赛后统计）见 [M11h 交付记录](docs/M11h-Delivery.md)，现场美术与验收见 [M11g 交付记录](docs/M11g-Codex-Art-Delivery.md)。
+以下列出产品愿景，**不是全部已实现功能**。当前仍使用原创程序化角色；已补齐入场、三项基础训练、首发/换人界面与裁判基础动作。自由人、完整正式犯规体系、整套裁判手势、商业级写实资产和网络同步仍未完成。当前玩法与验收以 [M11h 现场收尾报告](docs/M11h-Codex-Closeout.md) 为准；豆包阶段基线见 [M11h 交付记录](docs/M11h-Delivery.md)，现场美术见 [M11g 交付记录](docs/M11g-Codex-Art-Delivery.md)。
 
-本机最新图形包：`Dist/M11h/Windows/SpikeElite.exe`；根目录 `Play_SPIKE_ELITE.bat` 优先启动此包。包与实机截图不入 Git，源码更新后需重新构建，不代表 GitHub Release 已更新。
+本机最新图形包：`Dist/M11h-Codex/Windows/SpikeElite.exe`；根目录 `Play_SPIKE_ELITE.bat` 优先启动此包。包与实机截图不入 Git，源码更新后需重新构建，不代表 GitHub Release 已更新。
 
 - **真实 6v6 室内排球**：严格遵循 FIVB 2025–2028 规则，rally point、顺时针轮换、5-1 / 6-2 进攻体系、Libero 自由人、拦网/吊球/后排进攻全部还原。
 - **第一人称沉浸视角**（核心卖点）：你就是场上那个球员——跳起来扣球的主观冲击力、3D 音频定位、辅助雷达与轨迹预测，解决 FP 看不到全场的问题。第三人称肩后镜、战术俯视镜、直播观战镜并存。
@@ -52,7 +52,7 @@
 
 ## 当前状态
 
-✅ **可玩垂直切片（PC 原型 → M11b 里程碑）** — 引擎 UE 5.8，纯 C++/UMG，无蓝图依赖。
+✅ **可玩垂直切片（PC 原型 → M11h 玩法收尾）** — 引擎 UE 5.8，纯 C++/UMG，无蓝图依赖。
 
 - [x] M0 市场调研、设计理念、GDD、技术选型
 - [x] M1 工程初始化（C++ 项目、输入、渲染基础）
@@ -91,6 +91,7 @@
 - [x] M11f-3 菜单/设置：排球图标 1×1 根因修复（Brush.ImageSize）、金分隔线 180×3、SEFocusableButton 真实键盘焦点金框、设置页 ScrollBox、-UIScale 0.8/1.0/1.4 矩阵
 - [x] M11f-4 球与记录台：原创黄蓝白多面板球（运行时面板纹理、无品牌、授权插槽回退）、记录台同侧工作区、实体记分牌文字正向可读（Yaw+90、WorldSize16、TextCenter）、观众朝场心
 - [x] M11f-5 可信验收：ShotSuite 首触必须真实接发（删除摆拍）、超时明确缺项并非零退出、-FiveSetTest 生产五局三胜加速验收（26:24/24:26/26:24/24:26/16:14 → 3:2 PASS）
+- [x] M11h 现场收尾：24 人身份、首发编辑、合法换人回归、入场与暂停集合、场下教练、三项训练、注册身份统计；验收边界见收尾报告
 - [ ] 战术 AI 完整化（后排进攻细化、自由人）、外部角色动画模型、网络同步
 
 下一步具体行动见 [docs/05-roadmap.md](docs/05-roadmap.md)。
@@ -127,6 +128,21 @@
 **系统要求：** Windows 10/11 64 位，显卡支持 DirectX 12（UE5 最低要求），键鼠操作。操作说明见下表。
 
 ## 快速开始（给开发者）
+
+### M11h 现场收尾
+
+新增赛前首发编辑、完整候补换人选择、24 人入场、场下教练与三种可重复训练。
+本机启动器优先运行 `Dist/M11h-Codex/Windows/SpikeElite.exe`，保留 M11h/M11g/旧包回退；产物不上传 Git。
+球员身份和统计以注册 PlayerId 为准，轮转不改变统计归属；首发回归与每局换人额度由 GameMode 校验。
+主菜单 → 开始 → 模式 → 选择首发 → 确认。训练直接进入对应项目。
+
+- `Tab`：教练席／球队管理；`R`：切换受控球员（训练中为重试）。
+- `E`：跳过入场／发球介绍，哨响后再按一次发球；`Esc`：系统暂停并释放鼠标。
+- 发球训练：鼠标调方向和深度，白色虚线预览；接发训练：把来球传入金色目标区；二传配攻：给队友做第二次触球。
+- 名单文件在 `Saved/LineupSave.ini`，不入 Git；取消只取消草稿。换人选择期间暂停世界，不扣球队暂停。
+
+验收、构建产物和仍未实现的规则边界见 [M11h 现场收尾报告](docs/M11h-Codex-Closeout.md)。
+自由人未启用，裁判动作与人物仍是程序化原型，不能称作完整正式赛事或商业写实美术。
 
 引擎版本：**Unreal Engine 5.8**（`.uproject` 的 `EngineAssociation` 为 `5.8`）。
 
@@ -176,7 +192,7 @@ D:\Epic\UE_5.8\Engine\Build\BatchFiles\RunUAT.bat BuildCookRun `
 ## 规则自动化测试
 
 ```powershell
-# 无地图纯逻辑 + 集成自动化测试（当前 60/60）：
+# 无地图纯逻辑 + 集成自动化测试（当前 81 项；最终结果见收尾报告）：
 D:\Epic\UE_5.8\Engine\Binaries\Win64\UnrealEditor.exe .\SpikeElite.uproject `
   -ExecCmds="Automation RunTests SpikeElite.Tests; Quit" -unattended -nosplash -nopause -NullRHI -log
 ```
