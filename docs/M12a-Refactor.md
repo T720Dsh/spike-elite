@@ -76,6 +76,8 @@ $env:TEMP="D:/ue-temp"; $env:TMP=$env:TEMP
 
 Perf：1280×720，预热10秒、采样45秒，共3717个frame-wall样本；中位12.048ms，p95 13.253ms，VSync=0、MaxFPS=0。不是1080p中画质结果，不是1% low、独立GPU耗时或30分钟稳定性保证。
 
+1080p补验：相同包，-Suites Perf,Playability -Label m12a_pack_1080 -Width 1920 -Height 1080 -AdditionalArguments "-ForceRes"。两套脚本均exit=0且PASS；日志systemresolution=1920×1080，12张新Playability截图PNG元数据也全部1920×1080（仅尺寸检查，不是目视审查）。Perf预热10秒、45秒样本3318个，frame-wall中位13.561ms、p95 15.326ms；画质沿用实际设置，未证实为中画质，没有1% low或30分钟稳定性数据，不能宣称完整性能目标达标。
+
 此包是Development验收包，不是Shipping商业发行包；没有上传或创建Release。
 
 ## 资产

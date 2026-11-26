@@ -36,6 +36,10 @@ smoke*.log
 # Cooked
 Cooked/
 
+# Python tooling cache
+__pycache__/
+*.py[cod]
+
 # Local temp
 *.user
 *.useropts
