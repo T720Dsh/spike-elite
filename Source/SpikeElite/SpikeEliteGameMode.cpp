@@ -1,5 +1,6 @@
-﻿// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: MIT
 #include "SpikeEliteGameMode.h"
+#include "Private/SpikeEliteGameModeHelpers.h"
 #include "Volleyball/SetPlay.h"
 #include "Volleyball/VolleyballBall.h"
 
@@ -76,27 +77,6 @@ static bool IsDiveSituation(const FVolleyballRallyState& RS, bool bBallOnOwnSide
 // LogVolleyballRules is defined in VolleyballRules.cpp and declared in
 // VolleyballRules.h (shared by GameMode and Character).
 
-namespace
-{
-	/** Map the current touch count to its phase label (Receive -> Set -> Attack). */
-	EBallTouchType ResolveTouchType(int32 TouchCount)
-	{
-		switch (TouchCount)
-		{
-		case 0:  return EBallTouchType::Receive;
-		case 1:  return EBallTouchType::Set;
-		case 2:  return EBallTouchType::Attack;
-		default: return EBallTouchType::Unknown;
-		}
-	}
-
-	const TCHAR* TeamStr(EVolleyballTeam Team)
-	{
-		if (Team == EVolleyballTeam::TeamA) return TEXT("A");
-		if (Team == EVolleyballTeam::TeamB) return TEXT("B");
-		return TEXT("-");
-	}
-}
 
 TArray<FVector> ASpikeEliteGameMode::GetPositionsA()
 {
@@ -448,7 +428,7 @@ void ASpikeEliteGameMode::CleanupMatch()
 		SEVolleyballRules::SettleRally(RallyState);
 		UE_LOG(LogVolleyballRules, Log,
 			TEXT("[RallyEnd] reason=Cancelled scoring=- lastTouch=%s touchCount=%d A:%d B:%d set=%d"),
-			TeamStr(RallyState.LastTouchTeam), RallyState.TouchCount,
+			SpikeEliteGameModeHelpers::TeamStr(RallyState.LastTouchTeam), RallyState.TouchCount,
 			TeamAScore, TeamBScore, CurrentSet);
 	}
 
@@ -536,7 +516,7 @@ void ASpikeEliteGameMode::ShowBanner(const FString& Text, float Seconds)
 void ASpikeEliteGameMode::SetRallyResult(ERallyEndReason Reason, EVolleyballTeam ScoringTeam)
 {
 	const FString Text = FString::Printf(TEXT("%s · %s 队得分"),
-		*SEVolleyballRules::RallyReasonLabel(Reason), TeamStr(ScoringTeam));
+		*SEVolleyballRules::RallyReasonLabel(Reason), SpikeEliteGameModeHelpers::TeamStr(ScoringTeam));
 	ShowBanner(Text, 1.5f);
 }
 
@@ -672,7 +652,7 @@ void ASpikeEliteGameMode::Tick(float DeltaSeconds)
 		if (TimeoutTimer <= 0.f)
 		{
 			UE_LOG(LogVolleyballRules, Log, TEXT("Timeout ended team=%s (30s elapsed)"),
-				TeamStr(TimeoutTeam));
+				SpikeEliteGameModeHelpers::TeamStr(TimeoutTeam));
 			TimeoutTeam = EVolleyballTeam::None;
 			TimeoutTimer = 0.f;
 			TimeoutPausedSeconds = 0.f;
@@ -852,7 +832,7 @@ void ASpikeEliteGameMode::UpdateScoreboard()
 	{
 		// M11h-4: show the live 30 s timeout clock and remaining allowances.
 		ServeHint = FString::Printf(TEXT("球队暂停 · %s 队 · %.0f 秒 · 剩余 A:%d B:%d"),
-			TeamStr(TimeoutTeam), FMath::CeilToFloat(TimeoutTimer), TimeoutLeftA, TimeoutLeftB);
+			SpikeEliteGameModeHelpers::TeamStr(TimeoutTeam), FMath::CeilToFloat(TimeoutTimer), TimeoutLeftA, TimeoutLeftB);
 	}
 	else if (MatchState == EMatchState::ServiceAuthorized && ServingTeam == EVolleyballTeam::TeamA)
 	{
@@ -891,7 +871,7 @@ void ASpikeEliteGameMode::UpdateScoreboard()
 			FString::Printf(TEXT("SET %d"), CurrentSet),
 			FString::Printf(TEXT("A %d : %d B"), TeamAScore, TeamBScore),
 			FString::Printf(TEXT("SETS A %d : %d B"), TeamASetsWon, TeamBSetsWon),
-			FString::Printf(TEXT("SERVE %s"), TeamStr(ServingTeam)));
+			FString::Printf(TEXT("SERVE %s"), SpikeEliteGameModeHelpers::TeamStr(ServingTeam)));
 	}
 }
 
@@ -924,9 +904,9 @@ void ASpikeEliteGameMode::OnBallLanded(const FVector& BallLocation)
 		TEXT("Ball landed %s at (%.0f, %.0f, %.0f) | LastTouch=%s | TouchCount=%d | Scoring=%s"),
 		bIn ? TEXT("IN") : TEXT("OUT"),
 		BallLocation.X, BallLocation.Y, BallLocation.Z,
-		TeamStr(Last),
+		SpikeEliteGameModeHelpers::TeamStr(Last),
 		RallyState.TouchCount,
-		TeamStr(Scoring));
+		SpikeEliteGameModeHelpers::TeamStr(Scoring));
 
 	EndRally(Reason, Scoring);
 }
@@ -966,259 +946,9 @@ void ASpikeEliteGameMode::EndRally(ERallyEndReason Reason, EVolleyballTeam Scori
 
 	UE_LOG(LogVolleyballRules, Log,
 		TEXT("[RallyEnd] reason=%s scoring=%s lastTouch=%s touchCount=%d A:%d->%d B:%d->%d set=%d"),
-		*SEVolleyballRules::RallyReasonLabel(Reason), TeamStr(ScoringTeam),
-		TeamStr(RallyState.LastTouchTeam), RallyState.TouchCount,
+		*SEVolleyballRules::RallyReasonLabel(Reason), SpikeEliteGameModeHelpers::TeamStr(ScoringTeam),
+		SpikeEliteGameModeHelpers::TeamStr(RallyState.LastTouchTeam), RallyState.TouchCount,
 		BeforeA, TeamAScore, BeforeB, TeamBScore, CurrentSet);
-}
-
-void ASpikeEliteGameMode::AwardPoint(EVolleyballTeam ScoringTeam)
-{
-	const auto& TouchActors = GetTeamPlayers(RallyState.LastTouchTeam);
-	const FPlayerIdentity* TouchIdentity = TouchActors.IsValidIndex(RallyState.LastTouchPlayerIndex)
-		? FindIdentity(RallyState.LastTouchTeam, TouchActors[RallyState.LastTouchPlayerIndex]) : nullptr;
-	const int32 TouchIdentityIndex = TouchIdentity ?
-		(RallyState.LastTouchTeam == EVolleyballTeam::TeamA ? RosterA : RosterB).RegisteredIndex(TouchIdentity->PlayerId) : INDEX_NONE;
-	if (ScoringTeam == EVolleyballTeam::TeamA) { TeamAScore++; }
-	else if (ScoringTeam == EVolleyballTeam::TeamB) { TeamBScore++; }
-	else { return; }
-
-	const bool bWasServeWin = (ServingTeam == ScoringTeam);
-	const EVolleyballTeam ServingTeamBeforePoint = ServingTeam;
-	ServingTeam = ScoringTeam;
-	if (!bWasServeWin)
-	{
-		// Side-out: ONLY the team that just gained the serve rotates (clockwise,
-		// its P1 leaves the court after serving... here the P1 slot moves to P6).
-		// The serving winner's rotation stays untouched (no rotation on a point).
-		RotateTeam(ScoringTeam);
-		if (ScoringTeam == EVolleyballTeam::TeamA) { TeamARotation = SEVolleyballRules::AdvanceRotationIndex(TeamARotation); }
-		else { TeamBRotation = SEVolleyballRules::AdvanceRotationIndex(TeamBRotation); }
-	}
-	// M11h-8: attribute the rally outcome to player stats (server ace/error,
-	// attack win/error, block) from the real last-touch data. Indexed by court
-	// slot; the last touch index lives in RallyState.
-	if (RallyState.LastTouchPlayerIndex >= 0 && RallyState.LastTouchTeam != EVolleyballTeam::None)
-	{
-		SEVolleyballRules::AttachStatsForRally(
-			StatsFor(RallyState.LastTouchTeam), RallyState.LastTouchType,
-			TouchIdentityIndex, RallyState.TouchCount,
-			ScoringTeam, ServingTeamBeforePoint, RallyState.LastTouchTeam);
-	}
-	RefreshRotationView();
-	++CompletedRallies;
-
-	// Record the current set's running score.
-	if (SetScoresA.Num() >= CurrentSet) { SetScoresA[CurrentSet-1] = TeamAScore; }
-	if (SetScoresB.Num() >= CurrentSet) { SetScoresB[CurrentSet-1] = TeamBScore; }
-
-	UE_LOG(LogVolleyballRules, Log, TEXT("Point. A:%d B:%d (serve=%s)"), TeamAScore, TeamBScore, TeamStr(ServingTeam));
-	CheckSetWin();
-}
-
-void ASpikeEliteGameMode::CheckSetWin()
-{
-	if (!SEVolleyballRules::IsSetWon(TeamAScore, TeamBScore, PointsToWin))
-	{
-		MatchState = EMatchState::BetweenRallies;
-		InterRallyTimer = InterRallyDelay;
-		bInToss = false;
-		UpdateScoreboard();
-		return;
-	}
-
-	const EVolleyballTeam W = (TeamAScore > TeamBScore) ? EVolleyballTeam::TeamA : EVolleyballTeam::TeamB;
-	if (W == EVolleyballTeam::TeamA) { TeamASetsWon++; } else { TeamBSetsWon++; }
-
-	if (SEVolleyballRules::IsMatchWon(TeamASetsWon, TeamBSetsWon, MatchWinsNeeded))
-	{
-		MatchWinner = W;
-		MatchState = EMatchState::MatchOver;
-		// The end-of-match screen shows the result itself; drop the last rally
-		// banner so the scoreboard reads clean under MatchOver.
-		RallyResultText.Empty();
-		RallyResultDisplayTimer = 0.0f;
-		UpdateScoreboard();
-#if !UE_BUILD_SHIPPING
-		// M11f-5: accelerated best-of-five acceptance — report the full set
-		// history and exit BEFORE NotifyMatchOver pauses the world (a paused
-		// world stops this Tick, which would strand the driver).
-		if (bFiveSetTest)
-		{
-			const bool bOk = (TeamASetsWon == 3 && TeamBSetsWon == 2 && CurrentSet == 5);
-			UE_LOG(LogVolleyballRules, Log, TEXT("FIVE SET TEST: MatchOver winner=%s setsA=%d setsB=%d"),
-				TeamStr(MatchWinner), TeamASetsWon, TeamBSetsWon);
-			for (int32 i = 0; i < SetScoresA.Num(); ++i)
-			{
-				UE_LOG(LogVolleyballRules, Log, TEXT("FIVE SET TEST: set %d -> A %d : %d B"),
-					i + 1, SetScoresA[i], SetScoresB.Num() > i ? SetScoresB[i] : -1);
-			}
-			UE_LOG(LogVolleyballRules, Log, TEXT("FIVE SET TEST: RESULT=%s"), bOk ? TEXT("PASS") : TEXT("FAIL"));
-			FPlatformMisc::RequestExit(0);
-			return;
-		}
-#endif
-		// M11h-2b: challenge progress — a Team A win advances the stage.
-		if (MatchModeConfig.Mode == EGameModeChoice::Challenge12 && MatchWinner == EVolleyballTeam::TeamA)
-		{
-			LoadChallengeState();
-			ChallengeSave.Won++;
-			if (ChallengeSave.Stage + 1 >= SEChallenge::StageCount) { ChallengeSave.bCompleted = true; ChallengeSave.Stage = SEChallenge::StageCount; }
-			else { ChallengeSave.Stage++; }
-			SaveChallengeState();
-			UE_LOG(LogVolleyballRules, Log, TEXT("Challenge advanced: stage=%d won=%d completed=%d"),
-				ChallengeSave.Stage, ChallengeSave.Won, ChallengeSave.bCompleted ? 1 : 0);
-		}
-		NotifyMatchOver();
-		return;
-	}
-
-	// Set over: show banner, then start the next set after the pause.
-	MatchState = EMatchState::SetOver;
-	InterRallyTimer = SetOverDelay;
-	const FString Text = FString::Printf(TEXT("第 %d 局结束：%s 队获胜  %d : %d"),
-		CurrentSet, TeamStr(W), TeamAScore, TeamBScore);
-	ShowBanner(Text, SetOverDelay);
-	UpdateScoreboard();
-}
-
-void ASpikeEliteGameMode::StartNextSet()
-{
-	CurrentSet++;
-	TeamARotation=TeamBRotation=1;
-	TeamAScore = TeamBScore = 0;
-	PointsToWin = bQuickMatch ? 3 : SEVolleyballRules::PointsToWinForSet(CurrentSet);
-	SetScoresA.Add(0);
-	SetScoresB.Add(0);
-	// M11h-4: timeout allowances reset at the start of every set (FIVB 15.2).
-	TimeoutLeftA = TimeoutLeftB = 2;
-	TimeoutTeam = EVolleyballTeam::None;
-	TimeoutTimer = 0.f;
-	TimeoutPausedSeconds = 0.f;
-	// M11h-5: substitution allowances and bench pool reset each set; the
-	// starting six return (FIVB 15.2 — starters may be used again in the next
-	// set; on-court lineup returns to this set's starting lineup).
-	ResetSubstitutionState();
-	// M11h-3: a new set always shows the full server intro card again.
-	LastPresentedServerId = TEXT("");
-	RespawnPlayersToPositions();
-	SEVolleyballRules::BeginRally(RallyState, ServingTeam);
-	MatchState = EMatchState::BetweenRallies;
-	InterRallyTimer = SetOverDelay * 0.6f;
-	UpdateScoreboard();
-	UE_LOG(LogVolleyballRules, Log, TEXT("Set %d begins (to %d)"), CurrentSet, PointsToWin);
-}
-
-void ASpikeEliteGameMode::DriveFiveSet()
-{
-	// M11f-5: accelerated best-of-five acceptance. Reuses the PRODUCTION
-	// scoring path (AwardPoint -> CheckSetWin -> IsSetWon/IsMatchWon) and the
-	// production state transitions (SetOver -> StartNextSet). No result arrays
-	// are faked; every point goes through AwardPoint and every set through
-	// CheckSetWin. Plan: A wins sets 1/3/5, B wins 2/4 -> 3:2, with sets
-	// ending 26:24 (first four) and 16:14 (fifth) — both prove "lead by 2".
-	// MatchOver reporting/exit happens inside CheckSetWin before the world
-	// pauses for the result screen.
-	if (MatchState == EMatchState::MatchOver || MatchState == EMatchState::SetOver) { return; }
-	// Only drive from BetweenRallies (points land after a settled rally).
-	if (MatchState != EMatchState::BetweenRallies) { return; }
-
-	// Production target points: 25 for sets 1-4, 15 for the deciding set.
-	const int32 PlanPts = SEVolleyballRules::PointsToWinForSet(CurrentSet);
-	const EVolleyballTeam Winner = (CurrentSet % 2 == 1) ? EVolleyballTeam::TeamA : EVolleyballTeam::TeamB;
-	const int32 AS = TeamAScore;
-	const int32 BS = TeamBScore;
-
-	// Alternate up to 24:24 (14:14 in set 5) so no early "lead by 2" set end.
-	if (AS < PlanPts - 1 && BS < PlanPts - 1)
-	{
-		AwardPoint(AS <= BS ? EVolleyballTeam::TeamA : EVolleyballTeam::TeamB);
-		return;
-	}
-	// Tied at 24:24 / 14:14 -> winner takes two straight.
-	if (AS == PlanPts - 1 && BS == PlanPts - 1) { AwardPoint(Winner); return; }
-	// Winner leads by one (25:24 / 15:14) -> one more ends the set 26:24 / 16:14.
-	if ((Winner == EVolleyballTeam::TeamA && AS == PlanPts && BS == PlanPts - 1) ||
-		(Winner == EVolleyballTeam::TeamB && BS == PlanPts && AS == PlanPts - 1))
-	{
-		AwardPoint(Winner);
-		return;
-	}
-	// Safety: alternate if anything unexpected lands here.
-	AwardPoint(AS <= BS ? EVolleyballTeam::TeamA : EVolleyballTeam::TeamB);
-}
-
-void ASpikeEliteGameMode::ResetMatchStats()
-{
-	StatsA.Reset();
-	StatsB.Reset();
-	for (int32 i = 0; i < 12; ++i)
-	{
-		StatsA.Add(SEVolleyballRules::FPlayerMatchStats());
-		StatsB.Add(SEVolleyballRules::FPlayerMatchStats());
-	}
-}
-
-void ASpikeEliteGameMode::RecordTouchStat(EVolleyballTeam Team, int32 CourtIndex, EBallTouchType Type, bool bWasDiveSave)
-{
-	if (MatchModeConfig.Mode == EGameModeChoice::Training) { return; }
-	TArray<SEVolleyballRules::FPlayerMatchStats>& Stats = StatsFor(Team);
-	const auto& Actors = GetTeamPlayers(Team);
-	const FPlayerIdentity* Identity = Actors.IsValidIndex(CourtIndex) ? FindIdentity(Team, Actors[CourtIndex]) : nullptr;
-	CourtIndex = Identity ? (Team == EVolleyballTeam::TeamA ? RosterA : RosterB).RegisteredIndex(Identity->PlayerId) : INDEX_NONE;
-	if (!Stats.IsValidIndex(CourtIndex)) { return; }
-	SEVolleyballRules::FPlayerMatchStats& S = Stats[CourtIndex];
-	switch (Type)
-	{
-	case EBallTouchType::Receive: S.Receives++; break;
-	case EBallTouchType::Set:     S.Sets++;     break;
-	case EBallTouchType::Attack:  S.Attacks++;  break;
-	case EBallTouchType::Block:   S.Blocks++;   break;
-	case EBallTouchType::Serve:   S.ServeAttempts++; break;
-	default: break;
-	}
-	if (bWasDiveSave) { S.Digs++; }
-}
-
-// ---------------- M11h-3: server introduction ----------------
-
-void ASpikeEliteGameMode::EnterServePresentation()
-{
-	if (MatchState != EMatchState::AwaitingReady) { return; }
-	TArray<TObjectPtr<ASpikeEliteCharacter>>& Roster = (ServingTeam == EVolleyballTeam::TeamA) ? TeamAPlayers : TeamBPlayers;
-	ASpikeEliteCharacter* Server = (Roster.Num() > 0) ? Roster[0].Get() : nullptr;
-	const FPlayerIdentity* Id = FindIdentity(ServingTeam, Server);
-	// Identity PlayerId is a stable FString ("A01"); the actor's int PlayerId is
-	// only the spawn index. The presentation tracks the IDENTITY, so a
-	// substitution keeps the comparison meaningful.
-	const FString ServerId = Id ? Id->PlayerId : TEXT("");
-
-	// Same player serving again -> short name/number bar only; a new server gets
-	// the full card. The intro runs at UI/real time (world is NOT paused here).
-	const bool bSameServer = (!ServerId.IsEmpty() && ServerId == LastPresentedServerId);
-	PresentationTimer = bSameServer ? 1.2f : 2.2f;
-	MatchState = EMatchState::ServePresentation;
-	UpdateScoreboard();
-
-	const FPlayerIdentity* ServerIdentity = FindIdentity(ServingTeam, Server);
-	if (ASpikeElitePlayerController* SEPC = Cast<ASpikeElitePlayerController>(UGameplayStatics::GetPlayerController(this, 0)))
-	{
-		SEPC->ShowServeIntro(ServerId, ServerIdentity ? ServerIdentity->JerseyNumber : 0,
-			ServerIdentity ? ServerIdentity->DisplayName : TEXT("发球员"),
-			ServingTeam, ServerIdentity ? SEVolleyballRoster::RoleDisplayName(ServerIdentity->Role) : TEXT(""),
-			bSameServer);
-	}
-	UE_LOG(LogVolleyballRules, Log, TEXT("Serve presentation: server=%s same=%d"),
-		*ServerId, bSameServer ? 1 : 0);
-}
-
-void ASpikeEliteGameMode::SkipServePresentation()
-{
-	if (MatchState != EMatchState::ServePresentation) { return; }
-	if (ASpikeElitePlayerController* SEPC = Cast<ASpikeElitePlayerController>(UGameplayStatics::GetPlayerController(this, 0)))
-	{
-		SEPC->HideServeIntro();
-	}
-	BeginServiceAuthorized();
 }
 
 void ASpikeEliteGameMode::BeginServiceAuthorized()
@@ -1264,7 +994,7 @@ void ASpikeEliteGameMode::BeginServiceAuthorized()
 	// Before this whistle the E key is refused (RequestServe state gate).
 	ServeDeadlineTimer = ServeDeadline;
 	if (Officials) { Officials->Whistle(); }
-	UE_LOG(LogVolleyballRules, Log, TEXT("Whistle: service authorized for team=%s (%.0fs window)"), TeamStr(ServingTeam), ServeDeadline);
+	UE_LOG(LogVolleyballRules, Log, TEXT("Whistle: service authorized for team=%s (%.0fs window)"), SpikeEliteGameModeHelpers::TeamStr(ServingTeam), ServeDeadline);
 
 	// M11 auto-serve policy: bots always auto-serve after a short pause; a human
 	// server serves ONLY when the automation flag (-devauto) is present. Normal
@@ -1278,7 +1008,7 @@ void ASpikeEliteGameMode::BeginServiceAuthorized()
 		AIServeTimer = (Server->bIsBot ? 1.0f : 0.5f) * (bFastFlow ? 0.3f : 1.0f);
 	}
 
-	UE_LOG(LogVolleyballRules, Log, TEXT("Service authorized: team=%s server=%s auto=%d"), TeamStr(ServingTeam),
+	UE_LOG(LogVolleyballRules, Log, TEXT("Service authorized: team=%s server=%s auto=%d"), SpikeEliteGameModeHelpers::TeamStr(ServingTeam),
 		(Server && !Server->bIsBot) ? TEXT("human") : TEXT("bot"), bAIServePending ? 1 : 0);
 	RefreshRotationView();
 	UpdateScoreboard();
@@ -1301,7 +1031,7 @@ void ASpikeEliteGameMode::HandleServeDeadline()
 	// 8 s elapsed with no legal serve: serve delay fault, opponent scores.
 	if (Officials) { Officials->Whistle(); }
 	UE_LOG(LogVolleyballRules, Log, TEXT("Serve delay: %s failed to serve within %.0fs -> fault"),
-		TeamStr(ServingTeam), ServeDeadline);
+		SpikeEliteGameModeHelpers::TeamStr(ServingTeam), ServeDeadline);
 	EndRally(ERallyEndReason::ServeFault, (ServingTeam == EVolleyballTeam::TeamA) ? EVolleyballTeam::TeamB : EVolleyballTeam::TeamA);
 }
 
@@ -1364,7 +1094,7 @@ bool ASpikeEliteGameMode::RequestServe(ASpikeEliteCharacter* Server)
 			const float BiasDeg = C.ServeZoneBiasCm() / 400.f; // ~240 cm -> ~34° at 4 m flight
 			TossDir = TossDir.RotateAngleAxis(BiasDeg, FVector::UpVector);
 			UE_LOG(LogVolleyballRules, Log, TEXT("Coach serve bias team=%s zone=%d deg=%.1f"),
-				TeamStr(Team), C.ServeZone, BiasDeg);
+				SpikeEliteGameModeHelpers::TeamStr(Team), C.ServeZone, BiasDeg);
 		}
 	}
 	TossTimer = 0.6f;
@@ -1382,7 +1112,7 @@ bool ASpikeEliteGameMode::RequestServe(ASpikeEliteCharacter* Server)
 	MatchState = EMatchState::ServingToss;
 	bAIServePending = false;
 
-	UE_LOG(LogVolleyballRules, Log, TEXT("Serve toss by team=%s player=%d"), TeamStr(Team), ServerPlayerIndex);
+	UE_LOG(LogVolleyballRules, Log, TEXT("Serve toss by team=%s player=%d"), SpikeEliteGameModeHelpers::TeamStr(Team), ServerPlayerIndex);
 	UpdateScoreboard();
 	return true;
 }
@@ -1421,7 +1151,7 @@ void ASpikeEliteGameMode::ExecuteServe()
 		}
 	}
 	UE_LOG(LogVolleyballRules, Log, TEXT("[Serve] team=%s player=%d power=%.0f dir=(%.2f,%.2f,%.2f) touches=0 ballInPlay=1"),
-		TeamStr(ServingTeam), ServerPlayerIndex, TossPower, TossDir.X, TossDir.Y, TossDir.Z);
+		SpikeEliteGameModeHelpers::TeamStr(ServingTeam), ServerPlayerIndex, TossPower, TossDir.X, TossDir.Y, TossDir.Z);
 	UpdateScoreboard();
 }
 
@@ -1432,8 +1162,8 @@ void ASpikeEliteGameMode::OnBallCrossedNet()
 	const EVolleyballTeam NewPossessor = (Ball && Ball->GetActorLocation().X < 0.f) ? EVolleyballTeam::TeamB : EVolleyballTeam::TeamA;
 	SEVolleyballRules::OnBallCrossedNet(RallyState, NewPossessor);
 
-	ShowBanner(FString::Printf(TEXT("球过网 → %s 队控球"), TeamStr(NewPossessor)), 0.8f);
-	UE_LOG(LogVolleyballRules, Log, TEXT("[NetCross] possession -> %s, touches=0"), TeamStr(NewPossessor));
+	ShowBanner(FString::Printf(TEXT("球过网 → %s 队控球"), SpikeEliteGameModeHelpers::TeamStr(NewPossessor)), 0.8f);
+	UE_LOG(LogVolleyballRules, Log, TEXT("[NetCross] possession -> %s, touches=0"), SpikeEliteGameModeHelpers::TeamStr(NewPossessor));
 	UpdateScoreboard();
 }
 
@@ -1467,7 +1197,7 @@ bool ASpikeEliteGameMode::TryTouchBall(ASpikeEliteCharacter* Toucher, EBallTouch
 	// made high sets/attacks unreachable even when the player stood right under
 	// the ball (3D dist ballooned with Z). A dive lunges further and can touch a
 	// lower ball, but only within the lunge window.
-	const EBallTouchType EffectiveType = (Type != EBallTouchType::Unknown) ? Type : ResolveTouchType(RallyState.TouchCount);
+	const EBallTouchType EffectiveType = (Type != EBallTouchType::Unknown) ? Type : SpikeEliteGameModeHelpers::ResolveTouchType(RallyState.TouchCount);
 	const FVector MyLoc = Toucher->GetActorLocation();
 	const FVector BallLoc = Ball->GetActorLocation();
 	const float Dist2D = FVector::Dist2D(MyLoc, BallLoc);
@@ -1545,7 +1275,7 @@ bool ASpikeEliteGameMode::ExecuteTacticalShot(ASpikeEliteCharacter* Toucher, con
 	const float Power = Sol.InitialVelocity.Size();
 
 	UE_LOG(LogVolleyballRules, Log, TEXT("[TacticalShot] team=%s player=%d target=(%.0f,%.0f) flight=%.2f power=%.0f err=%.2f net=%d in=%d"),
-		TeamStr(Team), Index, Intent.TargetLocation.X, Intent.TargetLocation.Y, Sol.FlightTime, Power, Intent.TimingError,
+		SpikeEliteGameModeHelpers::TeamStr(Team), Index, Intent.TargetLocation.X, Intent.TargetLocation.Y, Sol.FlightTime, Power, Intent.TimingError,
 		Sol.bCrossedNet ? 1 : 0, Sol.bInBounds ? 1 : 0);
 
 	return DoTouch(Toucher, (Intent.TouchType != EBallTouchType::Unknown) ? Intent.TouchType : EBallTouchType::Attack,
@@ -1562,7 +1292,7 @@ bool ASpikeEliteGameMode::DoTouch(ASpikeEliteCharacter* Toucher, EBallTouchType 
 	const int32 Index = GetPlayerIndex(Team, Toucher);
 	if (Index < 0) return false;
 
-	const EBallTouchType EffectiveType = (Type != EBallTouchType::Unknown) ? Type : ResolveTouchType(RallyState.TouchCount);
+	const EBallTouchType EffectiveType = (Type != EBallTouchType::Unknown) ? Type : SpikeEliteGameModeHelpers::ResolveTouchType(RallyState.TouchCount);
 	const FVector MyLoc = Toucher->GetActorLocation();
 	const FVector BallLoc = Ball->GetActorLocation();
 	const float Dist2D = FVector::Dist2D(MyLoc, BallLoc);
@@ -1599,7 +1329,7 @@ bool ASpikeEliteGameMode::DoTouch(ASpikeEliteCharacter* Toucher, EBallTouchType 
 		{
 			Toucher->DiveState.RecordSave();
 			UE_LOG(LogVolleyballRules, Log, TEXT("[DiveSave] %s %s saved (touch=%s)"),
-				TeamStr(Team), *Toucher->GetName(),
+				SpikeEliteGameModeHelpers::TeamStr(Team), *Toucher->GetName(),
 				*SEVolleyballRules::TouchTypeLabel(EffectiveType));
 		}
 
@@ -1623,21 +1353,21 @@ bool ASpikeEliteGameMode::DoTouch(ASpikeEliteCharacter* Toucher, EBallTouchType 
 		}
 
 		UE_LOG(LogVolleyballRules, Log, TEXT("[Touch] team=%s player=%d touch=%d/%d type=%s"),
-			TeamStr(Team), Index, RallyState.TouchCount, 3, TypeStr(EffectiveType));
+			SpikeEliteGameModeHelpers::TeamStr(Team), Index, RallyState.TouchCount, 3, TypeStr(EffectiveType));
 		UpdateScoreboard();
 		return true;
 	}
 	case ETouchResult::FourTouchesFault:
 	{
 		const EVolleyballTeam Opp = (Team == EVolleyballTeam::TeamA) ? EVolleyballTeam::TeamB : EVolleyballTeam::TeamA;
-		UE_LOG(LogVolleyballRules, Log, TEXT("Fault: 4th touch by team=%s -> %s scores"), TeamStr(Team), TeamStr(Opp));
+		UE_LOG(LogVolleyballRules, Log, TEXT("Fault: 4th touch by team=%s -> %s scores"), SpikeEliteGameModeHelpers::TeamStr(Team), SpikeEliteGameModeHelpers::TeamStr(Opp));
 		EndRally(ERallyEndReason::FourTouches, Opp);
 		return false;
 	}
 	case ETouchResult::DoubleTouchFault:
 	{
 		const EVolleyballTeam Opp = (Team == EVolleyballTeam::TeamA) ? EVolleyballTeam::TeamB : EVolleyballTeam::TeamA;
-		UE_LOG(LogVolleyballRules, Log, TEXT("Fault: double touch by team=%s player=%d -> %s scores"), TeamStr(Team), Index, TeamStr(Opp));
+		UE_LOG(LogVolleyballRules, Log, TEXT("Fault: double touch by team=%s player=%d -> %s scores"), SpikeEliteGameModeHelpers::TeamStr(Team), Index, SpikeEliteGameModeHelpers::TeamStr(Opp));
 		EndRally(ERallyEndReason::DoubleTouch, Opp);
 		return false;
 	}
@@ -1719,7 +1449,7 @@ bool ASpikeEliteGameMode::TryBlockBall(ASpikeEliteCharacter* Toucher)
 	}
 
 	UE_LOG(LogVolleyballRules, Log, TEXT("[Block] team=%s player=%d (front-row) hand-contact, ball %s"),
-		TeamStr(Team), Index, bOwnSide ? TEXT("stayed own side") : TEXT("over the net"));
+		SpikeEliteGameModeHelpers::TeamStr(Team), Index, bOwnSide ? TEXT("stayed own side") : TEXT("over the net"));
 	UpdateScoreboard();
 	return true;
 }
@@ -2386,217 +2116,4 @@ void ASpikeEliteGameMode::RefreshRotationView()
 	BuildRotationView(State);
 	RotationWidget->Refresh(State);
 	if (ServingTeam != EVolleyballTeam::None) { LastRotationServeTeam = ServingTeam; }
-}
-
-// ---------------- M11h-4: team timeout ----------------
-
-bool ASpikeEliteGameMode::CanRequestTimeout() const
-{
-	// Shared tested rule: dead ball before the service whistle only.
-	return MatchModeConfig.Mode!=EGameModeChoice::Training && SEVolleyballRules::CanRequestTimeoutInPhase(MatchState);
-}
-
-bool ASpikeEliteGameMode::RequestTeamTimeout(EVolleyballTeam Team)
-{
-	if (Team == EVolleyballTeam::None) { return false; }
-	if (!CanRequestTimeout())
-	{
-		const auto StateName = [](EMatchState S) -> const TCHAR*
-		{
-			switch (S)
-			{
-			case EMatchState::PreMatch: return TEXT("PreMatch");
-			case EMatchState::BetweenRallies: return TEXT("BetweenRallies");
-			case EMatchState::ResettingPositions: return TEXT("ResettingPositions");
-			case EMatchState::AwaitingReady: return TEXT("AwaitingReady");
-			case EMatchState::ServiceAuthorized: return TEXT("ServiceAuthorized");
-			case EMatchState::ServingToss: return TEXT("ServingToss");
-			case EMatchState::Rally: return TEXT("Rally");
-			case EMatchState::Timeout: return TEXT("Timeout");
-			case EMatchState::SetOver: return TEXT("SetOver");
-			case EMatchState::MatchOver: return TEXT("MatchOver");
-			default: return TEXT("?");
-			}
-		};
-		UE_LOG(LogVolleyballRules, Log, TEXT("Timeout request REJECTED team=%s state=%s (not a dead-ball window)"),
-			TeamStr(Team), StateName(MatchState));
-		return false;
-	}
-	if (GetTimeoutLeft(Team) <= 0)
-	{
-		UE_LOG(LogVolleyballRules, Log, TEXT("Timeout request REJECTED team=%s (no timeouts left this set)"),
-			TeamStr(Team));
-		return false;
-	}
-
-	// Consume one timeout and enter the independent timeout phase. The world is
-	// NOT paused: coach UI, player huddle and the 30 s clock keep running.
-	if (Team == EVolleyballTeam::TeamA) { TimeoutLeftA = SEVolleyballRules::TimeoutLeftAfterRequest(TimeoutLeftA); }
-	else { TimeoutLeftB = SEVolleyballRules::TimeoutLeftAfterRequest(TimeoutLeftB); }
-	TimeoutTeam = Team;
-	TimeoutTimer = SEVolleyballRules::TimeoutSeconds();
-	TimeoutPausedSeconds = 0.f;
-	MatchState = EMatchState::Timeout;
-	bAIServePending = false; // no auto-serve can fire during the huddle
-
-	// Huddle: move each team to its bench-side gathering zone (outside the free
-	// zone, no collisions with the net / officials).
-	for(int32 Side : {1,-1})
-	{
-		const auto& Roster=Side>0 ? TeamAPlayers:TeamBPlayers;
-		for(int32 i=0;i<Roster.Num();++i) if(Roster[i])
-		{
-			Roster[i]->HomePosition=FVector(Side*(350.f+100.f*i),-1080.f,0.f);
-			Roster[i]->bCeremonyWalking=true;
-		}
-	}
-	if(auto* PC=Cast<ASpikeElitePlayerController>(UGameplayStatics::GetPlayerController(this,0))) { PC->HideServeIntro(); if(PC->Tactical) PC->Tactical->CancelShot(); }
-	UE_LOG(LogVolleyballRules, Log, TEXT("Team timeout STARTED team=%s leftA=%d leftB=%d 30s"),
-		TeamStr(Team), TimeoutLeftA, TimeoutLeftB);
-	UpdateScoreboard();
-	RefreshRotationView();
-	return true;
-}
-
-void ASpikeEliteGameMode::CancelTeamTimeout()
-{
-	if (MatchState != EMatchState::Timeout) { return; }
-	UE_LOG(LogVolleyballRules, Log, TEXT("Team timeout CANCELLED team=%s"),
-		TeamStr(TimeoutTeam));
-	TimeoutTeam = EVolleyballTeam::None;
-	TimeoutTimer = 0.f;
-	TimeoutPausedSeconds = 0.f;
-	RespawnPlayersToPositions();
-	for(auto& C : TeamAPlayers) if(C) C->bCeremonyWalking=false;
-	for(auto& C : TeamBPlayers) if(C) C->bCeremonyWalking=false;
-	MatchState = EMatchState::ResettingPositions;
-	PhaseTimer = ResetDelay;
-	UpdateScoreboard();
-}
-
-// ---------------- M11h-5: substitutions ----------------
-
-void ASpikeEliteGameMode::ResetSubstitutionState()
-{
-	SubLedgerA = FSubstitutionLedger(); SubLedgerB = FSubstitutionLedger();
-	SubstitutionsLeftA = SubstitutionsLeftB = SEVolleyballRules::SubstitutionsPerSet();
-	auto Rebuild = [](const FTeamRosterState& RS, TArray<FString>& OutPool, TMap<FString, FString>& OutPairing)
-	{
-		OutPool.Reset();
-		OutPairing.Reset();
-		// Registered order i: starters are 0..5, bench 6..11. Default pairing maps
-		// bench player to the starter with the same court index (coach-set pairing
-		// is a later feature; this keeps substitution legal and symmetric).
-		OutPool = RS.GetBench();
-	};
-	Rebuild(RosterA, SubPoolA, SubPairingA);
-	Rebuild(RosterB, SubPoolB, SubPairingB);
-	// The on-court lineup is always the authoritative court six.
-	RosterA.OnCourtLineup = RosterA.StartingLineup;
-	RosterB.OnCourtLineup = RosterB.StartingLineup;
-	SubPoolA = RosterA.GetBench(); SubPoolB = RosterB.GetBench();
-	SynchronizeCourtIdentities(); RefreshRegisteredBench();
-}
-
-bool ASpikeEliteGameMode::CanRequestSubstitution(EVolleyballTeam Team, int32 CourtIndex, const FString& SubId, FString& OutReason) const
-{
-	if (Team == EVolleyballTeam::None)
-	{
-		OutReason = TEXT("未知球队");
-		return false;
-	}
-	if (MatchModeConfig.Mode==EGameModeChoice::Training || !SEVolleyballRules::CanSubstituteInPhase(MatchState))
-	{
-		OutReason = TEXT("仅死球且发球哨前可申请换人");
-		return false;
-	}
-	const int32 Left = (Team == EVolleyballTeam::TeamA) ? SubstitutionsLeftA : SubstitutionsLeftB;
-	if (Left <= 0)
-	{
-		OutReason = TEXT("本局换人次数已用完");
-		return false;
-	}
-	const FTeamRosterState& RS = (Team == EVolleyballTeam::TeamA) ? RosterA : RosterB;
-	if (!RS.OnCourtLineup.IsValidIndex(CourtIndex))
-	{
-		OutReason = TEXT("场上位置无效");
-		return false;
-	}
-	const TArray<FString>& Pool = (Team == EVolleyballTeam::TeamA) ? SubPoolA : SubPoolB;
-	if (!Pool.Contains(SubId))
-	{
-		OutReason = TEXT("该球员不在替补席");
-		return false;
-	}
-	const FSubstitutionLedger& Ledger = Team == EVolleyballTeam::TeamA ? SubLedgerA : SubLedgerB;
-	if (Ledger.LastRequestRally == CompletedRallies)
-	{ OutReason = TEXT("同队两次独立换人请求之间须完成一个回合"); return false; }
-	return Ledger.Validate(RS, CourtIndex, SubId, OutReason);
-}
-
-bool ASpikeEliteGameMode::RequestSubstitution(EVolleyballTeam Team, int32 CourtIndex, const FString& SubId)
-{
-	FString Reason;
-	if (!CanRequestSubstitution(Team, CourtIndex, SubId, Reason))
-	{
-		UE_LOG(LogVolleyballRules, Log, TEXT("[SubstitutionRejected] team=%s court=%d sub=%s reason=%s"),
-			TeamStr(Team), CourtIndex, *SubId, *Reason);
-		return false;
-	}
-
-	FTeamRosterState& RS = (Team == EVolleyballTeam::TeamA) ? RosterA : RosterB;
-	TArray<FString>& Pool = (Team == EVolleyballTeam::TeamA) ? SubPoolA : SubPoolB;
-	int32& Left = (Team == EVolleyballTeam::TeamA) ? SubstitutionsLeftA : SubstitutionsLeftB;
-	TArray<TObjectPtr<ASpikeEliteCharacter>>& CourtActors = (Team == EVolleyballTeam::TeamA) ? TeamAPlayers : TeamBPlayers;
-
-	const FString OldId = RS.OnCourtLineup[CourtIndex];
-	const FPlayerIdentity* SubIdentity = RS.FindById(SubId);
-
-	// Atomic identity switch: OnCourtLineup, bench pool and allowance move
-	// together; the court actor keeps its slot but takes the substitute's
-	// number/name/role. No transient 7/5-man court, no duplicate PlayerId.
-	FSubstitutionLedger& Ledger = Team == EVolleyballTeam::TeamA ? SubLedgerA : SubLedgerB;
-	Ledger.Apply(RS, CourtIndex, SubId);
-	Ledger.LastRequestRally = CompletedRallies;
-	Pool.Remove(SubId);
-	Pool.Add(OldId);
-	Left = Ledger.Remaining;
-	for (auto& C : BenchPlayers)
-		if (C && C->RosterPlayerId == SubId) { C->RosterPlayerId = OldId; break; }
-	SynchronizeCourtIdentities(); RefreshRegisteredBench();
-
-	// Visual: update the court actor's jersey (same team colours).
-	if (CourtActors.IsValidIndex(CourtIndex) && CourtActors[CourtIndex] && SubIdentity)
-	{
-		CourtActors[CourtIndex]->JerseyNumber = SubIdentity->JerseyNumber;
-		CourtActors[CourtIndex]->RefreshJerseyNumberVisual();
-		UE_LOG(LogVolleyballRules, Log,
-			TEXT("[SubstitutionApproved] team=%s court=%d out=%s(%s #%d) in=%s(%s #%d) left=%d"),
-			TeamStr(Team), CourtIndex,
-			*OldId, RS.FindById(OldId) ? *RS.FindById(OldId)->DisplayName : TEXT("?"),
-			RS.FindById(OldId) ? RS.FindById(OldId)->JerseyNumber : -1,
-			*SubId, *SubIdentity->DisplayName, SubIdentity->JerseyNumber, Left);
-	}
-	else
-	{
-		UE_LOG(LogVolleyballRules, Log, TEXT("[SubstitutionApproved] team=%s court=%d out=%s in=%s left=%d"),
-			TeamStr(Team), CourtIndex, *OldId, *SubId, Left);
-	}
-
-	// The P1 server slot follows the identity automatically (court index 0 is
-	// the server; the new identity's number is what the HUD shows next serve).
-	if (CourtIndex == 0 && MatchState == EMatchState::ServiceAuthorized)
-	{
-		ServerPlayerIndex = 0;
-	}
-	LastManagementMessage = FString::Printf(TEXT("换人完成：%s → %s（剩余 %d 次）"),
-		*OldId, *SubId, Left);
-	if (MatchState == EMatchState::ServePresentation)
-	{
-		if (auto* PC = Cast<ASpikeElitePlayerController>(UGameplayStatics::GetPlayerController(this, 0))) { PC->HideServeIntro(); }
-		MatchState = EMatchState::AwaitingReady; PhaseTimer = ReadyDelay;
-	}
-	UpdateScoreboard();
-	RefreshRotationView();
-	return true;
 }
