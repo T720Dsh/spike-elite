@@ -34,13 +34,19 @@
 - 此次是M12a第一阶段拆分，GameMode核心仍较大，不能宣称所有规则/AI职责已完全拆开。
 - Editor最终构建通过（Saved/Logs/M12a_SpikeEliteEditor_final_build.log）；adaptive non-unity将新增单元独立编译，验证了直接头依赖。Game最终构建也通过（Saved/Logs/M12a_SpikeElite_final_build.log），两目标串行构建exit=0。完整运行回归已结束：Automation 83/83，Closeout、FiveSet、Tactical、Rematch、Art、Playability脚本均PASS，exit=0、无超时/Fatal/Assertion/Ensure。最终Automation启动日志确认Local DDC已使用D:/UE_DDC_Local（进程级环境覆盖）。
 
-## 后续验收（待执行，不是 PASS）
+## Shipping 编译补验
 
-1. 核对函数移动前后完整性与条件编译边界。
-2. 编译 Editor 和 Game，必要时独立编译单元验证，避免Unity构建掩盖缺失依赖。
-3. 运行 Automation,Closeout,FiveSet,Tactical,Rematch,Art,Playability，失败即调查，不能自动反复重跑取最好结果。
-4. 逐张查看新截图；独立包只能在重打包后宣称对应新源码。
-5. 更新本报告的实测结果，审阅最终diff，仅提交本里程碑源文件和说明。
+2026-11-26 对 f681b7f 执行 SpikeElite Win64 Shipping 编译，MaxParallelActions=4，TEMP/TMP仅进程级指向D:/ue-temp。日志 Saved/Logs/M12a_Shipping_build.log：Result: Succeeded，exit=0，36.67秒。生成 Binaries/Win64/SpikeElite-Win64-Shipping.exe。此项仅验证条件编译及链接，不等于Cook、独立打包、启动或发行验收。
+
+可复现：使用引擎自带dotnet执行UnrealBuildTool.dll，参数 SpikeElite Win64 Shipping -Project=D:/projects/spike-elite/SpikeElite.uproject -WaitMutex -NoUBA -MaxParallelActions=4。
+
+## 后续验收清单（状态逐项列明）
+
+1. 已完成：函数移动完整性核对与公开接口保持。
+2. 已通过：Editor/Game Development和Game Shipping编译。
+3. 已通过：Automation,Closeout,FiveSet,Tactical,Rematch,Art,Playability自动化运行。
+4. 未完成：38张截图逐张目视复核、重打独立包与运行验收。
+5. 已提交：M12a第一阶段f681b7f，未推送；不计为完整M12a或上市级完成。
 
 ## 最终运行证据与视觉限制
 
