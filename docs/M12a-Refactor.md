@@ -45,7 +45,7 @@
 1. 已完成：函数移动完整性核对与公开接口保持。
 2. 已通过：Editor/Game Development和Game Shipping编译。
 3. 已通过：Automation,Closeout,FiveSet,Tactical,Rematch,Art,Playability自动化运行。
-4. 未完成：38张截图逐张目视复核、重打独立包与运行验收。
+4. 已完成Development独立包重建及脚本回归；Editor 38张和独立包34张截图目视复核仍未完成。
 5. 已提交：M12a第一阶段f681b7f，未推送；不计为完整M12a或上市级完成。
 
 ## 最终运行证据与视觉限制
@@ -59,6 +59,24 @@ $env:TEMP="D:/ue-temp"; $env:TMP=$env:TEMP
 日志均位于Saved/Logs/Codex_M11g_m12a_final_<Suite>.log。本轮生成38张截图（Closeout 11、Tactical 7、Rematch 1、Art 7、Playability 12），时间2026-11-26 13:14–13:19，位于Saved/Screenshots/WindowsEditor。Art后缀00003，Closeout大多00005，Playability大多00005；不能用历史后缀替代。
 
 尝试逐张打开时，read_image明确返回当前gpt-6-astra不支持图像输入。遵循不触碰失败边界：不重复尝试、不转换图片绕过限制。**视觉人工验收未完成**，截图存在及自动化PASS不能替代画面质量验收。M12a保留待视觉复核状态；不宣称上市级，不新增发布包或Release。
+
+## 独立Development包补验（2026-11-26）
+
+输入源码2606927，新归档Dist/M12a-2606927，未覆盖M11i旧包。
+
+```powershell
+# 同上，TEMP/TMP及UE-LocalDataCachePath均为进程级设置
+./tools/m11g_package.ps1 -ArchiveDirectory D:/projects/spike-elite/Dist/M12a-2606927 -MaxParallelActions 4
+./tools/m11g_verify.ps1 -Packaged -Executable D:/projects/spike-elite/Dist/M12a-2606927/Windows/SpikeElite.exe -Suites Quick1,Quick42,Quick4242,Closeout,FiveSet,Tactical,Rematch,Perf -Label m12a_pack
+```
+
+打包日志：Saved/Logs/M12a_2606927_package.log，BUILD SUCCESSFUL，AutomationTool ExitCode=0。归档48个文件，953126143字节（约909MiB，不含运行生成Saved目录）。内层exe SHA256：045200A18F55B33C0D2E35428E8E9B4F079292A2D3136F5CDE5866958C3264F7。
+
+独立包8组验收全部exit=0、无超时、evidence=True、fatal=False。日志Saved/Logs/Codex_M11g_m12a_pack_<Suite>.log。Quick1/42/4242各5张、Closeout11张、Tactical7张、Rematch1张，共34张截图保留在归档Windows/SpikeElite/Saved/Screenshots/Windows，未目视验收。
+
+Perf：1280×720，预热10秒、采样45秒，共3717个frame-wall样本；中位12.048ms，p95 13.253ms，VSync=0、MaxFPS=0。不是1080p中画质结果，不是1% low、独立GPU耗时或30分钟稳定性保证。
+
+此包是Development验收包，不是Shipping商业发行包；没有上传或创建Release。
 
 ## 资产
 
