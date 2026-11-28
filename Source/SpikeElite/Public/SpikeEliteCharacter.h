@@ -1,4 +1,4 @@
-﻿// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: MIT
 #pragma once
 
 #include "CoreMinimal.h"
@@ -9,6 +9,8 @@
 class UCameraComponent;
 class USpringArmComponent;
 class UStaticMeshComponent;
+class USkeletalMeshComponent;
+class UAnimSequence;
 class USceneComponent;
 class UTextRenderComponent;
 class ASpikeEliteGameMode;
@@ -219,6 +221,10 @@ protected:
 	TObjectPtr<UStaticMeshComponent> Head;
 	UPROPERTY() TObjectPtr<USceneComponent> HeadJoint;
 	UPROPERTY() TArray<TObjectPtr<UStaticMeshComponent>> ArtDetails;
+	/** Blender-authored skinned body; procedural segments are the fallback. */
+	UPROPERTY() TObjectPtr<USkeletalMeshComponent> BodyMesh;
+	UPROPERTY() TArray<TObjectPtr<UAnimSequence>> BodyAnims;
+	int32 PlayingAnimIndex = -1;
 	FVector PreviousAnimationLocation = FVector::ZeroVector;
 	float AnimationMoveSpeed = 0.f;
 	bool bAnimationLocationReady = false;
@@ -297,6 +303,9 @@ protected:
 
 	/** M11b-3: drive the articulated joints from pose + locomotion state. */
 	void UpdateProceduralAnimation(float DeltaSeconds);
+	void ApplySkeletalBody();
+	void TintSkeletalBody(const FLinearColor& Jersey, const FLinearColor& Shorts, const FLinearColor& Skin);
+	void UpdateSkeletalAnimation();
 
 	/** Compute the target pose for this frame from movement/contact/AI state. */
 	EAnimPose ResolvePose(float DeltaSeconds);

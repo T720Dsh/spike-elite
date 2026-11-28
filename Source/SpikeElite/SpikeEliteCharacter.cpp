@@ -11,6 +11,9 @@
 #include "Components/CapsuleComponent.h"
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Engine/SkeletalMesh.h"
+#include "Animation/AnimSequence.h"
 #include "Components/InputComponent.h"
 #include "Camera/CameraComponent.h"
 #include "GameFramework/SpringArmComponent.h"
@@ -189,6 +192,7 @@ void ASpikeEliteCharacter::BeginPlay()
 {
 	Super::BeginPlay();
 	ApplyArtMeshes();
+	ApplySkeletalBody();
 	ApplyJerseyColor();
 	RefreshJerseyNumberVisual();
 
@@ -324,6 +328,122 @@ void ASpikeEliteCharacter::SetThirdPersonArmLength(float NewLength)
 	}
 }
 
+namespace
+{
+	// Asset order of BodyAnims. Must match kAnimPaths.
+	enum ESkelAnim : int32 { SA_Idle, SA_Run, SA_Receive, SA_Set, SA_Spike, SA_Block, SA_Serve, SA_Count };
+	const TCHAR* kAnimPaths[SA_Count] = {
+		TEXT("/Game/Characters/Anims/SE_Anim_Idle.SE_Anim_Idle"),
+		TEXT("/Game/Characters/Anims/SE_Anim_Run.SE_Anim_Run"),
+		TEXT("/Game/Characters/Anims/SE_Anim_Receive.SE_Anim_Receive"),
+		TEXT("/Game/Characters/Anims/SE_Anim_Set.SE_Anim_Set"),
+		TEXT("/Game/Characters/Anims/SE_Anim_Spike.SE_Anim_Spike"),
+		TEXT("/Game/Characters/Anims/SE_Anim_Block.SE_Anim_Block"),
+		TEXT("/Game/Characters/Anims/SE_Anim_Serve.SE_Anim_Serve"),
+	};
+	int32 AnimForPose(EAnimPose Pose)
+	{
+		switch (Pose)
+		{
+		case EAnimPose::Run:        return SA_Run;
+		case EAnimPose::Receive:
+		case EAnimPose::Dive:       return SA_Receive;
+		case EAnimPose::Set:        return SA_Set;
+		case EAnimPose::Jump:
+		case EAnimPose::Spike:      return SA_Spike;
+		case EAnimPose::Block:
+		case EAnimPose::RaiseHands: return SA_Block;
+		case EAnimPose::Serve:      return SA_Serve;
+		default:                    return SA_Idle;
+		}
+	}
+#if !UE_BUILD_SHIPPING
+	int32 GSkelAnimSwitches = 0;
+#endif
+}
+
+void ASpikeEliteCharacter::ApplySkeletalBody()
+{
+	USkeletalMesh* Skel = LoadObject<USkeletalMesh>(nullptr, TEXT("/Game/Characters/SE_Player_Mesh.SE_Player_Mesh"));
+	if (!Skel)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("SE_Player_Mesh missing; keeping procedural body"));
+		return;
+	}
+	BodyAnims.SetNum(SA_Count);
+	int32 Loaded = 0;
+	for (int32 i = 0; i < SA_Count; ++i)
+	{
+		BodyAnims[i] = LoadObject<UAnimSequence>(nullptr, kAnimPaths[i]);
+		if (BodyAnims[i]) ++Loaded;
+	}
+	BodyMesh = NewObject<USkeletalMeshComponent>(this, TEXT("BlenderBody"));
+	BodyMesh->SetupAttachment(GetCapsuleComponent());
+	BodyMesh->SetSkeletalMesh(Skel);
+	// Mesh origin is at the feet; capsule origin is its centre (half height 84).
+	// Blender -Y forward lands as UE +Y, so yaw -90 makes it face actor +X.
+	BodyMesh->SetRelativeLocation(FVector(0.f, 0.f, -GetCapsuleComponent()->GetUnscaledCapsuleHalfHeight()));
+	BodyMesh->SetRelativeRotation(FRotator(0.f, -90.f, 0.f));
+	BodyMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	BodyMesh->SetAnimationMode(EAnimationMode::AnimationSingleNode);
+	BodyMesh->RegisterComponent();
+
+	// Hide this actor's procedural segments only (outer == this); components owned
+	// by other subobjects such as the trajectory preview keep their visibility.
+	int32 Hidden = 0;
+	TArray<UStaticMeshComponent*> Parts;
+	GetComponents<UStaticMeshComponent>(Parts);
+	for (UStaticMeshComponent* Part : Parts)
+	{
+		if (Part && Part->GetOuter() == this) { Part->SetHiddenInGame(true); ++Hidden; }
+	}
+	PlayingAnimIndex = -1;
+	UpdateSkeletalAnimation();
+#if !UE_BUILD_SHIPPING
+	UE_LOG(LogTemp, Display, TEXT("PLAYER MESH skeletal=1 anims=%d/%d slots=%d hidden_parts=%d id=%d"),
+		Loaded, static_cast<int32>(SA_Count), BodyMesh->GetNumMaterials(), Hidden, PlayerId);
+#endif
+}
+
+void ASpikeEliteCharacter::TintSkeletalBody(const FLinearColor& Jersey, const FLinearColor& Shorts, const FLinearColor& Skin)
+{
+	if (!BodyMesh) return;
+	const TArray<FName> Slots = BodyMesh->GetMaterialSlotNames();
+	for (const FName& Slot : Slots)
+	{
+		const FString S = Slot.ToString();
+		FLinearColor Col = Skin; float Rough = .62f;
+		if (S.Contains(TEXT("Jersey")))       { Col = Jersey; Rough = .82f; }
+		else if (S.Contains(TEXT("Shorts")))  { Col = Shorts; Rough = .85f; }
+		else if (S.Contains(TEXT("Hair")))    { Col = FLinearColor(.06f, .05f, .05f); Rough = .7f; }
+		else if (S.Contains(TEXT("KneePad"))) { Col = FLinearColor(.88f, .89f, .92f); Rough = .75f; }
+		else if (S.Contains(TEXT("Shoe")))    { Col = FLinearColor(.94f, .95f, .97f); Rough = .5f; }
+		const int32 Index = BodyMesh->GetMaterialIndex(Slot);
+		if (Index == INDEX_NONE) continue;
+		if (UMaterialInstanceDynamic* MID = SEMaterials::MakeSurface(this, Col, Rough))
+			BodyMesh->SetMaterial(Index, MID);
+	}
+}
+
+void ASpikeEliteCharacter::UpdateSkeletalAnimation()
+{
+	if (!BodyMesh || BodyAnims.Num() != SA_Count) return;
+	int32 Want = AnimForPose(CurrentPose);
+	if (Want == SA_Idle && AnimationMoveSpeed > 60.f) Want = SA_Run;
+	if (!BodyAnims[Want]) Want = SA_Idle;
+	if (!BodyAnims[Want]) return;
+	if (Want == SA_Run) BodyMesh->SetPlayRate(FMath::Clamp(AnimationMoveSpeed / 450.f, 0.6f, 1.6f));
+	if (Want == PlayingAnimIndex) return;
+	const bool bLoop = (Want == SA_Idle || Want == SA_Run);
+	BodyMesh->PlayAnimation(BodyAnims[Want], bLoop);
+	if (Want != SA_Run) BodyMesh->SetPlayRate(1.f);
+	PlayingAnimIndex = Want;
+#if !UE_BUILD_SHIPPING
+	if (++GSkelAnimSwitches % 150 == 0)
+		UE_LOG(LogTemp, Display, TEXT("PLAYER ANIM switches=%d last=%d"), GSkelAnimSwitches, Want);
+#endif
+}
+
 void ASpikeEliteCharacter::ApplyJerseyColor()
 {
 	// Team A = electric blue, Team B = red. Jersey = torso + arms; shorts are a
@@ -332,6 +452,7 @@ void ASpikeEliteCharacter::ApplyJerseyColor()
 	const FLinearColor Shorts = (TeamSide > 0) ? FLinearColor(0.05f, 0.16f, 0.38f) : FLinearColor(0.38f, 0.07f, 0.05f);
 	const FLinearColor SkinPalette[] = { FLinearColor(.63f,.40f,.26f), FLinearColor(.82f,.61f,.44f), FLinearColor(.40f,.23f,.15f), FLinearColor(.72f,.48f,.31f) };
 	const FLinearColor Skin = SkinPalette[FMath::Max(0,PlayerId) % UE_ARRAY_COUNT(SkinPalette)];
+	TintSkeletalBody(Jersey, Shorts, Skin);
 
 		auto Tint = [&](UStaticMeshComponent* Comp, const FLinearColor& Col)
 	{
@@ -384,6 +505,7 @@ void ASpikeEliteCharacter::Tick(float DeltaSeconds)
 
 	// M11b-3: procedural animation runs for bots and the human alike.
 	UpdateProceduralAnimation(DeltaSeconds);
+	UpdateSkeletalAnimation();
 	if (bOffCourt || bCeremonyWalking) return;
 
 	if (bIsBot)
