@@ -438,6 +438,10 @@ void ASpikeEliteCharacter::TickBot(float DeltaSeconds)
 		Dest = AITargetLocation;
 		break;
 	case EAIBehavior::Wait:
+		// Wait carries a defensive/support target from the GameMode; honouring it
+		// is what makes off-ball teammates reposition during a rally.
+		Dest = AITargetLocation.IsNearlyZero() ? HomePosition : AITargetLocation;
+		break;
 	case EAIBehavior::ReturnHome:
 	default:
 		Dest = HomePosition;

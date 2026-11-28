@@ -530,6 +530,36 @@ void ASpikeEliteGameMode::Tick(float DeltaSeconds)
 #if !UE_BUILD_SHIPPING
 	// M11f-5: Development-only accelerated best-of-five acceptance driver.
 	if (bFiveSetTest) { DriveFiveSet(); }
+	// Development-only probe: did the 11 non-human players actually move? Logs
+	// accumulated 2D travel per side every 5 s so acceptance does not rely on reading AI code.
+	{
+		static float ProbeTimer = 0.f; static float TravelA = 0.f, TravelB = 0.f; static int32 MovingA = 0, MovingB = 0;
+		static TMap<const ASpikeEliteCharacter*, FVector> LastPos;
+		auto Accumulate = [&](auto& Team, float& Travel, int32& Moving)
+		{
+			for (auto& P : Team)
+			{
+				const ASpikeEliteCharacter* C = P.Get();
+				if (!C || !C->bIsBot || C->bOffCourt) continue;
+				const FVector Now = C->GetActorLocation();
+				if (const FVector* Prev = LastPos.Find(C))
+				{
+					const float D = FVector::Dist2D(Now, *Prev);
+					if (D < 200.f) { Travel += D; if (D > 0.5f) ++Moving; }
+				}
+				LastPos.Add(C, Now);
+			}
+		};
+		Accumulate(TeamAPlayers, TravelA, MovingA);
+		Accumulate(TeamBPlayers, TravelB, MovingB);
+		ProbeTimer += DeltaSeconds;
+		if (ProbeTimer >= 5.f)
+		{
+			UE_LOG(LogTemp, Display, TEXT("BOT PROBE state=%d teamA_bot_travel_cm=%.0f teamA_moving_samples=%d teamB_bot_travel_cm=%.0f teamB_moving_samples=%d"),
+				static_cast<int32>(MatchState), TravelA, MovingA, TravelB, MovingB);
+			ProbeTimer = 0.f; TravelA = TravelB = 0.f; MovingA = MovingB = 0;
+		}
+	}
 #endif
 
 	// M11b-6: 5 s performance heartbeat (frame time, actor count) for the report.
@@ -2011,6 +2041,17 @@ void ASpikeEliteGameMode::UpdateAIDirectives(float DeltaSeconds)
 					{
 						Defensive.Y = FMath::Clamp(Home.Y * 0.5f, -280.f, 280.f);
 					}
+					// Off-ball support: shift partway toward the ball's lane so the
+					// other five teammates visibly react instead of standing on their
+					// spawn spot. Clamped so formation and side separation survive.
+					const FVector BallNow = Ball ? Ball->GetActorLocation() : Defensive;
+					const float LaneShift = FMath::Clamp(BallNow.Y - Defensive.Y, -170.f, 170.f);
+					const float DepthShift = FMath::Clamp((FMath::Abs(BallNow.X) - FMath::Abs(Defensive.X)) * 0.22f, -120.f, 120.f);
+					Defensive.Y = FMath::Clamp(Defensive.Y + LaneShift * 0.45f, -480.f, 480.f);
+					Defensive.X += (Team == EVolleyballTeam::TeamA) ? DepthShift : -DepthShift;
+					Defensive.X = (Team == EVolleyballTeam::TeamA)
+						? FMath::Clamp(Defensive.X, 60.f, 930.f)
+						: FMath::Clamp(Defensive.X, -930.f, -60.f);
 					SetAIDirective(C, EAIBehavior::Wait, Defensive, false);
 				}
 			}
