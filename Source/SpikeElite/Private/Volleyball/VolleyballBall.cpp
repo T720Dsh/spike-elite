@@ -217,6 +217,8 @@ void AVolleyballBall::BeginPlay()
 	// licensed V200W mesh AND material (see ASSET_LICENSE.md). Otherwise the
 	// un-branded yellow/blue placeholder stays — no Missing Package, no fake
 	// official claims. Missing slots are silently normal.
+	CreateFlightVisuals();
+
 	if (SEVolleyballRules::ShouldUseLicensedBall(LicensedBallMesh != nullptr, LicensedBallMaterial != nullptr))
 	{
 		Mesh->SetStaticMesh(LicensedBallMesh);
@@ -228,6 +230,137 @@ void AVolleyballBall::BeginPlay()
 }
 
 
+
+namespace
+{
+	constexpr int32 kTrailDots = 14;
+	constexpr float kTrailInterval = 0.028f;
+
+	UStaticMeshComponent* MakeFxMesh(AActor* Owner, UStaticMesh* Shape, const FLinearColor& Color)
+	{
+		UStaticMeshComponent* Comp = NewObject<UStaticMeshComponent>(Owner);
+		if (!Comp) return nullptr;
+		Comp->SetStaticMesh(Shape);
+		Comp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Comp->SetCastShadow(false);
+		Comp->SetGenerateOverlapEvents(false);
+		Comp->SetUsingAbsoluteLocation(true);
+		Comp->SetUsingAbsoluteRotation(true);
+		Comp->SetUsingAbsoluteScale(true);
+		Comp->RegisterComponent();
+		SEMaterials::TintMesh(Comp, Owner, Color);
+		Comp->SetVisibility(false);
+		return Comp;
+	}
+}
+
+void AVolleyballBall::CreateFlightVisuals()
+{
+	UStaticMesh* Sphere = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Sphere.Sphere"));
+	UStaticMesh* Cylinder = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
+	if (!Sphere || !Cylinder) { UE_LOG(LogTemp, Warning, TEXT("Ball FX shapes missing; flight visuals disabled")); return; }
+	for (int32 i = 0; i < kTrailDots; ++i)
+	{
+		// Warm-to-cool fade so the newest segment reads as the head of the arc.
+		const float T = static_cast<float>(i) / (kTrailDots - 1);
+		TrailDots.Add(MakeFxMesh(this, Sphere, FLinearColor::LerpUsingHSV(FLinearColor(1.f, .86f, .25f), FLinearColor(.55f, .78f, 1.f), T)));
+	}
+	LandingRing = MakeFxMesh(this, Cylinder, FLinearColor(1.f, .45f, .18f));
+	HitFlash = MakeFxMesh(this, Sphere, FLinearColor(1.f, .95f, .7f));
+}
+
+bool AVolleyballBall::PredictLanding(FVector& OutLanding) const
+{
+	if (!Projectile) return false;
+	const FVector P = GetActorLocation();
+	const FVector V = Projectile->Velocity;
+	const float G = (GetWorld() ? GetWorld()->GetGravityZ() : -980.f) * Projectile->ProjectileGravityScale;
+	if (G >= -1.f) return false;
+	// Solve P.Z + V.Z t + 0.5 G t^2 = ball radius (10.5 cm) for the later root; drag is ignored.
+	const float Z0 = P.Z - 10.5f;
+	const float Disc = V.Z * V.Z - 2.f * G * Z0;
+	if (Disc < 0.f) return false;
+	const float T = (-V.Z - FMath::Sqrt(Disc)) / G;
+	if (T <= 0.f || T > 6.f) return false;
+	OutLanding = FVector(P.X + V.X * T, P.Y + V.Y * T, 1.5f);
+	return true;
+}
+
+void AVolleyballBall::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+	const FVector Loc = GetActorLocation();
+	const bool bFlying = Projectile && Projectile->Velocity.SizeSquared() > 120.f * 120.f && Loc.Z > 14.f;
+
+	TrailSampleTimer += DeltaSeconds;
+	if (bFlying && TrailSampleTimer >= kTrailInterval)
+	{
+		TrailSampleTimer = 0.f;
+		TrailHistory.Insert(Loc, 0);
+		if (TrailHistory.Num() > TrailDots.Num()) TrailHistory.SetNum(TrailDots.Num());
+	}
+	else if (!bFlying && TrailHistory.Num() > 0 && TrailSampleTimer >= kTrailInterval)
+	{
+		TrailSampleTimer = 0.f;
+		TrailHistory.Pop(); // drain gracefully after landing instead of snapping off
+	}
+	for (int32 i = 0; i < TrailDots.Num(); ++i)
+	{
+		UStaticMeshComponent* Dot = TrailDots[i];
+		if (!Dot) continue;
+		const bool bShow = i < TrailHistory.Num();
+		Dot->SetVisibility(bShow);
+		if (bShow)
+		{
+			const float S = FMath::Lerp(0.16f, 0.035f, static_cast<float>(i) / FMath::Max(1, TrailDots.Num() - 1));
+			Dot->SetWorldLocation(TrailHistory[i]);
+			Dot->SetWorldScale3D(FVector(S));
+		}
+	}
+
+	FVector Landing;
+	if (LandingRing)
+	{
+		const bool bShowRing = bFlying && PredictLanding(Landing);
+		LandingRing->SetVisibility(bShowRing);
+		if (bShowRing)
+		{
+			RingPulse += DeltaSeconds * 6.f;
+			const float R = 0.62f + 0.08f * FMath::Sin(RingPulse);
+			LandingRing->SetWorldLocation(Landing);
+			LandingRing->SetWorldScale3D(FVector(R, R, 0.012f));
+		}
+	}
+
+	if (HitFlash && HitFlashAge >= 0.f)
+	{
+		HitFlashAge += DeltaSeconds;
+		const float Life = 0.28f;
+		if (HitFlashAge >= Life) { HitFlash->SetVisibility(false); HitFlashAge = -1.f; }
+		else
+		{
+			const float A = HitFlashAge / Life;
+			HitFlash->SetWorldLocation(Loc);
+			HitFlash->SetWorldScale3D(FVector(FMath::Lerp(0.25f, HitFlashPeak, FMath::Sqrt(A))));
+		}
+	}
+}
+
+void AVolleyballBall::PlayHitBurst(float Power)
+{
+	if (!HitFlash) return;
+	// Hard spikes flash big and hot, soft touches small and cool.
+	const float Strength = FMath::Clamp((Power - 600.f) / 2200.f, 0.f, 1.f);
+	HitFlashPeak = FMath::Lerp(0.55f, 1.55f, Strength);
+	SEMaterials::TintMesh(HitFlash, this, FLinearColor::LerpUsingHSV(FLinearColor(.75f, .9f, 1.f), FLinearColor(1.f, .38f, .12f), Strength));
+	HitFlash->SetWorldLocation(GetActorLocation());
+	HitFlash->SetVisibility(true);
+	HitFlashAge = 0.f;
+	TrailHistory.Reset();
+#if !UE_BUILD_SHIPPING
+	UE_LOG(LogTemp, Display, TEXT("BALL FX burst power=%.0f strength=%.2f"), Power, Strength);
+#endif
+}
 
 void AVolleyballBall::HandleProjectileBounce(const FHitResult& ImpactResult, const FVector& ImpactVelocity)
 {

@@ -29,6 +29,10 @@ public:
 	AVolleyballBall();
 
 	virtual void BeginPlay() override;
+	virtual void Tick(float DeltaSeconds) override;
+
+	/** Visual-only contact burst; colour/size encode hit strength. No gameplay effect. */
+	void PlayHitBurst(float Power);
 
 
 	/**
@@ -96,4 +100,16 @@ protected:
 	 */
 	UFUNCTION()
 	void HandleProjectileBounce(const FHitResult& ImpactResult, const FVector& ImpactVelocity);
+
+	// ---- Flight readability (visual only, never affects rules) ----
+	UPROPERTY(Transient) TArray<TObjectPtr<UStaticMeshComponent>> TrailDots;
+	UPROPERTY(Transient) TObjectPtr<UStaticMeshComponent> LandingRing;
+	UPROPERTY(Transient) TObjectPtr<UStaticMeshComponent> HitFlash;
+	TArray<FVector> TrailHistory;
+	float TrailSampleTimer = 0.f;
+	float HitFlashAge = -1.f;
+	float HitFlashPeak = 1.f;
+	float RingPulse = 0.f;
+	void CreateFlightVisuals();
+	bool PredictLanding(FVector& OutLanding) const;
 };

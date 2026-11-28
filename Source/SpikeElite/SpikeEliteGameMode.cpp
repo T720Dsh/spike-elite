@@ -1343,6 +1343,7 @@ bool ASpikeEliteGameMode::DoTouch(ASpikeEliteCharacter* Toucher, EBallTouchType 
 	{
 		if(MatchModeConfig.Mode==EGameModeChoice::Training && !Toucher->bIsBot) ++TrainingPlayerTouches;
 		Ball->Strike(Dir, Power, SpinRadS);
+		Ball->PlayHitBurst(Power);   // visual-only contact feedback
 		Toucher->bTouchArmed = false;   // single-touch protection until rearmed
 		// M11b-2: a successful touch must immediately retire the player from the
 		// primary-handler role. Without this the setter (who is still flagged
@@ -1464,6 +1465,7 @@ bool ASpikeEliteGameMode::TryBlockBall(ASpikeEliteCharacter* Toucher)
 		return false;
 	}
 	Ball->Strike(Dir, Power, 0.f);
+	Ball->PlayHitBurst(Power);   // visual-only contact feedback
 	Toucher->bTouchArmed = false;
 	Toucher->bIsPrimaryHandler = false;
 	Toucher->NotifyContact(EBallTouchType::Block);
